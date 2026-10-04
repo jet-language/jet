@@ -1,0 +1,17 @@
+use crate.[jet_cli_codemod_json_parse, jet_cli_codemod_json_object_fields, jet_cli_codemod_json_field, JetCLICodemodJSONValue]
+
+// Rust: Source/CmdCodemod/JSON.rs:146-190
+#Test("codemod_json_rejects_duplicate_fields_and_orders_object_keys") {
+    error :: jet_cli_codemod_json_parse("{{\"x\":1,\"x\":2}}").unwrap_err()
+    assert_eq(error.message, "duplicate field `x`")
+    fields :: jet_cli_codemod_json_object_fields(jet_cli_codemod_json_parse("{{\"z\":2,\"a\":1}}").unwrap()).unwrap()
+    assert_eq(fields[0].key, "a")
+    assert_eq(fields[1].key, "z")
+    assert_eq(jet_cli_codemod_json_field(fields, "a"), Val(JetCLICodemodJSONValue.Number(1)))
+}
+// Rust: Source/CmdCodemod/JSON.rs:66-122
+#Test("codemod_json_preserves_unsigned_integer_and_scalar_refusals") {
+    assert_eq(jet_cli_codemod_json_parse("18446744073709551615").unwrap(), JetCLICodemodJSONValue.Number(18446744073709551615))
+    assert_eq(jet_cli_codemod_json_parse("18446744073709551616").unwrap_err().message, "invalid integer at byte 0")
+    assert_eq(jet_cli_codemod_json_parse("\"\\uD800\"").unwrap_err().message, "bad unicode scalar")
+}

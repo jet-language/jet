@@ -1,22 +1,16 @@
-// PORT-PENDING 0833 crates-jetos-src-main: crates/jetos/src/main.rs:1-18
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! The `jetos` binary — direct front door for JetOS system tools.
-//RS //!
-//RS //! Card #367 / D-PRODUCT-SPLIT1=C: `jetos` owns OS workflows as its own
-//RS //! crate/binary boundary. Today it still dispatches through `jetpack`'s `os`
-//RS //! verb (JetOS realization logic hasn't moved out of `jetpack::JetOS` yet —
-//RS //! that split is a separate, larger slice: pulling the JetOS engine out from
-//RS //! under the Jetpack provider/store engine it currently shares). This is the
-//RS //! boundary-prep step: a real `jetos` crate/binary exists and owns the entry
-//RS //! point, without changing what running `jetos <args>` does.
-//RS 
-//RS #![allow(non_snake_case)]
-//RS 
-//RS fn main() {
-//RS     jetpack::Codegen::MIREval::install_mir_bridge();
-//RS     let mut args: Vec<String> = std::env::args().skip(1).collect();
-//RS     args.insert(0, "os".to_string());
-//RS     std::process::exit(jetpack::run(args));
-//RS }
-// END-PORT-PENDING 0833 crates/jetos/src/main.rs:1-18
+// The `jetos` binary — direct front door for JetOS system tools.
+// Card #367 / D-PRODUCT-SPLIT1=C: JetOS owns this entry point while
+// realization continues through Jetpack's `os` verb.
+use jetpack.Codegen.MIREval.[install_mir_bridge]
+use jetpack.[run]
+use std.[env, process]
+
+// Rust: crates/jetos/src/main.rs:13
+fn main() -> {
+    install_mir_bridge()
+    // GATE #4494: native process arguments and exit.
+    args: [String] := env.args().skip(1).collect()
+    args.insert(0, "os")
+    process.exit(run(args))
+}
 

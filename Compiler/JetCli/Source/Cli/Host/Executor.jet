@@ -1,376 +1,241 @@
-// PORT-PENDING 0685 source-cmdexec-module-group: Source/CmdExec.rs:1-372
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! `jet self exec`: the application-facing workspace executor.
-//RS //!
-//RS //! The command is a thin CLI adapter. It resolves the executable and checks
-//RS //! the declared workspace grants here, then hands the child to the same native
-//RS //! isolation boundary used by hermetic build actions. It never falls back to a
-//RS //! plain `Command` launch.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS use jet::Comptime::Build::{self, NativeSandboxError};
-//RS 
-//RS use crate::OutputMode;
-//RS 
-//RS #[derive(Default)]
-//RS struct ExecOptions {
-//RS     workspace: Option<String>,
-//RS     executable_grant: Option<String>,
-//RS     reads: Vec<String>,
-//RS     writes: Vec<String>,
-//RS     unsupported: Option<String>,
-//RS }
-//RS 
-//RS fn fail(what: impl Into<String>, fix: impl Into<String>, json: bool) -> ! {
-//RS     crate::emit_cli_report(
-//RS         "E2104",
-//RS         what.into(),
-//RS         "the executor accepts only explicit workspace and authority inputs before the `--` command separator".to_string(),
-//RS         fix.into(),
-//RS         json,
-//RS     );
-//RS     std::process::exit(jet::ExitCodes::USAGE)
-//RS }
-//RS 
-//RS fn reject_unsupported_grant(grant: &str, json: bool) -> ! {
-//RS     crate::emit_cli_report(
-//RS         "E2105",
-//RS         format!("executor grant `{grant}` cannot be enforced by the native child boundary"),
-//RS         "Jet does not convert an unenforced expert grant into ambient authority".to_string(),
-//RS         "use the workspace read/build-write grants, or wait for the host backend that enforces this grant".to_string(),
-//RS         json,
-//RS     );
-//RS     std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS }
-//RS 
-//RS fn next_value(args: &[String], index: &mut usize, flag: &str, json: bool) -> String {
-//RS     *index += 1;
-//RS     args.get(*index)
-//RS         .filter(|value| !value.starts_with('-'))
-//RS         .cloned()
-//RS         .unwrap_or_else(|| {
-//RS             fail(
-//RS                 format!("`{flag}` needs a value"),
-//RS                 format!("write `{flag} <value>`"),
-//RS                 json,
-//RS             )
-//RS         })
-//RS }
-//RS 
-//RS fn parse_options(args: &[String], json: bool) -> (ExecOptions, Vec<String>) {
-//RS     let separator = args.iter().position(|arg| arg == "--").unwrap_or_else(|| {
-//RS         fail(
-//RS             "`jet self exec` needs a `--` command separator",
-//RS             "write `jet self exec --workspace <dir> -- <program> [args]`",
-//RS             json,
-//RS         )
-//RS     });
-//RS     let mut options = ExecOptions::default();
-//RS     let mut index = 1;
-//RS     while index < separator {
-//RS         let arg = &args[index];
-//RS         match arg.as_str() {
-//RS             "--workspace" => options.workspace = Some(next_value(args, &mut index, arg, json)),
-//RS             "--exec" => options.executable_grant = Some(next_value(args, &mut index, arg, json)),
-//RS             "--read" => options.reads.push(next_value(args, &mut index, arg, json)),
-//RS             "--write" => options.writes.push(next_value(args, &mut index, arg, json)),
-//RS             "--host" | "--secret" | "--timeout" | "--output-limit" => {
-//RS                 options.unsupported = Some(arg.clone());
-//RS                 index += 1;
-//RS                 if index < separator && !args[index].starts_with('-') {
-//RS                     index += 1;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             jet::CLI::MACHINE_OUTPUT_FLAG | "--quiet" => {}
-//RS             value if value.starts_with("--workspace=") => {
-//RS                 let value = value.trim_start_matches("--workspace=");
-//RS                 if value.is_empty() {
-//RS                     fail(
-//RS                         "`--workspace=` needs a value",
-//RS                         "write `--workspace <dir>`",
-//RS                         json,
-//RS                     );
-//RS                 }
-//RS                 options.workspace = Some(value.to_string());
-//RS             }
-//RS             value if value.starts_with("--exec=") => {
-//RS                 let value = value.trim_start_matches("--exec=");
-//RS                 if value.is_empty() {
-//RS                     fail("`--exec=` needs a value", "write `--exec <path>`", json);
-//RS                 }
-//RS                 options.executable_grant = Some(value.to_string());
-//RS             }
-//RS             value if value.starts_with("--read=") => {
-//RS                 let value = value.trim_start_matches("--read=");
-//RS                 if value.is_empty() {
-//RS                     fail("`--read=` needs a value", "write `--read <path>`", json);
-//RS                 }
-//RS                 options.reads.push(value.to_string());
-//RS             }
-//RS             value if value.starts_with("--write=") => {
-//RS                 let value = value.trim_start_matches("--write=");
-//RS                 if value.is_empty() {
-//RS                     fail("`--write=` needs a value", "write `--write <path>`", json);
-//RS                 }
-//RS                 options.writes.push(value.to_string());
-//RS             }
-//RS             value
-//RS                 if value.starts_with("--host=")
-//RS                     || value.starts_with("--secret=")
-//RS                     || value.starts_with("--timeout=")
-//RS                     || value.starts_with("--output-limit=") =>
-//RS             {
-//RS                 options.unsupported = Some(value.split('=').next().unwrap_or(value).to_string());
-//RS             }
-//RS             _ => fail(
-//RS                 format!("unknown `jet self exec` option `{arg}`"),
-//RS                 "use `--workspace`, optional exact `--exec`/`--read`/`--write`, then `-- <program> [args]`",
-//RS                 json,
-//RS             ),
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     let command = args[separator + 1..].to_vec();
-//RS     if command.is_empty() {
-//RS         fail(
-//RS             "the executor command is empty",
-//RS             "add `<program> [args]` after `--`",
-//RS             json,
-//RS         );
-//RS     }
-//RS     (options, command)
-//RS }
-//RS 
-//RS fn real_directory(path: &str) -> Result<PathBuf, String> {
-//RS     let path = Path::new(path);
-//RS     let canonical = path.canonicalize().map_err(|error| {
-//RS         format!(
-//RS             "workspace `{}` is not a readable directory: {error}",
-//RS             path.display()
-//RS         )
-//RS     })?;
-//RS     if !canonical.is_dir() {
-//RS         return Err(format!("workspace `{}` is not a directory", path.display()));
-//RS     }
-//RS     Ok(canonical)
-//RS }
-//RS 
-//RS fn secure_output_directory(workspace: &Path) -> Result<PathBuf, String> {
-//RS     let jet_dir = workspace.join(".jet");
-//RS     let output = jet_dir.join("build");
-//RS     for path in [&jet_dir, &output] {
-//RS         if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                 return Err(format!(
-//RS                     "workspace output path `{}` is not a real directory",
-//RS                     path.display()
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     fs::create_dir_all(&output).map_err(|error| {
-//RS         format!(
-//RS             "cannot prepare workspace output `{}`: {error}",
-//RS             output.display()
-//RS         )
-//RS     })?;
-//RS     output.canonicalize().map_err(|error| {
-//RS         format!(
-//RS             "cannot resolve workspace output `{}`: {error}",
-//RS             output.display()
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn resolve_executable(command: &str) -> Result<PathBuf, String> {
-//RS     let candidate = Path::new(command);
-//RS     if candidate.is_absolute() || command.contains('/') || command.contains('\\') {
-//RS         if candidate.is_file() {
-//RS             return Ok(candidate.to_path_buf());
-//RS         }
-//RS         return Err(format!("cannot resolve executable `{command}`"));
-//RS     }
-//RS     let path = std::env::var_os("PATH")
-//RS         .ok_or_else(|| "cannot resolve executable without a PATH snapshot".to_string())?;
-//RS     for directory in std::env::split_paths(&path) {
-//RS         let candidate = directory.join(command);
-//RS         if candidate.is_file() {
-//RS             return Ok(candidate);
-//RS         }
-//RS     }
-//RS     Err(format!(
-//RS         "executable `{command}` was not found in the captured PATH"
-//RS     ))
-//RS }
-//RS 
-//RS fn grant_path(path: &str, workspace: &Path) -> Result<PathBuf, String> {
-//RS     let path = Path::new(path);
-//RS     let candidate = if path.is_absolute() {
-//RS         path.to_path_buf()
-//RS     } else {
-//RS         workspace.join(path)
-//RS     };
-//RS     candidate.canonicalize().map_err(|error| {
-//RS         format!(
-//RS             "cannot resolve authority path `{}`: {error}",
-//RS             candidate.display()
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn run_exec(raw: &[String], mode: OutputMode) -> ! {
-//RS     let (options, command) = parse_options(raw, mode.json);
-//RS     let workspace = options.workspace.as_deref().unwrap_or_else(|| {
-//RS         fail(
-//RS             "`--workspace` is required",
-//RS             "write `--workspace <dir>`",
-//RS             mode.json,
-//RS         )
-//RS     });
-//RS     let workspace = match real_directory(workspace) {
-//RS         Ok(path) => path,
-//RS         Err(detail) => {
-//RS             crate::emit_cli_report(
-//RS                 "E2105",
-//RS                 detail,
-//RS                 "the executor cannot bind a non-directory workspace".to_string(),
-//RS                 "choose an existing workspace directory".to_string(),
-//RS                 mode.json,
-//RS             );
-//RS             std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS         }
-//RS     };
-//RS     if let Some(grant) = options.unsupported.as_deref() {
-//RS         reject_unsupported_grant(grant, mode.json);
-//RS     }
-//RS     let executable = match resolve_executable(&command[0]) {
-//RS         Ok(path) => path,
-//RS         Err(detail) => {
-//RS             crate::emit_cli_report(
-//RS                 "E2105",
-//RS                 detail,
-//RS                 "the executor reviews executable identity before launch".to_string(),
-//RS                 "use an executable present in the captured PATH".to_string(),
-//RS                 mode.json,
-//RS             );
-//RS             std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS         }
-//RS     };
-//RS     if let Some(grant) = options.executable_grant.as_deref() {
-//RS         let grant = match Path::new(grant).canonicalize() {
-//RS             Ok(path) => path,
-//RS             Err(error) => reject_unsupported_grant(&format!("Exec:{grant} ({error})"), mode.json),
-//RS         };
-//RS         let executable_identity = match executable.canonicalize() {
-//RS             Ok(path) => path,
-//RS             Err(error) => reject_unsupported_grant(
-//RS                 &format!("Exec:{} ({error})", executable.display()),
-//RS                 mode.json,
-//RS             ),
-//RS         };
-//RS         if grant != executable_identity {
-//RS             reject_unsupported_grant(&format!("Exec:{}", grant.display()), mode.json);
-//RS         }
-//RS     }
-//RS     for path in &options.reads {
-//RS         let path = match grant_path(path, &workspace) {
-//RS             Ok(path) => path,
-//RS             Err(detail) => {
-//RS                 crate::emit_cli_report(
-//RS                     "E2105",
-//RS                     detail,
-//RS                     "an authority path must resolve before launch".to_string(),
-//RS                     "grant a real path inside the workspace".to_string(),
-//RS                     mode.json,
-//RS                 );
-//RS                 std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS             }
-//RS         };
-//RS         if path != workspace {
-//RS             reject_unsupported_grant(&format!("FS.Read:{}", path.display()), mode.json);
-//RS         }
-//RS     }
-//RS     let output = match secure_output_directory(&workspace) {
-//RS         Ok(path) => path,
-//RS         Err(detail) => {
-//RS             crate::emit_cli_report(
-//RS                 "E2105",
-//RS                 detail,
-//RS                 "the executor refuses symlinked or invalid output roots".to_string(),
-//RS                 "repair `.jet/build` and retry".to_string(),
-//RS                 mode.json,
-//RS             );
-//RS             std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS         }
-//RS     };
-//RS     for path in &options.writes {
-//RS         let path = match grant_path(path, &workspace) {
-//RS             Ok(path) => path,
-//RS             Err(detail) => {
-//RS                 crate::emit_cli_report(
-//RS                     "E2105",
-//RS                     detail,
-//RS                     "an authority path must resolve before launch".to_string(),
-//RS                     "grant the private `.jet/build` output directory".to_string(),
-//RS                     mode.json,
-//RS                 );
-//RS                 std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS             }
-//RS         };
-//RS         if path != output {
-//RS             reject_unsupported_grant(&format!("FS.Write:{}", path.display()), mode.json);
-//RS         }
-//RS     }
-//RS     let status = Build::native_sandbox_status();
-//RS     if !status.available {
-//RS         crate::emit_cli_report(
-//RS             "E2105",
-//RS             format!(
-//RS                 "authority-bound execution refused before spawn: {}",
-//RS                 status.reason
-//RS             ),
-//RS             "the host must expose the #398 native isolation boundary".to_string(),
-//RS             "install or enable the supported native sandbox backend".to_string(),
-//RS             mode.json,
-//RS         );
-//RS         std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS     }
-//RS     let args = command[1..].to_vec();
-//RS     let result = Build::run_native_sandboxed(
-//RS         &executable,
-//RS         &args,
-//RS         &workspace,
-//RS         Some(&output),
-//RS         &BTreeMap::new(),
-//RS         false,
-//RS     );
-//RS     match result {
-//RS         Ok(result) => {
-//RS             print!("{}", String::from_utf8_lossy(&result.output.stdout));
-//RS             eprint!("{}", String::from_utf8_lossy(&result.output.stderr));
-//RS             std::process::exit(
-//RS                 result
-//RS                     .output
-//RS                     .status
-//RS                     .code()
-//RS                     .unwrap_or(jet::ExitCodes::USER_ERROR),
-//RS             );
-//RS         }
-//RS         Err(NativeSandboxError::Unsupported(detail)) | Err(NativeSandboxError::Io(detail)) => {
-//RS             crate::emit_cli_report(
-//RS                 "E2105",
-//RS                 format!("authority-bound execution refused before spawn: {detail}"),
-//RS                 "Jet never falls back to an unsandboxed child".to_string(),
-//RS                 "enable the native isolation backend and retry".to_string(),
-//RS                 mode.json,
-//RS             );
-//RS             std::process::exit(jet::ExitCodes::USER_ERROR)
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0685 Source/CmdExec.rs:1-372
+// Rust: Source/CmdExec.rs:1
+// `jet self exec`: resolves identity and workspace grants before handing the
+// child to the native isolation boundary. Never launches an ambient child.
+use core.files as fs
+use core.env
+use core.process.[exit]
+use jet.Comptime.Build
+use jet.Comptime.Build.[NativeSandboxError]
+use jet.[ExitCodes, CLI]
+use jet_cli.[OutputMode, emit_cli_report]
 
+// Rust: Source/CmdExec.rs:16
+struct ExecOptions {
+    workspace: String? = None
+    executable_grant: String? = None
+    reads: [String] = []
+    writes: [String] = []
+    unsupported: String? = None
+}
+
+// Rust: Source/CmdExec.rs:25
+fn fail(what: String, fix: String, json: Bool) -> Never {
+    emit_cli_report("E2104", what,
+        "the executor accepts only explicit workspace and authority inputs before the `--` command separator",
+        fix, json)
+    exit(ExitCodes.USAGE) // GATE #4494 native process exit
+}
+
+// Rust: Source/CmdExec.rs:36
+fn reject_unsupported_grant(grant: String, json: Bool) -> Never {
+    emit_cli_report("E2105", "executor grant `{grant}` cannot be enforced by the native child boundary",
+        "Jet does not convert an unenforced expert grant into ambient authority",
+        "use the workspace read/build-write grants, or wait for the host backend that enforces this grant", json)
+    exit(ExitCodes.USER_ERROR)
+}
+
+// Rust: Source/CmdExec.rs:47
+fn next_value(args: &[String], index: &Int, flag: String, json: Bool) -> String {
+    index += 1
+    if args.get(index) == {
+        .Some(value) -> {
+            if !value.starts_with('-') -> return value.clone()
+        }
+        .None -> {}
+    }
+    fail("`{flag}` needs a value", "write `{flag} <value>`", json)
+}
+
+// Rust: Source/CmdExec.rs:61
+fn parse_options(args: &[String], json: Bool) -> (ExecOptions, [String]) {
+    separator :: args.iter().position(arg -> arg == "--").unwrap_or_else(() -> {
+        fail("`jet self exec` needs a `--` command separator",
+            "write `jet self exec --workspace <dir> -- <program> [args]`", json)
+    })
+    options := ExecOptions{}
+    index := 1
+    loop index < separator {
+        arg :: args[index]
+        if arg == {
+            "--workspace" -> options.workspace = Some(next_value(args, &index, arg, json))
+            "--exec" -> options.executable_grant = Some(next_value(args, &index, arg, json))
+            "--read" -> options.reads.push(next_value(args, &index, arg, json))
+            "--write" -> options.writes.push(next_value(args, &index, arg, json))
+            "--host" | "--secret" | "--timeout" | "--output-limit" -> {
+                options.unsupported = Some(arg.clone())
+                index += 1
+                if index < separator && !args[index].starts_with('-') -> index += 1
+                next
+            }
+            CLI.MACHINE_OUTPUT_FLAG | "--quiet" -> {}
+            value if value.starts_with("--workspace=") -> {
+                value := value.trim_start_matches("--workspace=") // #4303
+                if value.is_empty() -> fail("`--workspace=` needs a value", "write `--workspace <dir>`", json)
+                options.workspace = Some(value.to_string())
+            }
+            value if value.starts_with("--exec=") -> {
+                value := value.trim_start_matches("--exec=") // #4303
+                if value.is_empty() -> fail("`--exec=` needs a value", "write `--exec <path>`", json)
+                options.executable_grant = Some(value.to_string())
+            }
+            value if value.starts_with("--read=") -> {
+                value := value.trim_start_matches("--read=") // #4303
+                if value.is_empty() -> fail("`--read=` needs a value", "write `--read <path>`", json)
+                options.reads.push(value.to_string())
+            }
+            value if value.starts_with("--write=") -> {
+                value := value.trim_start_matches("--write=") // #4303
+                if value.is_empty() -> fail("`--write=` needs a value", "write `--write <path>`", json)
+                options.writes.push(value.to_string())
+            }
+            value if value.starts_with("--host=") || value.starts_with("--secret=")
+                || value.starts_with("--timeout=") || value.starts_with("--output-limit=") -> {
+                options.unsupported = Some(value.split('=').next().unwrap_or(value).to_string())
+            }
+            _ -> fail("unknown `jet self exec` option `{arg}`",
+                "use `--workspace`, optional exact `--exec`/`--read`/`--write`, then `-- <program> [args]`", json)
+        }
+        index += 1
+    }
+    command :: args[separator + 1..].to_vec()
+    if command.is_empty() -> fail("the executor command is empty", "add `<program> [args]` after `--`", json)
+    (options, command)
+}
+
+// Rust: Source/CmdExec.rs:146
+fn real_directory(path: String) -> OSPath Err! {
+    path :: OSPath.new(path)
+    canonical :: path.canonicalize().map_err(error -> "workspace `{path.display()}` is not a readable directory: {error}")?
+    if !canonical.is_dir() -> return Err("workspace `{path.display()}` is not a directory")
+    Ok(canonical)
+}
+
+// Rust: Source/CmdExec.rs:160
+fn secure_output_directory(workspace: &OSPath) -> OSPath Err! {
+    jet_dir :: workspace.join(".jet")
+    output :: jet_dir.join("build")
+    loop path in [&jet_dir, &output] {
+        if fs.symlink_metadata(path) == {
+            .Ok(metadata) -> {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() -> {
+                    return Err("workspace output path `{path.display()}` is not a real directory")
+                }
+            }
+            .Err(_) -> {}
+        }
+    }
+    fs.create_dir_all(&output).map_err(error -> "cannot prepare workspace output `{output.display()}`: {error}")?
+    output.canonicalize().map_err(error -> "cannot resolve workspace output `{output.display()}`: {error}")
+}
+
+// Rust: Source/CmdExec.rs:187
+fn resolve_executable(command: String) -> OSPath Err! {
+    candidate :: OSPath.new(command)
+    if candidate.is_absolute() || command.contains('/') || command.contains('\\') -> {
+        if candidate.is_file() -> return Ok(candidate.to_path_buf())
+        return Err("cannot resolve executable `{command}`")
+    }
+    // GATE #4494 exact OS environment and path splitting, not lossy text.
+    path :: env.var_os("PATH").ok_or_else(() -> "cannot resolve executable without a PATH snapshot")?
+    loop directory in env.split_paths(&path) {
+        candidate :: directory.join(command)
+        if candidate.is_file() -> return Ok(candidate)
+    }
+    Err("executable `{command}` was not found in the captured PATH")
+}
+
+// Rust: Source/CmdExec.rs:208
+fn grant_path(path: String, workspace: &OSPath) -> OSPath Err! {
+    path :: OSPath.new(path)
+    candidate :: if path.is_absolute() -> path.to_path_buf() else -> workspace.join(path)
+    candidate.canonicalize().map_err(error -> "cannot resolve authority path `{candidate.display()}`: {error}")
+}
+
+// Rust: Source/CmdExec.rs:223
+pub fn run_exec(raw: &[String], mode: OutputMode) -> Never {
+    (options, command) :: parse_options(raw, mode.json)
+    workspace :: options.workspace.unwrap_or_else(() -> {
+        fail("`--workspace` is required", "write `--workspace <dir>`", mode.json)
+    })
+    workspace :: if real_directory(workspace) == {
+        .Ok(path) -> path
+        .Err(detail) -> {
+            emit_cli_report("E2105", detail, "the executor cannot bind a non-directory workspace",
+                "choose an existing workspace directory", mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    if options.unsupported == .Some(grant) -> reject_unsupported_grant(grant, mode.json)
+    executable :: if resolve_executable(command[0]) == {
+        .Ok(path) -> path
+        .Err(detail) -> {
+            emit_cli_report("E2105", detail, "the executor reviews executable identity before launch",
+                "use an executable present in the captured PATH", mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    if options.executable_grant == .Some(grant) -> {
+        grant :: if OSPath.new(grant).canonicalize() == {
+            .Ok(path) -> path
+            .Err(error) -> reject_unsupported_grant("Exec:{grant} ({error})", mode.json)
+        }
+        executable_identity :: if executable.canonicalize() == {
+            .Ok(path) -> path
+            .Err(error) -> reject_unsupported_grant("Exec:{executable.display()} ({error})", mode.json)
+        }
+        if grant != executable_identity -> reject_unsupported_grant("Exec:{grant.display()}", mode.json)
+    }
+    loop path in &options.reads {
+        path :: if grant_path(path, &workspace) == {
+            .Ok(path) -> path
+            .Err(detail) -> {
+                emit_cli_report("E2105", detail, "an authority path must resolve before launch",
+                    "grant a real path inside the workspace", mode.json)
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+        if path != workspace -> reject_unsupported_grant("FS.Read:{path.display()}", mode.json)
+    }
+    output :: if secure_output_directory(&workspace) == {
+        .Ok(path) -> path
+        .Err(detail) -> {
+            emit_cli_report("E2105", detail, "the executor refuses symlinked or invalid output roots",
+                "repair `.jet/build` and retry", mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    loop path in &options.writes {
+        path :: if grant_path(path, &workspace) == {
+            .Ok(path) -> path
+            .Err(detail) -> {
+                emit_cli_report("E2105", detail, "an authority path must resolve before launch",
+                    "grant the private `.jet/build` output directory", mode.json)
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+        if path != output -> reject_unsupported_grant("FS.Write:{path.display()}", mode.json)
+    }
+    // GATE #4494 native isolation status and authority-bound spawn.
+    status :: Build.native_sandbox_status()
+    if !status.available -> {
+        emit_cli_report("E2105", "authority-bound execution refused before spawn: {status.reason}",
+            "the host must expose the #398 native isolation boundary",
+            "install or enable the supported native sandbox backend", mode.json)
+        exit(ExitCodes.USER_ERROR)
+    }
+    args :: command[1..].to_vec()
+    environment: [String:String] = [:]
+    result :: Build.run_native_sandboxed(&executable, &args, &workspace, Some(&output), &environment, false)
+    if result == {
+        .Ok(result) -> {
+            print("{String.from_utf8_lossy(&result.output.stdout)}")
+            eprint("{String.from_utf8_lossy(&result.output.stderr)}")
+            exit(result.output.status.code().unwrap_or(ExitCodes.USER_ERROR))
+        }
+        .Err(.Unsupported(detail)) | .Err(.Io(detail)) -> {
+            emit_cli_report("E2105", "authority-bound execution refused before spawn: {detail}",
+                "Jet never falls back to an unsandboxed child", "enable the native isolation backend and retry", mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}

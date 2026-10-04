@@ -1,0 +1,120 @@
+use std.[fs, env, time, process, thread]
+use std.ffi.OsString
+use std.sync.[Arc, Barrier]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.os.unix.fs.symlink
+use core.sys.target
+use Cli.Evidence.History.*
+
+// Rust: Source/Store.rs:2624
+fn authority_test_root(name: String) -> OSPath {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("test clock must be after the Unix epoch").as_nanos()
+    env.temp_dir().join("jet-store-{name}-{process.id()}-{stamp}")
+}
+
+// Rust: Source/Store.rs:2642
+#Test("authority_replace_rejects_a_changed_pending_target") {
+    // GATE #4483: test's original cfg applies to the selected target, not the host.
+    os :: target.selected_os()
+    if os == "linux" || os == "android" || os == "macos" || os == "ios" {
+        root :: authority_test_root("authority-change")
+        fs.create_dir_all(root).unwrap()
+        path :: root.join("package.jet")
+        fs.write(path, b"approved\n").unwrap()
+        snapshot :: read_authority_file(path).unwrap()
+        fs.write(path, b"attacker\n").unwrap()
+        error :: replace_authority_file(&snapshot, b"published\n").unwrap_err()
+        assert(error.to_string().contains("authority target contents changed while approval was pending"), "unexpected authority replacement error: {error}")
+        assert_eq(fs.read(path).unwrap(), b"attacker\n")
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/Store.rs:2669
+#Test("authority_replace_publishes_only_the_snapshotted_target") {
+    os :: target.selected_os()
+    if os == "linux" || os == "android" || os == "macos" || os == "ios" {
+        root :: authority_test_root("authority-replace")
+        fs.create_dir_all(root).unwrap()
+        path :: root.join("package.jet")
+        fs.write(path, b"approved\n").unwrap()
+        snapshot :: read_authority_file(path).unwrap()
+        replace_authority_file(&snapshot, b"published\n").unwrap()
+        assert_eq(fs.read(path).unwrap(), b"published\n")
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/Store.rs:2689
+#Test("authority_file_operations_reject_symlink_targets") {
+    os :: target.selected_os()
+    if os == "linux" || os == "android" || os == "macos" || os == "ios" {
+        root :: authority_test_root("authority-symlink")
+        fs.create_dir_all(root).unwrap()
+        victim :: root.join("victim")
+        path :: root.join("authority.jsonl")
+        fs.write(victim, b"victim\n").unwrap()
+        // GATE #4494: actual native symlink, not a simulated provider.
+        symlink(victim, path).unwrap()
+        assert(read_authority_file(path).is_err())
+        assert(append_authority_file(path, b"grant\n").is_err())
+        assert_eq(fs.read(victim).unwrap(), b"victim\n")
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/Store.rs:2712
+#Test("held_store_authority_survives_active_ancestor_swap") {
+    os :: target.selected_os()
+    if os == "linux" || os == "android" || os == "macos" || os == "ios" {
+        stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("test clock must be after the Unix epoch").as_nanos()
+        root :: env.temp_dir().join("jet-store-held-root-{process.id()}-{stamp}")
+        held :: root.with_file_name("jet-store-held-root-renamed-{process.id()}-{stamp}")
+        outside :: root.with_file_name("jet-store-held-root-outside-{process.id()}-{stamp}")
+        fs.create_dir_all(root).unwrap()
+        fs.create_dir_all(outside).unwrap()
+        fs.write(root.join("trusted.jet"), b"trusted bytes\n").unwrap()
+        fs.write(outside.join("evil.jet"), b"evil bytes\n").unwrap()
+        authority :: DirectoryAuthority.open(root).expect("source authority must open")
+        // GATE #4494: real shared barriers, atomic exchange, hook and native thread.
+        reached :: Arc.new(Barrier.new(2))
+        release :: Arc.new(Barrier.new(2))
+        fired :: Arc.new(AtomicBool.new(false))
+        hook_root :: ~root
+        hook_reached :: Arc.clone(&reached)
+        hook_release :: Arc.clone(&release)
+        hook_fired :: Arc.clone(&fired)
+        hook :: install_store_walk_hook(Arc.new((directory, name) -> {
+            if directory == hook_root && name == OsString.from("trusted.jet") && !hook_fired.swap(true, Ordering.AcqRel) {
+                hook_reached.wait()
+                hook_release.wait()
+            }
+        }))
+        attacker_root :: ~root
+        attacker_held :: ~held
+        attacker_outside :: ~outside
+        attacker_reached :: Arc.clone(&reached)
+        attacker_release :: Arc.clone(&release)
+        attacker :: thread.spawn(() -> {
+            attacker_reached.wait()
+            fs.rename(attacker_root, attacker_held).expect("source root must be movable")
+            symlink(attacker_outside, attacker_root).expect("hostile root link must be made")
+            attacker_release.wait()
+        })
+        files := []
+        walk :: collect_authority_tree(&authority, OSPath.from(""), &files, 0, true)
+        attacker.join().expect("ancestor swap thread must finish")
+        drop(hook)
+        fs.remove_file(root).expect("hostile root link must be removable")
+        fs.rename(held, root).expect("held source root must be restored")
+        walk.expect("held authority must retain the verified root")
+        assert_eq(files.len(), 1, "walk must not enter the hostile root")
+        assert_eq(files[0].relative, "trusted.jet")
+        bytes := []
+        files[0].file.read_to_end(&bytes).expect("verified file must remain readable")
+        assert_eq(bytes, b"trusted bytes\n")
+        assert(root.is_dir(), "the original root must be restored")
+        fs.remove_dir_all(root).unwrap()
+        fs.remove_dir_all(outside).unwrap()
+    }
+}

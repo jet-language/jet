@@ -1,1809 +1,794 @@
-// PORT-PENDING 0692 source-cmdinspect-slice-2236: Source/CmdInspect.rs:2236-4040
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn render_provenance_json_package(report: &jet::Lock::DependencyProvenanceReport) -> StatusValue {
-//RS     let integrity_evidence = matches!(
-//RS         report.integrity.status,
-//RS         jet::Lock::ProvenanceStatus::Enforced
-//RS     )
-//RS     .then_some("E1204");
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("name", report.name.as_str())
-//RS             .with("version", report.version.as_str())
-//RS             .with(
-//RS                 "integrity",
-//RS                 render_provenance_json_field(&report.integrity, integrity_evidence),
-//RS             )
-//RS             .with(
-//RS                 "transparency",
-//RS                 render_provenance_json_field(&report.transparency, None),
-//RS             )
-//RS             .with(
-//RS                 "publisher",
-//RS                 render_provenance_json_field(&report.publisher, None),
-//RS             )
-//RS             .with("build", render_provenance_json_field(&report.build, None))
-//RS             .with(
-//RS                 "required_effects",
-//RS                 StatusValue::array(
-//RS                     report
-//RS                         .required_effects
-//RS                         .iter()
-//RS                         .map(|effect| StatusValue::from(effect.as_str())),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "granted_effects",
-//RS                 StatusValue::array(
-//RS                     report
-//RS                         .granted_effects
-//RS                         .iter()
-//RS                         .map(|effect| StatusValue::from(effect.as_str())),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "denied_effects",
-//RS                 StatusValue::array(
-//RS                     report
-//RS                         .denied_effects
-//RS                         .iter()
-//RS                         .map(|effect| StatusValue::from(effect.as_str())),
-//RS                 ),
-//RS             )
-//RS             .with("authority", report.authority.as_str()),
-//RS     )
-//RS }
-//RS 
-//RS fn render_provenance_json_field(
-//RS     field: &jet::Lock::ProvenanceField,
-//RS     evidence: Option<&str>,
-//RS ) -> StatusValue {
-//RS     let mut fields = StatusFields::new()
-//RS         .with("value", field.value.as_str())
-//RS         .with("status", field.status.label());
-//RS     if let Some(evidence) = evidence {
-//RS         fields = fields.with("evidence", evidence);
-//RS     }
-//RS     StatusValue::object(fields)
-//RS }
-//RS 
-//RS fn shape_type_label(ty: &ShapeType) -> String {
-//RS     match ty {
-//RS         ShapeType::Null => "Null".to_string(),
-//RS         ShapeType::Bool => "Bool".to_string(),
-//RS         ShapeType::Int => "Int".to_string(),
-//RS         ShapeType::Float => "Float".to_string(),
-//RS         ShapeType::Number => "Number".to_string(),
-//RS         ShapeType::Text => "Text".to_string(),
-//RS         ShapeType::Bytes => "Bytes".to_string(),
-//RS         ShapeType::Array(inner) => format!("[{}]", shape_type_label(inner)),
-//RS         ShapeType::Optional(inner) => format!("{}?", shape_type_label(inner)),
-//RS         ShapeType::Object(identity) => format!("Object({})", identity.key()),
-//RS         ShapeType::Unknown(value) => format!("Unknown({value})"),
-//RS     }
-//RS }
-//RS 
-//RS fn shape_default_value(default: &ShapeDefault) -> StatusValue {
-//RS     match default {
-//RS         ShapeDefault::Null => StatusValue::Null,
-//RS         ShapeDefault::Bool(value) => StatusValue::from(*value),
-//RS         ShapeDefault::Int(value) => StatusValue::from(*value),
-//RS         ShapeDefault::Float(value) => StatusValue::Float(value.clone()),
-//RS         ShapeDefault::Text(value) => StatusValue::from(value.as_str()),
-//RS         ShapeDefault::Bytes(value) => StatusValue::array(
-//RS             value
-//RS                 .iter()
-//RS                 .map(|byte| StatusValue::from(i128::from(*byte))),
-//RS         ),
-//RS         ShapeDefault::Unknown(value) => StatusValue::from(value.as_str()),
-//RS     }
-//RS }
-//RS 
-//RS fn shape_optional_name(
-//RS     value: Option<&String>,
-//RS     format: &'static str,
-//RS     ignored: &mut Vec<String>,
-//RS ) -> StatusValue {
-//RS     match value {
-//RS         Some(value) => StatusValue::from(value.as_str()),
-//RS         None => {
-//RS             ignored.push(format.to_string());
-//RS             StatusValue::Null
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn shape_names_value(names: &ShapeFieldNames) -> StatusValue {
-//RS     let mut ignored = Vec::new();
-//RS     let value = StatusFields::new()
-//RS         .with("text", names.text.as_str())
-//RS         .with(
-//RS             "json",
-//RS             shape_optional_name(names.json.as_ref(), "json", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "cbor",
-//RS             shape_optional_name(names.cbor.as_ref(), "cbor", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "csv",
-//RS             shape_optional_name(names.csv.as_ref(), "csv", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "toml",
-//RS             shape_optional_name(names.toml.as_ref(), "toml", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "yaml",
-//RS             shape_optional_name(names.yaml.as_ref(), "yaml", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "xml",
-//RS             shape_optional_name(names.xml.as_ref(), "xml", &mut ignored),
-//RS         )
-//RS         .with("args", names.args.as_str())
-//RS         .with("env", names.env.as_str())
-//RS         .with(
-//RS             "db",
-//RS             shape_optional_name(names.db.as_ref(), "db", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "layout",
-//RS             shape_optional_name(names.layout.as_ref(), "layout", &mut ignored),
-//RS         )
-//RS         .with(
-//RS             "ignored",
-//RS             StatusValue::array(
-//RS                 ignored
-//RS                     .iter()
-//RS                     .map(|format| StatusValue::from(format.as_str())),
-//RS             ),
-//RS         );
-//RS     StatusValue::object(value)
-//RS }
-//RS 
-//RS fn shape_layout_kind(kind: &ShapeLayoutKind) -> &'static str {
-//RS     match kind {
-//RS         ShapeLayoutKind::Default => "default",
-//RS         ShapeLayoutKind::C => "c",
-//RS         ShapeLayoutKind::Columnar => "columnar",
-//RS     }
-//RS }
-//RS 
-//RS fn shape_layout_value(fact: &ShapeFact) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("kind", shape_layout_kind(&fact.layout.kind))
-//RS             .with(
-//RS                 "alignment",
-//RS                 fact.layout
-//RS                     .alignment
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn shape_dimensions_value(dimensions: &ShapeDimensions) -> StatusValue {
-//RS     match dimensions {
-//RS         ShapeDimensions::Known { rank, width } => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("status", "known")
-//RS                 .with("rank", *rank)
-//RS                 .with("width", *width),
-//RS         ),
-//RS         ShapeDimensions::Unknown { reason } => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("status", "unknown")
-//RS                 .with("reason", reason.as_str()),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn shape_provenance_value(fact: &ShapeFact) -> StatusValue {
-//RS     let origin = match &fact.provenance.origin {
-//RS         ShapeOrigin::Declared => StatusValue::from("declared"),
-//RS         ShapeOrigin::Derived { from } => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", "derived")
-//RS                 .with("from", from.key()),
-//RS         ),
-//RS         ShapeOrigin::Imported { package } => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", "imported")
-//RS                 .with("package", package.as_str()),
-//RS         ),
-//RS     };
-//RS     let span = fact
-//RS         .provenance
-//RS         .span
-//RS         .map(|span| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("start", span.start)
-//RS                     .with("end", span.end),
-//RS             )
-//RS         })
-//RS         .unwrap_or(StatusValue::Null);
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("origin", origin)
-//RS             .with("span", span)
-//RS             .with(
-//RS                 "declaration",
-//RS                 fact.provenance
-//RS                     .declaration
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn shape_field_value(field: &ShapeFieldFact) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("source_name", field.name.as_str())
-//RS             .with("type", shape_type_label(&field.ty))
-//RS             .with("order", field.order)
-//RS             .with("encoding", field.encoding.as_str())
-//RS             .with("skipped", field.skip)
-//RS             .with(
-//RS                 "default",
-//RS                 field
-//RS                     .default
-//RS                     .as_ref()
-//RS                     .map(shape_default_value)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with("names", shape_names_value(&field.names))
-//RS             .with(
-//RS                 "short",
-//RS                 field
-//RS                     .short
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "doc",
-//RS                 field
-//RS                     .doc
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn shape_projection_value(fact: &ShapeFact, kind: ShapeProjectionKind) -> StatusValue {
-//RS     match fact.project(kind) {
-//RS         Ok(projection) => {
-//RS             let fields = StatusValue::array(projection.fields.iter().map(|field| {
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("source_name", field.source_name.as_str())
-//RS                         .with("name", field.name.as_str())
-//RS                         .with("decode_name", field.decode_name.as_str())
-//RS                         .with("type", shape_type_label(&field.ty))
-//RS                         .with("order", field.order)
-//RS                         .with("encoding", field.encoding.as_str())
-//RS                         .with(
-//RS                             "default",
-//RS                             field
-//RS                                 .default
-//RS                                 .as_ref()
-//RS                                 .map(shape_default_value)
-//RS                                 .unwrap_or(StatusValue::Null),
-//RS                         )
-//RS                         .with(
-//RS                             "short",
-//RS                             field
-//RS                                 .short
-//RS                                 .as_deref()
-//RS                                 .map(StatusValue::from)
-//RS                                 .unwrap_or(StatusValue::Null),
-//RS                         )
-//RS                         .with(
-//RS                             "doc",
-//RS                             field
-//RS                                 .doc
-//RS                                 .as_deref()
-//RS                                 .map(StatusValue::from)
-//RS                                 .unwrap_or(StatusValue::Null),
-//RS                         ),
-//RS                 )
-//RS             }));
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("kind", kind.as_str())
-//RS                     .with("status", "supported")
-//RS                     .with("fields", fields),
-//RS             )
-//RS         }
-//RS         Err(error) => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", kind.as_str())
-//RS                 .with("status", "unsupported")
-//RS                 .with("ignored", true)
-//RS                 .with("reason", error.to_string()),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn shape_fact_value(fact: &ShapeFact) -> StatusValue {
-//RS     let identity = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("source", fact.identity.source.as_str())
-//RS             .with("type", fact.identity.type_name.as_str())
-//RS             .with("key", fact.identity.key()),
-//RS     );
-//RS     let fields = StatusValue::array(fact.fields.iter().map(shape_field_value));
-//RS     let projections = StatusValue::array(
-//RS         ShapeProjectionKind::ALL
-//RS             .into_iter()
-//RS             .map(|kind| shape_projection_value(fact, kind)),
-//RS     );
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("identity", identity)
-//RS             .with("dimensions", shape_dimensions_value(&fact.dimensions))
-//RS             .with("encoding", fact.encoding.as_str())
-//RS             .with("layout", shape_layout_value(fact))
-//RS             .with("provenance", shape_provenance_value(fact))
-//RS             .with("fields", fields)
-//RS             .with("projections", projections),
-//RS     )
-//RS }
-//RS 
-//RS fn shape_name_text(value: Option<&String>) -> &str {
-//RS     value.map(String::as_str).unwrap_or("ignored")
-//RS }
-//RS 
-//RS fn print_shape_fact(fact: &ShapeFact) {
-//RS     println!(
-//RS         "shape {} (encoding={}, layout={})",
-//RS         fact.identity.key(),
-//RS         fact.encoding.as_str(),
-//RS         shape_layout_kind(&fact.layout.kind),
-//RS     );
-//RS     println!("  dimensions: {:?}", fact.dimensions);
-//RS     for field in &fact.fields {
-//RS         println!(
-//RS             "  field {}: {} (order={}, encoding={}, skipped={})",
-//RS             field.name,
-//RS             shape_type_label(&field.ty),
-//RS             field.order,
-//RS             field.encoding.as_str(),
-//RS             field.skip,
-//RS         );
-//RS         println!(
-//RS             "    names: text={} json={} cbor={} csv={} toml={} yaml={} xml={} args={} env={} db={} layout={}",
-//RS             field.names.text,
-//RS             shape_name_text(field.names.json.as_ref()),
-//RS             shape_name_text(field.names.cbor.as_ref()),
-//RS             shape_name_text(field.names.csv.as_ref()),
-//RS             shape_name_text(field.names.toml.as_ref()),
-//RS             shape_name_text(field.names.yaml.as_ref()),
-//RS             shape_name_text(field.names.xml.as_ref()),
-//RS             field.names.args,
-//RS             field.names.env,
-//RS             shape_name_text(field.names.db.as_ref()),
-//RS             shape_name_text(field.names.layout.as_ref()),
-//RS         );
-//RS     }
-//RS     for kind in ShapeProjectionKind::ALL {
-//RS         match fact.project(kind) {
-//RS             Ok(projection) => println!(
-//RS                 "  projection {}: supported ({} fields)",
-//RS                 kind.as_str(),
-//RS                 projection.fields.len()
-//RS             ),
-//RS             Err(error) => println!("  projection {}: ignored ({error})", kind.as_str()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `jet inspect shapes <file.jet>` — expose one canonical shape fact and all
-//RS /// of its typed projections without rebuilding format-specific tables.
-//RS pub(crate) fn run_shapes(args: &[String], json: bool) {
-//RS     let Some(file) = entry_file(args) else {
-//RS         crate::cli_error!(
-//RS             @fix "E2104",
-//RS             "`jet inspect shapes` needs an entry file",
-//RS             "run `jet inspect shapes Examples/features/encoding/records.jet`"
-//RS         );
-//RS         exit(jet::ExitCodes::USAGE);
-//RS     };
-//RS     let path = Path::new(&file);
-//RS     let projection = check_projection(path)
-//RS         .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
-//RS     let mut facts = Vec::new();
-//RS     for module in &projection.bundle.modules {
-//RS         for item in &module.items {
-//RS             let jet::AST::Item::Struct(structure) = item else {
-//RS                 continue;
-//RS             };
-//RS             let fact = match jet::Sema::Schema::shape_fact_from_struct(&module.display, structure) {
-//RS                 Ok(fact) => fact,
-//RS                 Err(error) => {
-//RS                     crate::emit_cli_report_for_action(
-//RS                         "inspect.shapes",
-//RS                         "E2105",
-//RS                         format!(
-//RS                             "could not project shape `{}` from `{}`: {error}",
-//RS                             structure.name, module.display
-//RS                         ),
-//RS                         "the checked declaration could not form one canonical shape fact"
-//RS                             .to_string(),
-//RS                         "fix the declaration's field names, types, or format markers".to_string(),
-//RS                         json,
-//RS                     );
-//RS                     exit(jet::ExitCodes::USER_ERROR);
-//RS                 }
-//RS             };
-//RS             facts.push(fact);
-//RS         }
-//RS     }
-//RS     facts.sort_by(|left, right| left.identity.cmp(&right.identity));
-//RS     if json {
-//RS         let shapes = StatusValue::array(facts.iter().map(shape_fact_value));
-//RS         println!(
-//RS             "{}",
-//RS             render_status(
-//RS                 "inspect.shapes",
-//RS                 true,
-//RS                 StatusFields::new().with("shapes", shapes),
-//RS             )
-//RS         );
-//RS     } else {
-//RS         if facts.is_empty() {
-//RS             println!("No shape facts declared.");
-//RS         }
-//RS         for fact in &facts {
-//RS             print_shape_fact(fact);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn entry_file(args: &[String]) -> Option<String> {
-//RS     let mut skip_value = false;
-//RS     for argument in args {
-//RS         if skip_value {
-//RS             skip_value = false;
-//RS             continue;
-//RS         }
-//RS         if matches!(
-//RS             argument.as_str(),
-//RS             "--profile" | "--target" | "--scope" | "--kind"
-//RS         ) {
-//RS             skip_value = true;
-//RS             continue;
-//RS         }
-//RS         if argument.starts_with('-') {
-//RS             continue;
-//RS         }
-//RS         return Some(argument.clone());
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// `jet inspect types <file.jet>` — project checked operator hooks and their
-//RS /// mixed-operand mirror rows from the same registry metadata used by sema.
-//RS pub(crate) fn run_types(args: &[String], json: bool) {
-//RS     let Some(file) = entry_file(args) else {
-//RS         crate::cli_error!(
-//RS             @fix "E2104",
-//RS             "`jet inspect types` needs an entry file",
-//RS             "run `jet inspect types Examples/features/operators/mixed_types.jet`"
-//RS         );
-//RS         exit(jet::ExitCodes::USAGE);
-//RS     };
-//RS     let path = Path::new(&file);
-//RS     let projection = check_projection(path)
-//RS         .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
-//RS     let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
-//RS     let mut registered = Vec::new();
-//RS     for module in &projection.bundle.modules {
-//RS         let mut registry =
-//RS             jet_foundation::Traits::TraitRegistry::auto_derives_for_items(&module.items);
-//RS         registry.register_synthetic_operators();
-//RS         registered.extend(registry.operator_impls);
-//RS     }
-//RS     for implementation in &registered {
-//RS         let Some(symbol) = operator_symbol(&implementation.trait_name) else {
-//RS             continue;
-//RS         };
-//RS         let rhs = implementation.rhs.name();
-//RS         let owner = if plain_number(&implementation.left) && !plain_number(&rhs) {
-//RS             rhs.clone()
-//RS         } else {
-//RS             implementation.left.clone()
-//RS         };
-//RS         let source = format!(
-//RS             "{}.{}<{}>",
-//RS             implementation.left, implementation.trait_name, rhs
-//RS         );
-//RS         let result = implementation.result.name();
-//RS         let kind = if implementation.explicit_rhs {
-//RS             "explicit hook"
-//RS         } else {
-//RS             "hook"
-//RS         };
-//RS         let direct = format!(
-//RS             "{} {} {} -> {}  {} {}",
-//RS             implementation.left, symbol, rhs, result, kind, source
-//RS         );
-//RS         grouped.entry(owner.clone()).or_default().push(direct);
-//RS         if plain_number(&rhs)
-//RS             && !plain_number(&implementation.left)
-//RS             && matches!(implementation.trait_name.as_str(), "Add" | "Mul")
-//RS         {
-//RS             let explicit_reverse = registered.iter().any(|candidate| {
-//RS                 candidate.explicit_rhs
-//RS                     && candidate.left == rhs
-//RS                     && candidate.trait_name == implementation.trait_name
-//RS                     && candidate.rhs.name() == implementation.left
-//RS             });
-//RS             if !explicit_reverse {
-//RS                 grouped.entry(owner).or_default().push(format!(
-//RS                     "{} {} {} -> {}  mirror of {}",
-//RS                     rhs, symbol, implementation.left, result, source
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     for rows in grouped.values_mut() {
-//RS         rows.sort();
-//RS         rows.dedup();
-//RS     }
-//RS     if json {
-//RS         let types = StatusValue::array(grouped.iter().map(|(owner, rows)| {
-//RS             StatusValue::object(StatusFields::new().with("type", owner.as_str()).with(
-//RS                 "rows",
-//RS                 StatusValue::array(rows.iter().map(|row| StatusValue::from(row.as_str()))),
-//RS             ))
-//RS         }));
-//RS         let payload = render_status(
-//RS             "inspect.types",
-//RS             true,
-//RS             StatusFields::new().with("types", types),
-//RS         );
-//RS         println!("{payload}");
-//RS     } else {
-//RS         for (owner, rows) in grouped {
-//RS             println!("type {owner}:");
-//RS             for row in rows {
-//RS                 println!("  {row}");
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn acceleration_scope_name(scope: &jet::CLI::InspectScope) -> &'static str {
-//RS     match scope {
-//RS         jet::CLI::InspectScope::Package => "package",
-//RS         jet::CLI::InspectScope::Target(_) => "target",
-//RS         jet::CLI::InspectScope::Live(_) => "live",
-//RS         jet::CLI::InspectScope::Replay(_) => "replay",
-//RS     }
-//RS }
-//RS 
-//RS fn acceleration_span_value(start: usize, end: usize) -> StatusValue {
-//RS     StatusValue::object(StatusFields::new().with("start", start).with("end", end))
-//RS }
-//RS 
-//RS struct AccelerationRuntimeReceipt {
-//RS     receipt_digest: String,
-//RS     receipt_verb: String,
-//RS     record_sequence: u64,
-//RS     row: jet::ReceiptStore::AccelerationReceiptRow,
-//RS }
-//RS 
-//RS fn acceleration_runtime_receipt(
-//RS     scope: &jet::CLI::InspectScope,
-//RS     file: &str,
-//RS     profile: &str,
-//RS ) -> Vec<AccelerationRuntimeReceipt> {
-//RS     let cwd = match std::env::current_dir() {
-//RS         Ok(cwd) => cwd,
-//RS         Err(_) => return Vec::new(),
-//RS     };
-//RS     let mut receipt_root = None;
-//RS     let mut target_identities = Vec::new();
-//RS     for verb in ["test", "prove", "build"] {
-//RS         let mut argv = vec![verb.to_string()];
-//RS         match scope {
-//RS             jet::CLI::InspectScope::Target(target) => argv.push(target.clone()),
-//RS             jet::CLI::InspectScope::Package
-//RS             | jet::CLI::InspectScope::Live(_)
-//RS             | jet::CLI::InspectScope::Replay(_) => {}
-//RS         }
-//RS         if !profile.is_empty() {
-//RS             argv.extend(["--profile".to_string(), profile.to_string()]);
-//RS         }
-//RS         let inputs = jet::ReceiptStore::input_paths_for(verb, &argv, &cwd);
-//RS         if inputs.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let root = jet::ReceiptStore::receipt_root_for(verb, &argv, &cwd);
-//RS         if receipt_root.is_none() {
-//RS             receipt_root = Some(root.clone());
-//RS         }
-//RS         let store = jet::ReceiptStore::ReceiptStore::new(root);
-//RS         let Ok(claim) = store.claim(verb, &argv, &inputs) else {
-//RS             continue;
-//RS         };
-//RS         let members = claim
-//RS             .inputs
-//RS             .iter()
-//RS             .map(|input| {
-//RS                 (
-//RS                     input.path.to_string_lossy().into_owned(),
-//RS                     input.digest.clone(),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let Ok(identity) = jet::ReceiptStore::canonical_target_identity(Path::new(file), &members)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         target_identities.push((identity.input_sha256, identity.authority_root));
-//RS     }
-//RS     let Some(receipt_root) = receipt_root else {
-//RS         return Vec::new();
-//RS     };
-//RS     if target_identities.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let store = jet::ReceiptStore::ReceiptStore::new(receipt_root);
-//RS     let mut index_roots = vec![cwd];
-//RS     for (_, authority_root) in &target_identities {
-//RS         if !index_roots.contains(authority_root) {
-//RS             index_roots.push(authority_root.clone());
-//RS         }
-//RS     }
-//RS     let mut entries = Vec::new();
-//RS     for index_root in index_roots {
-//RS         let Ok(index) = jet::RecordIndex::RecordIndex::load_for_project(index_root) else {
-//RS             continue;
-//RS         };
-//RS         entries.extend(
-//RS             index
-//RS                 .query_kind(jet::RecordIndex::RecordKind::Receipt, true)
-//RS                 .into_iter()
-//RS                 .filter(|entry| {
-//RS                     target_identities.iter().any(|(target, _)| {
-//RS                         entry.identity.target_inputs_sha256.as_str() == target.as_str()
-//RS                     }) && entry.identity.tool_version == env!("CARGO_PKG_VERSION")
-//RS                 }),
-//RS         );
-//RS     }
-//RS     entries.sort_by(|left, right| {
-//RS         right
-//RS             .recorded_sequence
-//RS             .cmp(&left.recorded_sequence)
-//RS             .then_with(|| right.artifact_id.cmp(&left.artifact_id))
-//RS     });
-//RS     entries.dedup_by(|left, right| left.artifact_id == right.artifact_id);
-//RS     let receipts = match store.list() {
-//RS         Ok(receipts) => receipts
-//RS             .into_iter()
-//RS             .filter_map(|receipt| store.lookup(&receipt.claim).ok().flatten())
-//RS             .collect::<Vec<_>>(),
-//RS         Err(_) => return Vec::new(),
-//RS     };
-//RS     for entry in entries {
-//RS         let Some(receipt) = receipts
-//RS             .iter()
-//RS             .find(|receipt| receipt.claim.key == entry.artifact_id)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let receipt_members = receipt
-//RS             .claim
-//RS             .inputs
-//RS             .iter()
-//RS             .map(|input| {
-//RS                 (
-//RS                     input.path.to_string_lossy().into_owned(),
-//RS                     input.digest.clone(),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let Ok(receipt_identity) =
-//RS             jet::ReceiptStore::canonical_target_identity(Path::new(file), &receipt_members)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         if !target_identities
-//RS             .iter()
-//RS             .any(|(target, _)| receipt_identity.input_sha256.as_str() == target.as_str())
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let Ok(rows) = jet::ReceiptStore::acceleration_decisions(receipt) else {
-//RS             continue;
-//RS         };
-//RS         return rows
-//RS             .into_iter()
-//RS             .map(|row| AccelerationRuntimeReceipt {
-//RS                 receipt_digest: receipt.digest.clone(),
-//RS                 receipt_verb: receipt.claim.verb.clone(),
-//RS                 record_sequence: entry.recorded_sequence,
-//RS                 row,
-//RS             })
-//RS             .collect();
-//RS     }
-//RS     Vec::new()
-//RS }
-//RS 
-//RS fn acceleration_runtime_measurement_value(
-//RS     measurement: jet_foundation::MIROptimization::Acceleration::AccelerationMeasurement,
-//RS ) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("items", measurement.items)
-//RS             .with("sample_items", measurement.sample_items)
-//RS             .with("sample_nanos", measurement.sample_nanos)
-//RS             .with("spawn_nanos", measurement.spawn_nanos)
-//RS             .with("bandwidth_floor_nanos", measurement.bandwidth_floor_nanos)
-//RS             .with("floor_nanos", measurement.floor_nanos)
-//RS             .with(
-//RS                 "projected_serial_nanos",
-//RS                 measurement
-//RS                     .projected_serial_nanos
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "required_serial_nanos",
-//RS                 measurement
-//RS                     .required_serial_nanos
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn acceleration_runtime_value(runtime: &AccelerationRuntimeReceipt) -> StatusValue {
-//RS     let decision = runtime.row.decision;
-//RS     let pin = match decision.status {
-//RS         AccelerationGateStatus::Pinned(pin) => StatusValue::from(pin.as_str()),
-//RS         _ => StatusValue::Null,
-//RS     };
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("record_sequence", runtime.record_sequence)
-//RS             .with("receipt_digest", runtime.receipt_digest.as_str())
-//RS             .with("receipt_verb", runtime.receipt_verb.as_str())
-//RS             .with("sequence", runtime.row.sequence)
-//RS             .with("function", runtime.row.function.as_str())
-//RS             .with("loop_header", runtime.row.loop_header)
-//RS             .with(
-//RS                 "source",
-//RS                 acceleration_span_value(runtime.row.source_start, runtime.row.source_end),
-//RS             )
-//RS             .with("transform", decision.transform.as_str())
-//RS             .with("status", decision.status.as_str())
-//RS             .with("pin", pin)
-//RS             .with("selected", decision.selected())
-//RS             .with("measurement_source", "receipt")
-//RS             .with(
-//RS                 "measurement",
-//RS                 acceleration_runtime_measurement_value(decision.measurement),
-//RS             ),
-//RS     )
-//RS }
-//RS fn acceleration_rejection_statement(
-//RS     reason: &jet_foundation::MIR::MirOptimizationRejection,
-//RS ) -> &'static str {
-//RS     use jet_foundation::MIR::MirOptimizationRejection::*;
-//RS     match reason {
-//RS         MissingProof => "the loop lacks the required proof",
-//RS         MayTrap => "the loop may trap",
-//RS         HasEffects => "the loop body has effects",
-//RS         HasEarlyExit => "the loop has an early exit",
-//RS         MayAlias => "the loop may alias",
-//RS         CrossIterationDependency => "iterations depend on each other",
-//RS         DynamicTripCount => "the trip count is dynamic",
-//RS         UnknownCopyCost => "copy cost is unknown",
-//RS         ScalarBoundary => "the loop crosses a scalar boundary",
-//RS         ObservableLayout => "the layout is observable",
-//RS         OwnershipObligation => "the ownership proof is incomplete",
-//RS         UnsupportedOperation => "the operation is unsupported",
-//RS     }
-//RS }
-//RS fn acceleration_gate_statement(status: Option<AccelerationGateStatus>) -> String {
-//RS     match status {
-//RS         None => "the runtime profile has not been published".to_string(),
-//RS         Some(AccelerationGateStatus::BelowStaticFloor) => {
-//RS             "the source item count is at or below the static floor".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::Pinned(pin)) => {
-//RS             format!("the loop is pinned by {}", pin.as_str())
-//RS         }
-//RS         Some(AccelerationGateStatus::NotReleaseBuild) => {
-//RS             "the build is not a release profile".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::CrossModeParityMissing) => {
-//RS             "cross-mode parity proof is incomplete".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::ColumnCopyNotApplicable) => {
-//RS             "nested-reuse facts do not permit a column copy".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::ProofIncomplete) => {
-//RS             "the acceleration proof is incomplete".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::SampleNotTimed) => {
-//RS             "the first serial chunk has not been timed".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::SpawnCostNotMeasured) => {
-//RS             "the once-per-process spawn cost has not been measured".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::BandwidthFloorNotMeasured) => {
-//RS             "the memory-bandwidth floor has not been measured".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::InvalidMeasurement) => {
-//RS             "the supplied measurement is invalid".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::ProjectedGainBelowThreshold) => {
-//RS             "projected gain is below the required threshold".to_string()
-//RS         }
-//RS         Some(AccelerationGateStatus::Selected) => {
-//RS             "the measured gate selected this transform".to_string()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn acceleration_proof_value(proof: AccelerationProof) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("source_proven", proof.source_proven)
-//RS             .with("independent_iterations", proof.independent_iterations)
-//RS             .with("no_aliasing", proof.no_aliasing)
-//RS             .with(
-//RS                 "no_cross_iteration_dependencies",
-//RS                 proof.no_cross_iteration_dependencies,
-//RS             )
-//RS             .with("no_early_exit", proof.no_early_exit)
-//RS             .with("effect_free_body", proof.effect_free_body)
-//RS             .with("ownership_safe", proof.ownership_safe)
-//RS             .with("failure_order_preserved", proof.failure_order_preserved),
-//RS     )
-//RS }
-//RS 
-//RS fn acceleration_workload_value(workload: AccelerationWorkloadFacts) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("nested_reuse", workload.nested_reuse)
-//RS             .with("single_pass", workload.single_pass)
-//RS             .with("column_copy_applicable", workload.column_copy_applicable()),
-//RS     )
-//RS }
-//RS 
-//RS fn acceleration_vector_value(
-//RS     function: &str,
-//RS     fact: &jet_foundation::MIR::MirVectorFact,
-//RS ) -> StatusValue {
-//RS     let (decision, accepted_rule, rejection_code, rejection_statement) = match &fact.decision {
-//RS         jet_foundation::MIR::MirOptimizationDecision::Eligible => (
-//RS             "accepted",
-//RS             StatusValue::from(fact.rule.as_str()),
-//RS             StatusValue::Null,
-//RS             StatusValue::Null,
-//RS         ),
-//RS         jet_foundation::MIR::MirOptimizationDecision::Rejected(reason) => (
-//RS             "rejected",
-//RS             StatusValue::Null,
-//RS             StatusValue::from(reason.as_str()),
-//RS             StatusValue::from(acceleration_rejection_statement(reason)),
-//RS         ),
-//RS     };
-//RS     let lane_width = fact
-//RS         .lane_width
-//RS         .map(|lane| StatusValue::from(u64::from(lane)))
-//RS         .unwrap_or(StatusValue::Null);
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("function", function)
-//RS             .with("loop_header", fact.loop_header.0)
-//RS             .with(
-//RS                 "span",
-//RS                 acceleration_span_value(fact.span.start, fact.span.end),
-//RS             )
-//RS             .with("rule", fact.rule.as_str())
-//RS             .with("accepted_rule", accepted_rule)
-//RS             .with("layout", fact.layout.as_str())
-//RS             .with("packed", fact.packed)
-//RS             .with("lane_width", lane_width)
-//RS             .with("access_count", fact.accesses.len())
-//RS             .with("no_aliasing", fact.no_aliasing)
-//RS             .with("no_early_exit", fact.no_early_exit)
-//RS             .with("effect_free_body", fact.effect_free_body)
-//RS             .with(
-//RS                 "no_cross_iteration_dependencies",
-//RS                 fact.no_cross_iteration_dependencies,
-//RS             )
-//RS             .with("decision", decision)
-//RS             .with("rejection_code", rejection_code)
-//RS             .with("rejection_statement", rejection_statement),
-//RS     )
-//RS }
-//RS 
-//RS fn acceleration_cross_mode_parity(
-//RS     fact: &jet_foundation::MIR::MirAccelerationFact,
-//RS     vector: Option<&jet_foundation::MIR::MirVectorFact>,
-//RS ) -> bool {
-//RS     let Some(vector) = vector else {
-//RS         return false;
-//RS     };
-//RS     vector.no_aliasing
-//RS         && vector.no_early_exit
-//RS         && vector.effect_free_body
-//RS         && vector.no_cross_iteration_dependencies
-//RS         && fact.proof.proves(fact.transform)
-//RS }
-//RS 
-//RS fn acceleration_gate_value(
-//RS     function: &str,
-//RS     fact: &jet_foundation::MIR::MirAccelerationFact,
-//RS     loop_fact: Option<&jet_foundation::MIR::MirLoopFact>,
-//RS     vector: Option<&jet_foundation::MIR::MirVectorFact>,
-//RS     gate: AccelerationGate,
-//RS     release_build: bool,
-//RS     runtime: Option<&AccelerationRuntimeReceipt>,
-//RS ) -> StatusValue {
-//RS     let cross_mode_parity_proven = acceleration_cross_mode_parity(fact, vector);
-//RS     let trip_count = loop_fact.and_then(|loop_fact| loop_fact.trip_count);
-//RS     let items = trip_count.and_then(|items| usize::try_from(items).ok());
-//RS     let deferred_decision = items.map(|items| {
-//RS         let mut input = AccelerationGateInput::deferred();
-//RS         input.items = items;
-//RS         input.release_build = release_build;
-//RS         input.cross_mode_parity_proven = cross_mode_parity_proven;
-//RS         fact.evaluate(gate, input)
-//RS     });
-//RS     let runtime_decision = runtime.map(|runtime| runtime.row.decision);
-//RS     let gate_status = runtime_decision
-//RS         .map(|decision| decision.status.as_str())
-//RS         .or_else(|| {
-//RS             deferred_decision
-//RS                 .as_ref()
-//RS                 .map(|decision| decision.status.as_str())
-//RS         })
-//RS         .unwrap_or("runtime-profile-required");
-//RS     let selected = runtime_decision
-//RS         .map(|decision| decision.selected())
-//RS         .or_else(|| {
-//RS             deferred_decision
-//RS                 .as_ref()
-//RS                 .map(|decision| decision.selected())
-//RS         })
-//RS         .unwrap_or(false);
-//RS     let gate_statement = acceleration_gate_statement(
-//RS         runtime_decision
-//RS             .map(|decision| decision.status)
-//RS             .or_else(|| deferred_decision.as_ref().map(|decision| decision.status)),
-//RS     );
-//RS     let trip_count = trip_count
-//RS         .map(StatusValue::from)
-//RS         .unwrap_or(StatusValue::Null);
-//RS     let runtime_profile = if runtime.is_some() {
-//RS         "receipt"
-//RS     } else {
-//RS         "not-published"
-//RS     };
-//RS     let measurement_source = if runtime.is_some() { "receipt" } else { "none" };
-//RS     let measurement = runtime_decision
-//RS         .map(|decision| acceleration_runtime_measurement_value(decision.measurement))
-//RS         .unwrap_or(StatusValue::Null);
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("function", function)
-//RS             .with("loop_header", fact.loop_header.0)
-//RS             .with(
-//RS                 "span",
-//RS                 acceleration_span_value(fact.span.start, fact.span.end),
-//RS             )
-//RS             .with("transform", fact.transform.as_str())
-//RS             .with("workload", acceleration_workload_value(fact.workload))
-//RS             .with("proof", acceleration_proof_value(fact.proof))
-//RS             .with("trip_count", trip_count)
-//RS             .with("release_build", release_build)
-//RS             .with("cross_mode_parity_proven", cross_mode_parity_proven)
-//RS             .with("gate_status", gate_status)
-//RS             .with("rejection_statement", gate_statement)
-//RS             .with("selected", selected)
-//RS             .with("runtime_profile", runtime_profile)
-//RS             .with("measurement_source", measurement_source)
-//RS             .with("measurement", measurement)
-//RS             .with(
-//RS                 "gate",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("static_floor_items", D_ACCEL_STATIC_FLOOR_ITEMS)
-//RS                         .with("cache_block_bytes", D_ACCEL_CACHE_BLOCK_BYTES)
-//RS                         .with("required_gain_numerator", D_ACCEL_REQUIRED_GAIN_NUMERATOR)
-//RS                         .with(
-//RS                             "required_gain_denominator",
-//RS                             D_ACCEL_REQUIRED_GAIN_DENOMINATOR,
-//RS                         ),
-//RS                 ),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn run_accel(
-//RS     request: &jet::CLI::InspectRequest,
-//RS     mode: crate::OutputMode,
-//RS     gates: jet::Policy::GateSet,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) {
-//RS     let file = inspect_entry_path(&request.scope);
-//RS     let inspect_scope = match &request.scope {
-//RS         jet::CLI::InspectScope::Package => CheckScope::Project,
-//RS         jet::CLI::InspectScope::Target(target) if Path::new(target).is_dir() => CheckScope::Project,
-//RS         jet::CLI::InspectScope::Target(_) => CheckScope::ExplicitFile,
-//RS         jet::CLI::InspectScope::Live(_) | jet::CLI::InspectScope::Replay(_) => CheckScope::Project,
-//RS     };
-//RS     let selected_target = match &request.scope {
-//RS         jet::CLI::InspectScope::Target(target) => Some(target.as_str()),
-//RS         _ => None,
-//RS     };
-//RS     let path = Path::new(&file);
-//RS     let projection = check_projection_for_command(
-//RS         path,
-//RS         gates,
-//RS         profile,
-//RS         setting_overrides,
-//RS         inspect_scope,
-//RS         None,
-//RS         selected_target,
-//RS     )
-//RS     .unwrap_or_else(|diagnostics| {
-//RS         render_check_failure(path, &diagnostics, mode.json, mode.color_stderr())
-//RS     });
-//RS     let build_profile = crate::CmdCompile::resolve_named_profile(profile, &file, mode);
-//RS     let release_build = build_profile.is_release();
-//RS     let build_mode = if release_build {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Release
-//RS     } else {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev
-//RS     };
-//RS     let (mir, _) = jet::lower_checked_semantic_mir_program_for(
-//RS         &projection.bundle,
-//RS         jet_foundation::MIR::MirArtifactRequest::new(
-//RS             jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS             build_mode,
-//RS         ),
-//RS     );
-//RS     let gate = AccelerationGate::d_accel1();
-//RS     let runtime_receipts = acceleration_runtime_receipt(&request.scope, &file, profile);
-//RS     let runtime_profile = if runtime_receipts.is_empty() {
-//RS         "not-published"
-//RS     } else {
-//RS         "receipt"
-//RS     };
-//RS     let measurement_source = if runtime_receipts.is_empty() {
-//RS         "none"
-//RS     } else {
-//RS         "receipt"
-//RS     };
-//RS     let runtime_rows = runtime_receipts
-//RS         .iter()
-//RS         .map(acceleration_runtime_value)
-//RS         .collect::<Vec<_>>();
-//RS     let mut functions = mir.functions.iter().collect::<Vec<_>>();
-//RS     functions.sort_by(|left, right| left.key.cmp(&right.key));
-//RS     let mut vector_rows = Vec::new();
-//RS     let mut acceleration_rows = Vec::new();
-//RS     let mut text = String::new();
-//RS     writeln!(
-//RS         text,
-//RS         "accel: scope={} source={} profile={} release_build={} runtime_profile={}",
-//RS         acceleration_scope_name(&request.scope),
-//RS         file,
-//RS         profile,
-//RS         release_build,
-//RS         runtime_profile
-//RS     )
-//RS     .expect("writing acceleration inspect output cannot fail");
-//RS     writeln!(
-//RS         text,
-//RS         "gate: static_floor_items={} cache_block_bytes={} required_gain={}/{} measurement_source={}",
-//RS         D_ACCEL_STATIC_FLOOR_ITEMS,
-//RS         D_ACCEL_CACHE_BLOCK_BYTES,
-//RS         D_ACCEL_REQUIRED_GAIN_NUMERATOR,
-//RS         D_ACCEL_REQUIRED_GAIN_DENOMINATOR,
-//RS         measurement_source
-//RS     )
-//RS     .expect("writing acceleration inspect output cannot fail");
-//RS     for runtime in &runtime_receipts {
-//RS         let decision = runtime.row.decision;
-//RS         let measurement = decision.measurement;
-//RS         writeln!(
-//RS             text,
-//RS             "runtime acceleration verb={} receipt={} sequence={} function={} loop={} source={}-{} transform={} status={} selected={} items={} sample_items={} sample_nanos={} spawn_nanos={} bandwidth_floor_nanos={} floor_nanos={} projected_serial_nanos={} required_serial_nanos={}",
-//RS             runtime.receipt_verb,
-//RS             runtime.receipt_digest,
-//RS             runtime.row.sequence,
-//RS             runtime.row.function,
-//RS             runtime.row.loop_header,
-//RS             runtime.row.source_start,
-//RS             runtime.row.source_end,
-//RS             decision.transform.as_str(),
-//RS             decision.status.as_str(),
-//RS             decision.selected(),
-//RS             measurement.items,
-//RS             measurement.sample_items,
-//RS             measurement.sample_nanos,
-//RS             measurement.spawn_nanos,
-//RS             measurement.bandwidth_floor_nanos,
-//RS             measurement.floor_nanos,
-//RS             measurement
-//RS                 .projected_serial_nanos
-//RS                 .map(|value| value.to_string())
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             measurement
-//RS                 .required_serial_nanos
-//RS                 .map(|value| value.to_string())
-//RS                 .unwrap_or_else(|| "null".to_string())
-//RS         )
-//RS         .expect("writing acceleration inspect output cannot fail");
-//RS     }
-//RS     if runtime_receipts.is_empty() {
-//RS         text.push_str("runtime profile: no matching authenticated receipt.\n");
-//RS     }
-//RS     for function in functions {
-//RS         for vector in &function.optimization.vector_facts {
-//RS             vector_rows.push(acceleration_vector_value(&function.key, vector));
-//RS             match &vector.decision {
-//RS                 jet_foundation::MIR::MirOptimizationDecision::Eligible => {
-//RS                     writeln!(
-//RS                         text,
-//RS                         "vector {} loop={} span={}-{} rule={} accepted",
-//RS                         function.key,
-//RS                         vector.loop_header.0,
-//RS                         vector.span.start,
-//RS                         vector.span.end,
-//RS                         vector.rule.as_str()
-//RS                     )
-//RS                     .expect("writing acceleration inspect output cannot fail");
-//RS                 }
-//RS                 jet_foundation::MIR::MirOptimizationDecision::Rejected(reason) => {
-//RS                     writeln!(
-//RS                         text,
-//RS                         "vector {} loop={} span={}-{} rule={} rejected: {} ({})",
-//RS                         function.key,
-//RS                         vector.loop_header.0,
-//RS                         vector.span.start,
-//RS                         vector.span.end,
-//RS                         vector.rule.as_str(),
-//RS                         acceleration_rejection_statement(reason),
-//RS                         reason.as_str()
-//RS                     )
-//RS                     .expect("writing acceleration inspect output cannot fail");
-//RS                 }
-//RS             }
-//RS         }
-//RS         for acceleration in &function.optimization.acceleration_facts {
-//RS             let loop_fact = function
-//RS                 .optimization
-//RS                 .loop_facts
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.header == acceleration.loop_header);
-//RS             let vector = function
-//RS                 .optimization
-//RS                 .vector_facts
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.loop_header == acceleration.loop_header);
-//RS             let runtime = runtime_receipts.iter().find(|runtime| {
-//RS                 runtime.row.function == function.key
-//RS                     && u64::from(runtime.row.loop_header) == acceleration.loop_header.0
-//RS                     && runtime.row.source_start == acceleration.span.start
-//RS                     && runtime.row.source_end == acceleration.span.end
-//RS             });
-//RS             acceleration_rows.push(acceleration_gate_value(
-//RS                 &function.key,
-//RS                 acceleration,
-//RS                 loop_fact,
-//RS                 vector,
-//RS                 gate,
-//RS                 release_build,
-//RS                 runtime,
-//RS             ));
-//RS             let trip_count = loop_fact
-//RS                 .and_then(|loop_fact| loop_fact.trip_count)
-//RS                 .map(|items| items.to_string())
-//RS                 .unwrap_or_else(|| "unknown".to_string());
-//RS             let items = loop_fact
-//RS                 .and_then(|loop_fact| loop_fact.trip_count)
-//RS                 .and_then(|items| usize::try_from(items).ok());
-//RS             let deferred_status = items.map(|items| {
-//RS                 let mut input = AccelerationGateInput::deferred();
-//RS                 input.items = items;
-//RS                 input.release_build = release_build;
-//RS                 input.cross_mode_parity_proven =
-//RS                     acceleration_cross_mode_parity(acceleration, vector);
-//RS                 acceleration.evaluate(gate, input).status
-//RS             });
-//RS             let gate_status = runtime
-//RS                 .map(|runtime| runtime.row.decision.status)
-//RS                 .or(deferred_status);
-//RS             let status = gate_status
-//RS                 .map(|status| status.as_str())
-//RS                 .unwrap_or("runtime-profile-required");
-//RS             let gate_statement = acceleration_gate_statement(gate_status);
-//RS             let selected = runtime
-//RS                 .map(|runtime| runtime.row.decision.selected())
-//RS                 .or_else(|| deferred_status.map(|status| status.is_selected()))
-//RS                 .unwrap_or(false);
-//RS             let measurement_source = if runtime.is_some() { "receipt" } else { "none" };
-//RS             writeln!(
-//RS                 text,
-//RS                 "acceleration {} loop={} span={}-{} transform={} status={} reason={} trip_count={} selected={} measurement_source={}",
-//RS                 function.key,
-//RS                 acceleration.loop_header.0,
-//RS                 acceleration.span.start,
-//RS                 acceleration.span.end,
-//RS                 acceleration.transform.as_str(),
-//RS                 status,
-//RS                 gate_statement,
-//RS                 trip_count,
-//RS                 selected,
-//RS                 measurement_source
-//RS             )
-//RS             .expect("writing acceleration inspect output cannot fail");
-//RS         }
-//RS     }
-//RS     if vector_rows.is_empty() {
-//RS         text.push_str("No vector facts declared.\n");
-//RS     }
-//RS     if acceleration_rows.is_empty() {
-//RS         text.push_str("No acceleration facts declared.\n");
-//RS     }
-//RS     if mode.json {
-//RS         println!(
-//RS             "{}",
-//RS             render_status(
-//RS                 "inspect.accel",
-//RS                 true,
-//RS                 StatusFields::new()
-//RS                     .with("scope", acceleration_scope_name(&request.scope))
-//RS                     .with("source", file)
-//RS                     .with("profile", profile)
-//RS                     .with("release_build", release_build)
-//RS                     .with("runtime_profile", runtime_profile)
-//RS                     .with("measurement_source", measurement_source)
-//RS                     .with("vectors", StatusValue::array(vector_rows))
-//RS                     .with("decisions", StatusValue::array(acceleration_rows))
-//RS                     .with("runtime_decisions", StatusValue::array(runtime_rows))
-//RS                     .with(
-//RS                         "gate",
-//RS                         StatusValue::object(
-//RS                             StatusFields::new()
-//RS                                 .with("static_floor_items", D_ACCEL_STATIC_FLOOR_ITEMS)
-//RS                                 .with("cache_block_bytes", D_ACCEL_CACHE_BLOCK_BYTES)
-//RS                                 .with("required_gain_numerator", D_ACCEL_REQUIRED_GAIN_NUMERATOR,)
-//RS                                 .with(
-//RS                                     "required_gain_denominator",
-//RS                                     D_ACCEL_REQUIRED_GAIN_DENOMINATOR,
-//RS                                 ),
-//RS                         ),
-//RS                     ),
-//RS             )
-//RS         );
-//RS     } else {
-//RS         print!("{text}");
-//RS     }
-//RS }
-//RS 
-//RS /// Project one row from the compiler-owned decision ledger.
-//RS fn decision_row_value(row: &MirDecisionRow) -> StatusValue {
-//RS     let identity = row
-//RS         .identity
-//RS         .as_ref()
-//RS         .map(|identity| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("source", identity.source.as_str())
-//RS                     .with("configuration", identity.configuration.as_str())
-//RS                     .with("profile", identity.profile.as_str())
-//RS                     .with("target", identity.target.as_str())
-//RS                     .with("implementation", identity.implementation.as_str())
-//RS                     .with("artifact", identity.artifact.as_str())
-//RS                     .with("run", identity.run.as_str()),
-//RS             )
-//RS         })
-//RS         .unwrap_or(StatusValue::Null);
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("id", row.id)
-//RS             .with("kind", row.kind.as_str())
-//RS             .with("disposition", row.disposition.as_str())
-//RS             .with(
-//RS                 "function_id",
-//RS                 row.function
-//RS                     .map(|function| StatusValue::from(function.0))
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "function",
-//RS                 if row.function_name.is_empty() {
-//RS                     StatusValue::Null
-//RS                 } else {
-//RS                     StatusValue::from(row.function_name.as_str())
-//RS                 },
-//RS             )
-//RS             .with(
-//RS                 "span",
-//RS                 acceleration_span_value(row.span.start, row.span.end),
-//RS             )
-//RS             .with("rule", row.rule.as_str())
-//RS             .with("reason", row.reason.as_str())
-//RS             .with("producer", row.producer.as_str())
-//RS             .with("evidence", row.evidence.as_str())
-//RS             .with(
-//RS                 "evidence_method",
-//RS                 row.evidence_method
-//RS                     .map(|method| StatusValue::from(method.as_str()))
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "derivation_disposition",
-//RS                 row.derivation_disposition
-//RS                     .map(|disposition| StatusValue::from(disposition.as_str()))
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "derivation_ref",
-//RS                 row.derivation
-//RS                     .as_ref()
-//RS                     .map(|reference| StatusValue::from(reference.id.as_str()))
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with("identity", identity)
-//RS             .with(
-//RS                 "edit",
-//RS                 row.edit
-//RS                     .as_ref()
-//RS                     .map(|edit| {
-//RS                         StatusValue::object(
-//RS                             StatusFields::new()
-//RS                                 .with(
-//RS                                     "span",
-//RS                                     acceleration_span_value(edit.span.start, edit.span.end),
-//RS                                 )
-//RS                                 .with("replacement", edit.replacement.as_str()),
-//RS                         )
-//RS                     })
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn decision_kind_status_value(rows: &[MirDecisionRow]) -> StatusValue {
-//RS     let kinds = [
-//RS         MirDecisionKind::Tier,
-//RS         MirDecisionKind::Inline,
-//RS         MirDecisionKind::Vectorize,
-//RS         MirDecisionKind::Parallel,
-//RS         MirDecisionKind::Copy,
-//RS         MirDecisionKind::Bounds,
-//RS         MirDecisionKind::Deopt,
-//RS         MirDecisionKind::Unreachable,
-//RS         MirDecisionKind::LoopInvariant,
-//RS     ];
-//RS     let mut fields = StatusFields::new();
-//RS     for kind in kinds {
-//RS         let count = rows.iter().filter(|row| row.kind == kind).count();
-//RS         fields = fields.with(
-//RS             kind.as_str(),
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with(
-//RS                         "status",
-//RS                         if count == 0 {
-//RS                             "not-applicable"
-//RS                         } else {
-//RS                             "present"
-//RS                         },
-//RS                     )
-//RS                     .with("rows", count),
-//RS             ),
-//RS         );
-//RS     }
-//RS     StatusValue::object(fields)
-//RS }
-//RS 
-//RS fn canonical_pass_status_value(record: &jet_foundation::CanonicalPass::Record) -> StatusValue {
-//RS     fn snapshot(value: &str) -> StatusValue {
-//RS         StatusValue::parse(value).unwrap_or_else(|_| StatusValue::String(value.to_string()))
-//RS     }
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema", jet_foundation::CanonicalPass::SCHEMA)
-//RS             .with("protocol", jet_foundation::CanonicalPass::PROTOCOL)
-//RS             .with("stage", record.stage.as_str())
-//RS             .with("operation_id", record.operation_id.as_str())
-//RS             .with("occurrence", record.occurrence)
-//RS             .with("order", record.order)
-//RS             .with(
-//RS                 "source",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("path", record.source.as_str())
-//RS                         .with(
-//RS                             "process",
-//RS                             std::env::var("JET_ADAPTER_CANONICAL_PASS_PROCESS")
-//RS                                 .unwrap_or_else(|_| "inspect".to_string()),
-//RS                         ),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "input",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("representation", record.input_representation.as_str())
-//RS                         .with("canonical_payload", snapshot(&record.input_payload))
-//RS                         .with("identity", snapshot(&record.input_identity)),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "output",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("representation", record.output_representation.as_str())
-//RS                         .with("canonical_payload", snapshot(&record.output_payload))
-//RS                         .with("identity", snapshot(&record.output_identity)),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "premises",
-//RS                 StatusValue::array(
-//RS                     record
-//RS                         .premises
-//RS                         .iter()
-//RS                         .map(|premise| StatusValue::from(premise.as_str())),
-//RS                 ),
-//RS             )
-//RS             .with("disposition", record.disposition.as_str()),
-//RS     )
-//RS }
-//RS 
-//RS fn run_decisions(
-//RS     request: &jet::CLI::InspectRequest,
-//RS     mode: crate::OutputMode,
-//RS     gates: jet::Policy::GateSet,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) {
-//RS     let file = inspect_entry_path(&request.scope);
-//RS     let inspect_scope = match &request.scope {
-//RS         jet::CLI::InspectScope::Package => CheckScope::Project,
-//RS         jet::CLI::InspectScope::Target(target) if Path::new(target).is_dir() => CheckScope::Project,
-//RS         jet::CLI::InspectScope::Target(_) => CheckScope::ExplicitFile,
-//RS         jet::CLI::InspectScope::Live(_) | jet::CLI::InspectScope::Replay(_) => CheckScope::Project,
-//RS     };
-//RS     jet_foundation::CanonicalPass::clear();
-//RS     let selected_target = match &request.scope {
-//RS         jet::CLI::InspectScope::Target(target) => Some(target.as_str()),
-//RS         _ => None,
-//RS     };
-//RS     let projection = check_projection_for_command(
-//RS         Path::new(&file),
-//RS         gates,
-//RS         profile,
-//RS         setting_overrides,
-//RS         inspect_scope,
-//RS         None,
-//RS         selected_target,
-//RS     )
-//RS     .unwrap_or_else(|diagnostics| {
-//RS         render_check_failure(
-//RS             Path::new(&file),
-//RS             &diagnostics,
-//RS             mode.json,
-//RS             mode.color_stderr(),
-//RS         )
-//RS     });
-//RS     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
-//RS         &projection.bundle,
-//RS         jet_foundation::MIR::MirArtifactRequest::new(
-//RS             jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS         ),
-//RS     );
-//RS     let mut additional_rows = projection
-//RS         .diagnostics
-//RS         .iter()
-//RS         .filter_map(|diagnostic| diagnostic.decision_row.clone())
-//RS         .collect::<Vec<_>>();
-//RS     additional_rows.extend(jet_jit::plan_mir_tiers(&mir, artifact).decision_ledger_rows(&mir));
-//RS     let ledger = jet_foundation::MIROptimization::decision_ledger(
-//RS         &mir,
-//RS         Some(artifact),
-//RS         profile,
-//RS         "not-observed",
-//RS         additional_rows,
-//RS     );
-//RS     let rows = ledger.rows;
-//RS     let canonical_passes = jet_foundation::CanonicalPass::take()
-//RS         .iter()
-//RS         .map(canonical_pass_status_value)
-//RS         .collect::<Vec<_>>();
-//RS     if mode.json {
-//RS         println!(
-//RS             "{}",
-//RS             render_status(
-//RS                 "inspect.decisions",
-//RS                 true,
-//RS                 StatusFields::new()
-//RS                     .with("scope", acceleration_scope_name(&request.scope))
-//RS                     .with("source", file)
-//RS                     .with("profile", profile)
-//RS                     .with(
-//RS                         "rows",
-//RS                         StatusValue::array(rows.iter().map(decision_row_value)),
-//RS                     )
-//RS                     .with("kinds", decision_kind_status_value(&rows))
-//RS                     .with("canonical_routes", StatusValue::array(canonical_passes))
-//RS                     .with("record_status", "current")
-//RS                     .with("retention", "bounded")
-//RS                     .with("redaction", "none")
-//RS             )
-//RS         );
-//RS         return;
-//RS     }
-//RS     let mut text = String::new();
-//RS     writeln!(
-//RS         text,
-//RS         "decisions: scope={} source={} profile={} record_status=current retention=bounded redaction=none",
-//RS         acceleration_scope_name(&request.scope),
-//RS         file,
-//RS         profile
-//RS     )
-//RS     .expect("writing decision inspect output cannot fail");
-//RS     for row in &rows {
-//RS         let function = if row.function_name.is_empty() {
-//RS             "<package>"
-//RS         } else {
-//RS             row.function_name.as_str()
-//RS         };
-//RS         let method = row
-//RS             .evidence_method
-//RS             .map_or("unavailable", |method| method.as_str());
-//RS         let derivation_disposition = row
-//RS             .derivation_disposition
-//RS             .map_or("unknown", |disposition| disposition.as_str());
-//RS         let derivation_ref = row
-//RS             .derivation
-//RS             .as_ref()
-//RS             .map_or("unavailable", |reference| reference.id.as_str());
-//RS         let identity = row.identity.as_ref().map_or_else(
-//RS             || "identity=unavailable".to_string(),
-//RS             |identity| {
-//RS                 format!(
-//RS                     "source={} configuration={} profile={} target={} implementation={} artifact={} run={}",
-//RS                     identity.source,
-//RS                     identity.configuration,
-//RS                     identity.profile,
-//RS                     identity.target,
-//RS                     identity.implementation,
-//RS                     identity.artifact,
-//RS                     identity.run,
-//RS                 )
-//RS             },
-//RS         );
-//RS         writeln!(
-//RS             text,
-//RS             "decision id={} kind={} disposition={} derivation_disposition={} function={} span={}-{} rule={} reason={} producer={} evidence={} method={} derivation_ref={} {}",
-//RS             row.id,
-//RS             row.kind.as_str(),
-//RS             row.disposition.as_str(),
-//RS             derivation_disposition,
-//RS             function,
-//RS             row.span.start,
-//RS             row.span.end,
-//RS             row.rule,
-//RS             row.reason,
-//RS             row.producer,
-//RS             row.evidence,
-//RS             method,
-//RS             derivation_ref,
-//RS             identity,
-//RS         )
-//RS         .expect("writing decision inspect output cannot fail");
-//RS     }
-//RS     for kind in [
-//RS         MirDecisionKind::Tier,
-//RS         MirDecisionKind::Inline,
-//RS         MirDecisionKind::Vectorize,
-//RS         MirDecisionKind::Parallel,
-//RS         MirDecisionKind::Copy,
-//RS         MirDecisionKind::Bounds,
-//RS         MirDecisionKind::Deopt,
-//RS         MirDecisionKind::Unreachable,
-//RS         MirDecisionKind::LoopInvariant,
-//RS     ] {
-//RS         let present = rows.iter().any(|row| row.kind == kind);
-//RS         writeln!(
-//RS             text,
-//RS             "kind {}: {}",
-//RS             kind.as_str(),
-//RS             if present { "present" } else { "not-applicable" }
-//RS         )
-//RS         .expect("writing decision inspect output cannot fail");
-//RS     }
-//RS     print!("{text}");
-//RS }
-//RS 
-//RS /// Dispatch the canonical `jet inspect <plane>` grammar.  The parser lives in
-//RS /// `jet::CLI`; this function only selects the existing typed projection for
-//RS /// the already-parsed plane and scope.
-//RS pub(crate) fn run_inspect(
-//RS     request: &jet::CLI::InspectRequest,
-//RS     mode: crate::OutputMode,
-//RS     gates: jet::Policy::GateSet,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     no_os: bool,
-//RS ) {
-//RS     if request.plane == jet::CLI::InspectPlane::Decisions {
-//RS         match &request.scope {
-//RS             jet::CLI::InspectScope::Live(pid) => {
-//RS                 run_inspect_live(request.plane, *pid, mode);
-//RS             }
-//RS             jet::CLI::InspectScope::Replay(artifact) => {
-//RS                 run_inspect_replay(request.plane, artifact, profile, setting_overrides, mode);
-//RS             }
-//RS             jet::CLI::InspectScope::Package | jet::CLI::InspectScope::Target(_) => {
-//RS                 run_decisions(request, mode, gates, profile, setting_overrides);
-//RS             }
-//RS         }
-//RS         return;
-//RS     }
-//RS     if request.plane == jet::CLI::InspectPlane::Accel {
-//RS         run_accel(request, mode, gates, profile, setting_overrides);
-//RS         return;
-//RS     }
-//RS     match &request.scope {
-//RS         jet::CLI::InspectScope::Live(pid) => {
-//RS             run_inspect_live(request.plane, *pid, mode);
-//RS             return;
-//RS         }
-//RS         jet::CLI::InspectScope::Replay(artifact) => {
-//RS             run_inspect_replay(request.plane, artifact, profile, setting_overrides, mode);
-//RS             return;
-//RS         }
-//RS         jet::CLI::InspectScope::Package | jet::CLI::InspectScope::Target(_) => {}
-//RS     }
-//RS 
-//RS     if request.plane == jet::CLI::InspectPlane::Build
-//RS         && request
-//RS             .options
-//RS             .iter()
-//RS             .any(|option| option == "--coverage" || option.starts_with("--coverage="))
-//RS     {
-//RS         run_build_coverage(mode);
-//RS         return;
-//RS     }
-//RS 
-//RS     let file = inspect_entry_path(&request.scope);
-//RS     let mut args = vec![file.clone()];
-//RS     args.extend(request.options.iter().cloned());
-//RS     match request.plane {
-//RS         jet::CLI::InspectPlane::Decisions => {
-//RS             run_decisions(request, mode, gates, profile, setting_overrides);
-//RS         }
-//RS         jet::CLI::InspectPlane::Types => {
-//RS             run_types(&args, mode.json);
-//RS         }
-//RS         jet::CLI::InspectPlane::Shapes => {
-//RS             run_shapes(&args, mode.json);
-//RS         }
-//RS         jet::CLI::InspectPlane::Accel => {
-//RS             unreachable!("accel inspect is routed before live/replay dispatch");
-//RS         }
-//RS         jet::CLI::InspectPlane::Rights => {
-//RS             let inspect_scope = match &request.scope {
-//RS                 jet::CLI::InspectScope::Package => CheckScope::Project,
-//RS                 jet::CLI::InspectScope::Target(target) if Path::new(target).is_dir() => {
-//RS                     CheckScope::Project
-//RS                 }
-//RS                 jet::CLI::InspectScope::Target(_) => CheckScope::ExplicitFile,
-//RS                 _ => unreachable!("live and replay inspect scopes returned above"),
-//RS             };
-//RS             let selected_target = match &request.scope {
-//RS                 jet::CLI::InspectScope::Target(target) => Some(target.as_str()),
-//RS                 _ => None,
-//RS             };
-//RS             let projection = check_projection_for_command(
-//RS                 Path::new(&file),
-//RS                 gates,
-//RS                 profile,
-//RS                 setting_overrides,
-//RS                 inspect_scope,
-//RS                 None,
-//RS                 selected_target,
-//RS             )
-//RS             .unwrap_or_else(|diagnostics| {
-//RS                 render_check_failure(
-//RS                     Path::new(&file),
-//RS                     &diagnostics,
-//RS                     mode.json,
-//RS                     mode.color_stderr(),
-//RS                 )
-//RS             });
-//RS             run_rights(&projection, inspect_scope, &file, mode.json);
-//RS         }
-//RS         jet::CLI::InspectPlane::Claims => {
-//RS             run_claims(&args[0], mode.json);
-//RS         }
-//RS         jet::CLI::InspectPlane::Structure => {
-//RS             crate::CmdStructure::run_structure(&args, mode.json, mode.color_stderr(), gates);
-//RS         }
-//RS         jet::CLI::InspectPlane::Build => {
-//RS             let query_args = args.iter().collect::<Vec<_>>();
-//RS             crate::CmdCompile::run_build_query("graph", &query_args, mode);
-//RS         }
-//RS         jet::CLI::InspectPlane::Gates => {
-//RS             crate::CmdGates::run(&args, mode.json, mode.color_stderr(), gates, false);
-//RS         }
-//RS     }
-//RS     let _ = (profile, no_os);
-//RS }
-//RS 
-//RS fn coverage_fact_value(fact: &jet_foundation::Coverage::CoverageFact) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("plane", fact.plane.as_str())
-//RS             .with("rows", fact.rows)
-//RS             .with("edit_covered", fact.edit_covered)
-//RS             .with("reason_covered", fact.reason_covered)
-//RS             .with("behavior_reasons", fact.behavior_reasons)
-//RS             .with("design_reasons", fact.design_reasons)
-//RS             .with("ambiguous_reasons", fact.ambiguous_reasons)
-//RS             .with("uncovered", fact.uncovered),
-//RS     )
-//RS }
-//RS 
-//RS fn run_build_coverage(mode: crate::OutputMode) {
-//RS     let entries = Registry::diagnostic_coverage_entries();
-//RS     let facts = jet_foundation::Coverage::try_facts(entries.clone())
-//RS         .expect("registered diagnostic coverage rows must be valid");
-//RS     let validation = Registry::validate_diagnostic_coverage(entries);
-//RS     if mode.json {
-//RS         let ok = validation.is_ok();
-//RS         let coverage = StatusValue::array(facts.iter().map(coverage_fact_value));
-//RS         let mut fields = StatusFields::new().with("coverage", coverage);
-//RS         if let Err(error) = validation {
-//RS             fields = fields.with("validation_error", error);
-//RS         }
-//RS         println!("{}", render_status("inspect.build", ok, fields));
-//RS         return;
-//RS     }
-//RS     println!("diagnostic coverage");
-//RS     println!("plane\trows\twith fix_edits\twith reason\tuncovered\tstate");
-//RS     for fact in facts {
-//RS         println!(
-//RS             "{}\t{}\t{}\t{}\t{}\t{}",
-//RS             fact.plane,
-//RS             fact.rows,
-//RS             fact.edit_covered,
-//RS             fact.reason_covered,
-//RS             fact.uncovered,
-//RS             if fact.is_closed() { "closed" } else { "open" },
-//RS         );
-//RS     }
-//RS     if let Err(error) = validation {
-//RS         println!("coverage validation error: {error}");
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0692 Source/CmdInspect.rs:2236-4040
+use jet_foundation.[StatusValue, StatusFields, ShapeType, ShapeDefault, ShapeFieldNames, ShapeLayoutKind, ShapeFact, ShapeDimensions, ShapeOrigin, ShapeFieldFact, ShapeProjectionKind]
+use jet_foundation.Traits.TraitRegistry
+use jet.Lock.[DependencyProvenanceReport, ProvenanceField, ProvenanceStatus]
+use jet.CLI.InspectScope
+use jet.Sema.Schema.shape_fact_from_struct
+use core.process.exit
+
+// Rust: Source/CmdInspect.rs:2236
+fn render_provenance_json_package(report: DependencyProvenanceReport) -> StatusValue {
+    integrity_evidence :: if report.integrity.status == .Enforced -> Some("E1204") else -> None
+    StatusValue.object(StatusFields.new()
+        .with("name", report.name).with("version", report.version)
+        .with("integrity", render_provenance_json_field(report.integrity, integrity_evidence))
+        .with("transparency", render_provenance_json_field(report.transparency, None))
+        .with("publisher", render_provenance_json_field(report.publisher, None))
+        .with("build", render_provenance_json_field(report.build, None))
+        .with("required_effects", StatusValue.array(report.required_effects.iter().map((effect) -> StatusValue.from(effect))))
+        .with("granted_effects", StatusValue.array(report.granted_effects.iter().map((effect) -> StatusValue.from(effect))))
+        .with("denied_effects", StatusValue.array(report.denied_effects.iter().map((effect) -> StatusValue.from(effect))))
+        .with("authority", report.authority))
+}
+
+// Rust: Source/CmdInspect.rs:2290
+fn render_provenance_json_field(field: ProvenanceField, evidence: String?) -> StatusValue {
+    fields := StatusFields.new().with("value", field.value).with("status", field.status.label())
+    if evidence == .Some(value) -> fields = fields.with("evidence", value)
+    StatusValue.object(fields)
+}
+
+// Rust: Source/CmdInspect.rs:2303
+fn shape_type_label(ty: ShapeType) -> String {
+    if ty == {
+        .Null -> "Null"
+        .Bool -> "Bool"
+        .Int -> "Int"
+        .Float -> "Float"
+        .Number -> "Number"
+        .Text -> "Text"
+        .Bytes -> "Bytes"
+        .Array(inner) -> "[{shape_type_label(inner)}]"
+        .Optional(inner) -> "{shape_type_label(inner)}?"
+        .Object(identity) -> "Object({identity.key()})"
+        .Unknown(value) -> "Unknown({value})"
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2319
+fn shape_default_value(default: ShapeDefault) -> StatusValue {
+    if default == {
+        .Null -> StatusValue.Null
+        .Bool(value) -> StatusValue.from(value)
+        .Int(value) -> StatusValue.from(value)
+        .Float(value) -> StatusValue.Float(value)
+        .Text(value) -> StatusValue.from(value)
+        .Bytes(value) -> StatusValue.array(value.iter().map((byte) -> StatusValue.from(Int128.from(byte))))
+        .Unknown(value) -> StatusValue.from(value)
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2335
+fn shape_optional_name(value: String?, format: String, ignored: &[String]) -> StatusValue {
+    if value == {
+        .Some(name) -> StatusValue.from(name)
+        .None -> {
+            ignored.push(format)
+            StatusValue.Null
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2349
+fn shape_names_value(names: ShapeFieldNames) -> StatusValue {
+    ignored := [String]{}
+    value :: StatusFields.new().with("text", names.text)
+        .with("json", shape_optional_name(names.json, "json", &ignored))
+        .with("cbor", shape_optional_name(names.cbor, "cbor", &ignored))
+        .with("csv", shape_optional_name(names.csv, "csv", &ignored))
+        .with("toml", shape_optional_name(names.toml, "toml", &ignored))
+        .with("yaml", shape_optional_name(names.yaml, "yaml", &ignored))
+        .with("xml", shape_optional_name(names.xml, "xml", &ignored))
+        .with("args", names.args).with("env", names.env)
+        .with("db", shape_optional_name(names.db, "db", &ignored))
+        .with("layout", shape_optional_name(names.layout, "layout", &ignored))
+        .with("ignored", StatusValue.array(ignored.iter().map((format) -> StatusValue.from(format))))
+    StatusValue.object(value)
+}
+
+// Rust: Source/CmdInspect.rs:2398
+fn shape_layout_kind(kind: ShapeLayoutKind) -> String {
+    if kind == { .Default -> "default"; .C -> "c"; .Columnar -> "columnar" }
+}
+
+// Rust: Source/CmdInspect.rs:2406
+fn shape_layout_value(fact: ShapeFact) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("kind", shape_layout_kind(fact.layout.kind))
+        .with("alignment", fact.layout.alignment.map(StatusValue.from).unwrap_or(StatusValue.Null)))
+}
+
+// Rust: Source/CmdInspect.rs:2420
+fn shape_dimensions_value(dimensions: ShapeDimensions) -> StatusValue {
+    if dimensions == {
+        .Known(rank, width) -> StatusValue.object(StatusFields.new().with("status", "known").with("rank", rank).with("width", width))
+        .Unknown(reason) -> StatusValue.object(StatusFields.new().with("status", "unknown").with("reason", reason))
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2436
+fn shape_provenance_value(fact: ShapeFact) -> StatusValue {
+    origin :: if fact.provenance.origin == {
+        .Declared -> StatusValue.from("declared")
+        .Derived(from) -> StatusValue.object(StatusFields.new().with("kind", "derived").with("from", from.key()))
+        .Imported(package) -> StatusValue.object(StatusFields.new().with("kind", "imported").with("package", package))
+    }
+    span :: fact.provenance.span.map((span) -> StatusValue.object(StatusFields.new().with("start", span.start).with("end", span.end))).unwrap_or(StatusValue.Null)
+    StatusValue.object(StatusFields.new().with("origin", origin).with("span", span)
+        .with("declaration", fact.provenance.declaration.map(StatusValue.from).unwrap_or(StatusValue.Null)))
+}
+
+// Rust: Source/CmdInspect.rs:2476
+fn shape_field_value(field: ShapeFieldFact) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("source_name", field.name)
+        .with("type", shape_type_label(field.ty)).with("order", field.order)
+        .with("encoding", field.encoding).with("skipped", field.skip)
+        .with("default", field.default.map(shape_default_value).unwrap_or(StatusValue.Null))
+        .with("names", shape_names_value(field.names))
+        .with("short", field.short.map(StatusValue.from).unwrap_or(StatusValue.Null))
+        .with("doc", field.doc.map(StatusValue.from).unwrap_or(StatusValue.Null)))
+}
+
+// Rust: Source/CmdInspect.rs:2512
+fn shape_projection_value(fact: ShapeFact, kind: ShapeProjectionKind) -> StatusValue {
+    if fact.project(kind) == {
+        .Ok(projection) -> {
+            fields :: StatusValue.array(projection.fields.iter().map((field) ->
+                StatusValue.object(StatusFields.new().with("source_name", field.source_name)
+                    .with("name", field.name).with("decode_name", field.decode_name)
+                    .with("type", shape_type_label(field.ty)).with("order", field.order)
+                    .with("encoding", field.encoding)
+                    .with("default", field.default.map(shape_default_value).unwrap_or(StatusValue.Null))
+                    .with("short", field.short.map(StatusValue.from).unwrap_or(StatusValue.Null))
+                    .with("doc", field.doc.map(StatusValue.from).unwrap_or(StatusValue.Null)))))
+            StatusValue.object(StatusFields.new().with("kind", kind.as_str()).with("status", "supported").with("fields", fields))
+        }
+        .Err(error) -> StatusValue.object(StatusFields.new().with("kind", kind.as_str())
+            .with("status", "unsupported").with("ignored", true).with("reason", error.to_string()))
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2567
+fn shape_fact_value(fact: ShapeFact) -> StatusValue {
+    identity :: StatusValue.object(StatusFields.new().with("source", fact.identity.source)
+        .with("type", fact.identity.type_name).with("key", fact.identity.key()))
+    fields :: StatusValue.array(fact.fields.iter().map(shape_field_value))
+    projections :: StatusValue.array(ShapeProjectionKind.ALL.iter().map((kind) -> shape_projection_value(fact, kind)))
+    StatusValue.object(StatusFields.new().with("identity", identity)
+        .with("dimensions", shape_dimensions_value(fact.dimensions)).with("encoding", fact.encoding)
+        .with("layout", shape_layout_value(fact)).with("provenance", shape_provenance_value(fact))
+        .with("fields", fields).with("projections", projections))
+}
+
+// Rust: Source/CmdInspect.rs:2592
+fn shape_name_text(value: String?) -> String { value.unwrap_or("ignored") }
+
+// Rust: Source/CmdInspect.rs:2596
+fn print_shape_fact(fact: ShapeFact) -> {
+    println("shape {fact.identity.key()} (encoding={fact.encoding}, layout={shape_layout_kind(fact.layout.kind)})")
+    println("  dimensions: {fact.dimensions.debug()}")
+    loop field in fact.fields {
+        println("  field {field.name}: {shape_type_label(field.ty)} (order={field.order}, encoding={field.encoding}, skipped={field.skip})")
+        println("    names: text={field.names.text} json={shape_name_text(field.names.json)} cbor={shape_name_text(field.names.cbor)} csv={shape_name_text(field.names.csv)} toml={shape_name_text(field.names.toml)} yaml={shape_name_text(field.names.yaml)} xml={shape_name_text(field.names.xml)} args={field.names.args} env={field.names.env} db={shape_name_text(field.names.db)} layout={shape_name_text(field.names.layout)}")
+    }
+    loop kind in ShapeProjectionKind.ALL {
+        if fact.project(kind) == {
+            .Ok(projection) -> println("  projection {kind.as_str()}: supported ({projection.fields.len()} fields)")
+            .Err(error) -> println("  projection {kind.as_str()}: ignored ({error})")
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2642
+// Expose the canonical shape fact and every typed projection.
+pub fn run_shapes(args: [String], json: Bool) -> {
+    file :: entry_file(args)
+    if file == None {
+        cli_error_fix("E2104", "`jet inspect shapes` needs an entry file",
+            "run `jet inspect shapes Examples/features/encoding/records.jet`")
+        exit(jet.ExitCodes.USAGE)
+    }
+    path :: OSPath.new(file.unwrap())
+    projection :: check_projection(path).unwrap_or_else((diagnostics) -> render_check_failure(path, diagnostics, json, false))
+    facts := [ShapeFact]{}
+    loop module in projection.bundle.modules {
+        loop item in module.items {
+            if item == .Struct(structure) {
+                fact :: if shape_fact_from_struct(module.display, structure) == {
+                    .Ok(fact) -> fact
+                    .Err(error) -> {
+                        emit_cli_report_for_action("inspect.shapes", "E2105",
+                            "could not project shape `{structure.name}` from `{module.display}`: {error}",
+                            "the checked declaration could not form one canonical shape fact",
+                            "fix the declaration's field names, types, or format markers", json)
+                        exit(jet.ExitCodes.USER_ERROR)
+                    }
+                }
+                facts.push(fact)
+            }
+        }
+    }
+    facts.sort_by((left, right) -> left.identity.cmp(right.identity))
+    if json {
+        shapes :: StatusValue.array(facts.iter().map(shape_fact_value))
+        println("{render_status(\"inspect.shapes\", true, StatusFields.new().with(\"shapes\", shapes))}")
+    } else {
+        if facts.is_empty() -> println("No shape facts declared.")
+        loop fact in facts -> print_shape_fact(fact)
+    }
+}
+
+// Rust: Source/CmdInspect.rs:2702
+fn entry_file(args: [String]) -> String? {
+    skip_value := false
+    loop argument in args {
+        if skip_value { skip_value = false; continue }
+        if argument == "--profile" || argument == "--target" || argument == "--scope" || argument == "--kind" {
+            skip_value = true
+            continue
+        }
+        if argument.starts_with("-") -> continue
+        return Some(argument)
+    }
+    None
+}
+
+// Rust: Source/CmdInspect.rs:2726
+pub fn run_types(args: [String], json: Bool) -> {
+    file :: entry_file(args)
+    if file == None {
+        cli_error_fix("E2104", "`jet inspect types` needs an entry file",
+            "run `jet inspect types Examples/features/operators/mixed_types.jet`")
+        exit(jet.ExitCodes.USAGE)
+    }
+    path :: OSPath.new(file.unwrap())
+    projection :: check_projection(path).unwrap_or_else((diagnostics) -> render_check_failure(path, diagnostics, json, false))
+    grouped := [String:[String]]{}
+    registered := [jet_foundation.Traits.OperatorImpl]{}
+    loop module in projection.bundle.modules {
+        registry := TraitRegistry.auto_derives_for_items(module.items)
+        registry.register_synthetic_operators()
+        registered.extend(registry.operator_impls)
+    }
+    loop implementation in registered {
+        symbol :: operator_symbol(implementation.trait_name)
+        if symbol == None -> continue
+        rhs :: implementation.rhs.name()
+        owner :: if plain_number(implementation.left) && !plain_number(rhs) -> rhs else -> implementation.left
+        source :: "{implementation.left}.{implementation.trait_name}<{rhs}>"
+        result :: implementation.result.name()
+        kind :: if implementation.explicit_rhs -> "explicit hook" else -> "hook"
+        direct :: "{implementation.left} {symbol.unwrap()} {rhs} -> {result}  {kind} {source}"
+        grouped.entry(owner).or_default().push(direct)
+        if plain_number(rhs) && !plain_number(implementation.left) && (implementation.trait_name == "Add" || implementation.trait_name == "Mul") {
+            explicit_reverse :: registered.iter().any((candidate) ->
+                candidate.explicit_rhs && candidate.left == rhs
+                && candidate.trait_name == implementation.trait_name
+                && candidate.rhs.name() == implementation.left)
+            if !explicit_reverse -> grouped.entry(owner).or_default().push("{rhs} {symbol.unwrap()} {implementation.left} -> {result}  mirror of {source}")
+        }
+    }
+    loop rows in grouped.values_mut() { rows.sort(); rows.dedup() }
+    owners := grouped.keys().collect()
+    owners.sort()
+    if json {
+        types :: StatusValue.array(owners.iter().map((owner) ->
+            StatusValue.object(StatusFields.new().with("type", owner)
+                .with("rows", StatusValue.array(grouped[owner].iter().map((row) -> StatusValue.from(row)))))))
+        payload :: render_status("inspect.types", true, StatusFields.new().with("types", types))
+        println("{payload}")
+    } else {
+        loop owner in owners {
+            println("type {owner}:")
+            loop row in grouped[owner] -> println("  {row}")
+        }
+    }
+}
+
+use jet_foundation.MIROptimization.Acceleration.[AccelerationGate, AccelerationGateStatus, AccelerationGateInput, AccelerationProof, AccelerationWorkloadFacts, AccelerationMeasurement, D_ACCEL_STATIC_FLOOR_ITEMS, D_ACCEL_CACHE_BLOCK_BYTES, D_ACCEL_REQUIRED_GAIN_NUMERATOR, D_ACCEL_REQUIRED_GAIN_DENOMINATOR]
+use jet_foundation.MIR.[MirOptimizationRejection, MirOptimizationDecision, MirVectorFact, MirAccelerationFact, MirLoopFact, MirArtifactBuildMode, MirArtifactRequest, MirArtifactTarget, MirArtifactKind]
+use jet.ReceiptStore.[ReceiptStore, AccelerationReceiptRow, input_paths_for, receipt_root_for, canonical_target_identity, acceleration_decisions]
+use jet.RecordIndex.[RecordIndex, RecordKind]
+
+// Rust: Source/CmdInspect.rs:2816
+fn acceleration_scope_name(scope: InspectScope) -> String {
+    if scope == { .Package -> "package"; .Target(_) -> "target"; .Live(_) -> "live"; .Replay(_) -> "replay" }
+}
+
+// Rust: Source/CmdInspect.rs:2825
+fn acceleration_span_value(start: USize, end: USize) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("start", start).with("end", end))
+}
+
+// Rust: Source/CmdInspect.rs:2829
+struct AccelerationRuntimeReceipt {
+    receipt_digest: String
+    receipt_verb: String
+    record_sequence: UInt64
+    row: AccelerationReceiptRow
+}
+
+// Rust: Source/CmdInspect.rs:2836
+fn acceleration_runtime_receipt(scope: InspectScope, file: String, profile: String) -> [AccelerationRuntimeReceipt] {
+    cwd :: if core.env.current_dir() == { .Ok(cwd) -> cwd; .Err(_) -> return [] }
+    receipt_root := OSPath?{None}
+    target_identities := [(String, OSPath)]{}
+    loop verb in ["test", "prove", "build"] {
+        argv := [verb]
+        if scope == .Target(target) -> argv.push(target)
+        if !profile.is_empty() -> argv.extend(["--profile", profile])
+        inputs :: input_paths_for(verb, argv, cwd)
+        if inputs.is_empty() -> continue
+        root :: receipt_root_for(verb, argv, cwd)
+        if receipt_root == None -> receipt_root = Some(root)
+        store :: ReceiptStore.new(root)
+        claim :: if store.claim(verb, argv, inputs) == { .Ok(claim) -> claim; .Err(_) -> continue }
+        members :: claim.inputs.iter().map((input) -> (input.path.to_string_lossy().into_owned(), input.digest)).collect()
+        identity :: if canonical_target_identity(OSPath.new(file), members) == { .Ok(identity) -> identity; .Err(_) -> continue }
+        target_identities.push((identity.input_sha256, identity.authority_root))
+    }
+    if receipt_root == None || target_identities.is_empty() -> return []
+    store :: ReceiptStore.new(receipt_root.unwrap())
+    index_roots := [cwd]
+    loop (_, authority_root) in target_identities {
+        if !index_roots.contains(authority_root) -> index_roots.push(authority_root)
+    }
+    entries := [jet.RecordIndex.RecordEntry]{}
+    loop index_root in index_roots {
+        index :: if RecordIndex.load_for_project(index_root) == { .Ok(index) -> index; .Err(_) -> continue }
+        entries.extend(index.query_kind(RecordKind.Receipt, true).iter().filter((entry) ->
+            target_identities.iter().any((identity) -> entry.identity.target_inputs_sha256 == identity.0)
+            && entry.identity.tool_version == jet.VERSION))
+    }
+    entries.sort_by((left, right) -> right.recorded_sequence.cmp(left.recorded_sequence)
+        .then_with(() -> right.artifact_id.cmp(left.artifact_id)))
+    entries.dedup_by((left, right) -> left.artifact_id == right.artifact_id)
+    receipts :: if store.list() == {
+        .Ok(receipts) -> receipts.iter().filter_map((receipt) -> store.lookup(receipt.claim).ok().flatten()).collect()
+        .Err(_) -> return []
+    }
+    loop entry in entries {
+        receipt :: receipts.iter().find((receipt) -> receipt.claim.key == entry.artifact_id)
+        if receipt == None -> continue
+        found :: receipt.unwrap()
+        receipt_members :: found.claim.inputs.iter().map((input) ->
+            (input.path.to_string_lossy().into_owned(), input.digest)).collect()
+        receipt_identity :: if canonical_target_identity(OSPath.new(file), receipt_members) == {
+            .Ok(identity) -> identity
+            .Err(_) -> continue
+        }
+        if !target_identities.iter().any((identity) -> receipt_identity.input_sha256 == identity.0) -> continue
+        rows :: if acceleration_decisions(found) == { .Ok(rows) -> rows; .Err(_) -> continue }
+        return rows.iter().map((row) -> AccelerationRuntimeReceipt{
+            receipt_digest: found.digest, receipt_verb: found.claim.verb,
+            record_sequence: entry.recorded_sequence, row: row,
+        }).collect()
+    }
+    []
+}
+
+// Rust: Source/CmdInspect.rs:2974
+fn acceleration_runtime_measurement_value(measurement: AccelerationMeasurement) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("items", measurement.items)
+        .with("sample_items", measurement.sample_items).with("sample_nanos", measurement.sample_nanos)
+        .with("spawn_nanos", measurement.spawn_nanos).with("bandwidth_floor_nanos", measurement.bandwidth_floor_nanos)
+        .with("floor_nanos", measurement.floor_nanos)
+        .with("projected_serial_nanos", measurement.projected_serial_nanos.map(StatusValue.from).unwrap_or(StatusValue.Null))
+        .with("required_serial_nanos", measurement.required_serial_nanos.map(StatusValue.from).unwrap_or(StatusValue.Null)))
+}
+
+// Rust: Source/CmdInspect.rs:3002
+fn acceleration_runtime_value(runtime: AccelerationRuntimeReceipt) -> StatusValue {
+    decision :: runtime.row.decision
+    pin :: if decision.status == { .Pinned(pin) -> StatusValue.from(pin.as_str()); _ -> StatusValue.Null }
+    StatusValue.object(StatusFields.new().with("record_sequence", runtime.record_sequence)
+        .with("receipt_digest", runtime.receipt_digest).with("receipt_verb", runtime.receipt_verb)
+        .with("sequence", runtime.row.sequence).with("function", runtime.row.function)
+        .with("loop_header", runtime.row.loop_header)
+        .with("source", acceleration_span_value(runtime.row.source_start, runtime.row.source_end))
+        .with("transform", decision.transform.as_str()).with("status", decision.status.as_str())
+        .with("pin", pin).with("selected", decision.selected()).with("measurement_source", "receipt")
+        .with("measurement", acceleration_runtime_measurement_value(decision.measurement)))
+}
+
+// Rust: Source/CmdInspect.rs:3031
+fn acceleration_rejection_statement(reason: MirOptimizationRejection) -> String {
+    if reason == {
+        .MissingProof -> "the loop lacks the required proof"
+        .MayTrap -> "the loop may trap"
+        .HasEffects -> "the loop body has effects"
+        .HasEarlyExit -> "the loop has an early exit"
+        .MayAlias -> "the loop may alias"
+        .CrossIterationDependency -> "iterations depend on each other"
+        .DynamicTripCount -> "the trip count is dynamic"
+        .UnknownCopyCost -> "copy cost is unknown"
+        .ScalarBoundary -> "the loop crosses a scalar boundary"
+        .ObservableLayout -> "the layout is observable"
+        .OwnershipObligation -> "the ownership proof is incomplete"
+        .UnsupportedOperation -> "the operation is unsupported"
+    }
+}
+
+// Rust: Source/CmdInspect.rs:3050
+fn acceleration_gate_statement(status: AccelerationGateStatus?) -> String {
+    if status == {
+        .None -> "the runtime profile has not been published"
+        .Some(.BelowStaticFloor) -> "the source item count is at or below the static floor"
+        .Some(.Pinned(pin)) -> "the loop is pinned by {pin.as_str()}"
+        .Some(.NotReleaseBuild) -> "the build is not a release profile"
+        .Some(.CrossModeParityMissing) -> "cross-mode parity proof is incomplete"
+        .Some(.ColumnCopyNotApplicable) -> "nested-reuse facts do not permit a column copy"
+        .Some(.ProofIncomplete) -> "the acceleration proof is incomplete"
+        .Some(.SampleNotTimed) -> "the first serial chunk has not been timed"
+        .Some(.SpawnCostNotMeasured) -> "the once-per-process spawn cost has not been measured"
+        .Some(.BandwidthFloorNotMeasured) -> "the memory-bandwidth floor has not been measured"
+        .Some(.InvalidMeasurement) -> "the supplied measurement is invalid"
+        .Some(.ProjectedGainBelowThreshold) -> "projected gain is below the required threshold"
+        .Some(.Selected) -> "the measured gate selected this transform"
+    }
+}
+
+// Rust: Source/CmdInspect.rs:3092
+fn acceleration_proof_value(proof: AccelerationProof) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("source_proven", proof.source_proven)
+        .with("independent_iterations", proof.independent_iterations).with("no_aliasing", proof.no_aliasing)
+        .with("no_cross_iteration_dependencies", proof.no_cross_iteration_dependencies)
+        .with("no_early_exit", proof.no_early_exit).with("effect_free_body", proof.effect_free_body)
+        .with("ownership_safe", proof.ownership_safe).with("failure_order_preserved", proof.failure_order_preserved))
+}
+
+// Rust: Source/CmdInspect.rs:3109
+fn acceleration_workload_value(workload: AccelerationWorkloadFacts) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("nested_reuse", workload.nested_reuse)
+        .with("single_pass", workload.single_pass).with("column_copy_applicable", workload.column_copy_applicable()))
+}
+
+// Rust: Source/CmdInspect.rs:3118
+fn acceleration_vector_value(function: String, fact: MirVectorFact) -> StatusValue {
+    (decision, accepted_rule, rejection_code, rejection_statement) :: if fact.decision == {
+        .Eligible -> ("accepted", StatusValue.from(fact.rule.as_str()), StatusValue.Null, StatusValue.Null)
+        .Rejected(reason) -> ("rejected", StatusValue.Null, StatusValue.from(reason.as_str()), StatusValue.from(acceleration_rejection_statement(reason)))
+    }
+    lane_width :: fact.lane_width.map((lane) -> StatusValue.from(UInt64.from(lane))).unwrap_or(StatusValue.Null)
+    StatusValue.object(StatusFields.new().with("function", function).with("loop_header", fact.loop_header.0)
+        .with("span", acceleration_span_value(fact.span.start, fact.span.end)).with("rule", fact.rule.as_str())
+        .with("accepted_rule", accepted_rule).with("layout", fact.layout.as_str()).with("packed", fact.packed)
+        .with("lane_width", lane_width).with("access_count", fact.accesses.len()).with("no_aliasing", fact.no_aliasing)
+        .with("no_early_exit", fact.no_early_exit).with("effect_free_body", fact.effect_free_body)
+        .with("no_cross_iteration_dependencies", fact.no_cross_iteration_dependencies)
+        .with("decision", decision).with("rejection_code", rejection_code).with("rejection_statement", rejection_statement))
+}
+
+// Rust: Source/CmdInspect.rs:3167
+fn acceleration_cross_mode_parity(fact: MirAccelerationFact, vector: MirVectorFact?) -> Bool {
+    if vector == None -> return false
+    row :: vector.unwrap()
+    row.no_aliasing && row.no_early_exit && row.effect_free_body
+        && row.no_cross_iteration_dependencies && fact.proof.proves(fact.transform)
+}
+
+// Rust: Source/CmdInspect.rs:3181
+fn acceleration_gate_value(function: String, fact: MirAccelerationFact, loop_fact: MirLoopFact?,
+    vector: MirVectorFact?, gate: AccelerationGate, release_build: Bool, runtime: AccelerationRuntimeReceipt?) -> StatusValue {
+    cross_mode_parity_proven :: acceleration_cross_mode_parity(fact, vector)
+    trip_count :: loop_fact.and_then((loop_fact) -> loop_fact.trip_count)
+    items :: trip_count.and_then((items) -> USize.try_from(items).ok())
+    deferred_decision :: items.map((items) -> {
+        input := AccelerationGateInput.deferred()
+        input.items = items
+        input.release_build = release_build
+        input.cross_mode_parity_proven = cross_mode_parity_proven
+        fact.evaluate(gate, input)
+    })
+    runtime_decision :: runtime.map((runtime) -> runtime.row.decision)
+    gate_status :: runtime_decision.map((decision) -> decision.status.as_str())
+        .or_else(() -> deferred_decision.map((decision) -> decision.status.as_str())).unwrap_or("runtime-profile-required")
+    selected :: runtime_decision.map((decision) -> decision.selected())
+        .or_else(() -> deferred_decision.map((decision) -> decision.selected())).unwrap_or(false)
+    gate_statement :: acceleration_gate_statement(runtime_decision.map((decision) -> decision.status)
+        .or_else(() -> deferred_decision.map((decision) -> decision.status)))
+    trip_count_value :: trip_count.map(StatusValue.from).unwrap_or(StatusValue.Null)
+    runtime_profile :: if runtime != None -> "receipt" else -> "not-published"
+    measurement_source :: if runtime != None -> "receipt" else -> "none"
+    measurement :: runtime_decision.map((decision) -> acceleration_runtime_measurement_value(decision.measurement)).unwrap_or(StatusValue.Null)
+    StatusValue.object(StatusFields.new().with("function", function).with("loop_header", fact.loop_header.0)
+        .with("span", acceleration_span_value(fact.span.start, fact.span.end)).with("transform", fact.transform.as_str())
+        .with("workload", acceleration_workload_value(fact.workload)).with("proof", acceleration_proof_value(fact.proof))
+        .with("trip_count", trip_count_value).with("release_build", release_build)
+        .with("cross_mode_parity_proven", cross_mode_parity_proven).with("gate_status", gate_status)
+        .with("rejection_statement", gate_statement).with("selected", selected).with("runtime_profile", runtime_profile)
+        .with("measurement_source", measurement_source).with("measurement", measurement)
+        .with("gate", StatusValue.object(StatusFields.new().with("static_floor_items", D_ACCEL_STATIC_FLOOR_ITEMS)
+            .with("cache_block_bytes", D_ACCEL_CACHE_BLOCK_BYTES).with("required_gain_numerator", D_ACCEL_REQUIRED_GAIN_NUMERATOR)
+            .with("required_gain_denominator", D_ACCEL_REQUIRED_GAIN_DENOMINATOR))))
+}
+
+use jet.CLI.InspectRequest
+use jet.Policy.GateSet
+use jet_foundation.MIR.[MirDecisionRow, MirDecisionKind]
+use jet.CmdCompile.resolve_named_profile
+use jet.lower_checked_semantic_mir_program_for
+
+// Rust: Source/CmdInspect.rs:3270
+fn run_accel(request: InspectRequest, mode: OutputMode, gates: GateSet,
+    profile: String, setting_overrides: [String:String]) -> {
+    file :: inspect_entry_path(request.scope)
+    inspect_scope :: if request.scope == {
+        .Package -> CheckScope.Project
+        .Target(target) -> if OSPath.new(target).is_dir() -> CheckScope.Project else -> CheckScope.ExplicitFile
+        .Live(_) -> CheckScope.Project
+        .Replay(_) -> CheckScope.Project
+    }
+    selected_target :: if request.scope == { .Target(target) -> Some(target); _ -> None }
+    path :: OSPath.new(file)
+    projection :: check_projection_for_command(path, gates, profile, setting_overrides, inspect_scope, None, selected_target)
+        .unwrap_or_else((diagnostics) -> render_check_failure(path, diagnostics, mode.json, mode.color_stderr()))
+    build_profile :: resolve_named_profile(profile, file, mode)
+    release_build :: build_profile.is_release()
+    build_mode :: if release_build -> MirArtifactBuildMode.Release else -> MirArtifactBuildMode.Dev
+    (mir, _) :: lower_checked_semantic_mir_program_for(projection.bundle,
+        MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.NativeExecutable, build_mode))
+    gate :: AccelerationGate.d_accel1()
+    runtime_receipts :: acceleration_runtime_receipt(request.scope, file, profile)
+    runtime_profile :: if runtime_receipts.is_empty() -> "not-published" else -> "receipt"
+    measurement_source :: if runtime_receipts.is_empty() -> "none" else -> "receipt"
+    runtime_rows :: runtime_receipts.iter().map(acceleration_runtime_value).collect()
+    functions := mir.functions.iter().collect()
+    functions.sort_by((left, right) -> left.key.cmp(right.key))
+    vector_rows := [StatusValue]{}
+    acceleration_rows := [StatusValue]{}
+    text := String.new()
+    text.push_str("accel: scope={acceleration_scope_name(request.scope)} source={file} profile={profile} release_build={release_build} runtime_profile={runtime_profile}\n")
+    text.push_str("gate: static_floor_items={D_ACCEL_STATIC_FLOOR_ITEMS} cache_block_bytes={D_ACCEL_CACHE_BLOCK_BYTES} required_gain={D_ACCEL_REQUIRED_GAIN_NUMERATOR}/{D_ACCEL_REQUIRED_GAIN_DENOMINATOR} measurement_source={measurement_source}\n")
+    loop runtime in runtime_receipts {
+        decision :: runtime.row.decision
+        measurement :: decision.measurement
+        projected :: measurement.projected_serial_nanos.map((value) -> value.to_string()).unwrap_or("null")
+        required :: measurement.required_serial_nanos.map((value) -> value.to_string()).unwrap_or("null")
+        text.push_str("runtime acceleration verb={runtime.receipt_verb} receipt={runtime.receipt_digest} sequence={runtime.row.sequence} function={runtime.row.function} loop={runtime.row.loop_header} source={runtime.row.source_start}-{runtime.row.source_end} transform={decision.transform.as_str()} status={decision.status.as_str()} selected={decision.selected()} items={measurement.items} sample_items={measurement.sample_items} sample_nanos={measurement.sample_nanos} spawn_nanos={measurement.spawn_nanos} bandwidth_floor_nanos={measurement.bandwidth_floor_nanos} floor_nanos={measurement.floor_nanos} projected_serial_nanos={projected} required_serial_nanos={required}\n")
+    }
+    if runtime_receipts.is_empty() -> text.push_str("runtime profile: no matching authenticated receipt.\n")
+    loop function in functions {
+        loop vector in function.optimization.vector_facts {
+            vector_rows.push(acceleration_vector_value(function.key, vector))
+            if vector.decision == {
+                .Eligible -> text.push_str("vector {function.key} loop={vector.loop_header.0} span={vector.span.start}-{vector.span.end} rule={vector.rule.as_str()} accepted\n")
+                .Rejected(reason) -> text.push_str("vector {function.key} loop={vector.loop_header.0} span={vector.span.start}-{vector.span.end} rule={vector.rule.as_str()} rejected: {acceleration_rejection_statement(reason)} ({reason.as_str()})\n")
+            }
+        }
+        loop acceleration in function.optimization.acceleration_facts {
+            loop_fact :: function.optimization.loop_facts.iter().find((candidate) -> candidate.header == acceleration.loop_header)
+            vector :: function.optimization.vector_facts.iter().find((candidate) -> candidate.loop_header == acceleration.loop_header)
+            runtime :: runtime_receipts.iter().find((runtime) ->
+                runtime.row.function == function.key && UInt64.from(runtime.row.loop_header) == acceleration.loop_header.0
+                && runtime.row.source_start == acceleration.span.start && runtime.row.source_end == acceleration.span.end)
+            acceleration_rows.push(acceleration_gate_value(function.key, acceleration, loop_fact, vector, gate, release_build, runtime))
+            trip_count :: loop_fact.and_then((loop_fact) -> loop_fact.trip_count).map((items) -> items.to_string()).unwrap_or("unknown")
+            items :: loop_fact.and_then((loop_fact) -> loop_fact.trip_count).and_then((items) -> USize.try_from(items).ok())
+            deferred_status :: items.map((items) -> {
+                input := AccelerationGateInput.deferred()
+                input.items = items
+                input.release_build = release_build
+                input.cross_mode_parity_proven = acceleration_cross_mode_parity(acceleration, vector)
+                acceleration.evaluate(gate, input).status
+            })
+            gate_status :: runtime.map((runtime) -> runtime.row.decision.status).or(deferred_status)
+            status :: gate_status.map((status) -> status.as_str()).unwrap_or("runtime-profile-required")
+            gate_statement :: acceleration_gate_statement(gate_status)
+            selected :: runtime.map((runtime) -> runtime.row.decision.selected())
+                .or_else(() -> deferred_status.map((status) -> status.is_selected())).unwrap_or(false)
+            row_measurement_source :: if runtime != None -> "receipt" else -> "none"
+            text.push_str("acceleration {function.key} loop={acceleration.loop_header.0} span={acceleration.span.start}-{acceleration.span.end} transform={acceleration.transform.as_str()} status={status} reason={gate_statement} trip_count={trip_count} selected={selected} measurement_source={row_measurement_source}\n")
+        }
+    }
+    if vector_rows.is_empty() -> text.push_str("No vector facts declared.\n")
+    if acceleration_rows.is_empty() -> text.push_str("No acceleration facts declared.\n")
+    if mode.json {
+        payload :: render_status("inspect.accel", true, StatusFields.new()
+            .with("scope", acceleration_scope_name(request.scope)).with("source", file)
+            .with("profile", profile).with("release_build", release_build)
+            .with("runtime_profile", runtime_profile).with("measurement_source", measurement_source)
+            .with("vectors", StatusValue.array(vector_rows)).with("decisions", StatusValue.array(acceleration_rows))
+            .with("runtime_decisions", StatusValue.array(runtime_rows))
+            .with("gate", StatusValue.object(StatusFields.new().with("static_floor_items", D_ACCEL_STATIC_FLOOR_ITEMS)
+                .with("cache_block_bytes", D_ACCEL_CACHE_BLOCK_BYTES).with("required_gain_numerator", D_ACCEL_REQUIRED_GAIN_NUMERATOR)
+                .with("required_gain_denominator", D_ACCEL_REQUIRED_GAIN_DENOMINATOR))))
+        println("{payload}")
+    } else -> print("{text}")
+}
+
+// Rust: Source/CmdInspect.rs:3538
+fn decision_row_value(row: MirDecisionRow) -> StatusValue {
+    identity :: row.identity.map((identity) -> StatusValue.object(StatusFields.new()
+        .with("source", identity.source).with("configuration", identity.configuration)
+        .with("profile", identity.profile).with("target", identity.target)
+        .with("implementation", identity.implementation).with("artifact", identity.artifact).with("run", identity.run)))
+        .unwrap_or(StatusValue.Null)
+    StatusValue.object(StatusFields.new().with("id", row.id).with("kind", row.kind.as_str())
+        .with("disposition", row.disposition.as_str())
+        .with("function_id", row.function.map((function) -> StatusValue.from(function.0)).unwrap_or(StatusValue.Null))
+        .with("function", if row.function_name.is_empty() -> StatusValue.Null else -> StatusValue.from(row.function_name))
+        .with("span", acceleration_span_value(row.span.start, row.span.end))
+        .with("rule", row.rule).with("reason", row.reason).with("producer", row.producer).with("evidence", row.evidence)
+        .with("evidence_method", row.evidence_method.map((method) -> StatusValue.from(method.as_str())).unwrap_or(StatusValue.Null))
+        .with("derivation_disposition", row.derivation_disposition.map((disposition) -> StatusValue.from(disposition.as_str())).unwrap_or(StatusValue.Null))
+        .with("derivation_ref", row.derivation.map((reference) -> StatusValue.from(reference.id)).unwrap_or(StatusValue.Null))
+        .with("identity", identity)
+        .with("edit", row.edit.map((edit) -> StatusValue.object(StatusFields.new()
+            .with("span", acceleration_span_value(edit.span.start, edit.span.end)).with("replacement", edit.replacement)))
+            .unwrap_or(StatusValue.Null)))
+}
+
+// Rust: Source/CmdInspect.rs:3621
+fn decision_kind_status_value(rows: [MirDecisionRow]) -> StatusValue {
+    kinds :: [MirDecisionKind.Tier, MirDecisionKind.Inline, MirDecisionKind.Vectorize, MirDecisionKind.Parallel,
+        MirDecisionKind.Copy, MirDecisionKind.Bounds, MirDecisionKind.Deopt, MirDecisionKind.Unreachable, MirDecisionKind.LoopInvariant]
+    fields := StatusFields.new()
+    loop kind in kinds {
+        count :: rows.iter().filter((row) -> row.kind == kind).count()
+        fields = fields.with(kind.as_str(), StatusValue.object(StatusFields.new()
+            .with("status", if count == 0 -> "not-applicable" else -> "present").with("rows", count)))
+    }
+    StatusValue.object(fields)
+}
+
+// Rust: Source/CmdInspect.rs:3655
+fn canonical_pass_status_value(record: jet_foundation.CanonicalPass.Record) -> StatusValue {
+    // Rust: Source/CmdInspect.rs:3656
+    fn snapshot(value: String) -> StatusValue {
+        StatusValue.parse(value).unwrap_or_else((_) -> StatusValue.String(value))
+    }
+    StatusValue.object(StatusFields.new().with("schema", jet_foundation.CanonicalPass.SCHEMA)
+        .with("protocol", jet_foundation.CanonicalPass.PROTOCOL).with("stage", record.stage)
+        .with("operation_id", record.operation_id).with("occurrence", record.occurrence).with("order", record.order)
+        .with("source", StatusValue.object(StatusFields.new().with("path", record.source)
+            .with("process", core.env.var("JET_ADAPTER_CANONICAL_PASS_PROCESS").unwrap_or("inspect"))))
+        .with("input", StatusValue.object(StatusFields.new().with("representation", record.input_representation)
+            .with("canonical_payload", snapshot(record.input_payload)).with("identity", snapshot(record.input_identity))))
+        .with("output", StatusValue.object(StatusFields.new().with("representation", record.output_representation)
+            .with("canonical_payload", snapshot(record.output_payload)).with("identity", snapshot(record.output_identity))))
+        .with("premises", StatusValue.array(record.premises.iter().map((premise) -> StatusValue.from(premise))))
+        .with("disposition", record.disposition))
+}
+
+use jet.CLI.InspectPlane
+use jet_foundation.Registry
+
+// Rust: Source/CmdInspect.rs:3710
+fn run_decisions(request: InspectRequest, mode: OutputMode, gates: GateSet,
+    profile: String, setting_overrides: [String:String]) -> {
+    file :: inspect_entry_path(request.scope)
+    inspect_scope :: if request.scope == {
+        .Package -> CheckScope.Project
+        .Target(target) -> if OSPath.new(target).is_dir() -> CheckScope.Project else -> CheckScope.ExplicitFile
+        .Live(_) -> CheckScope.Project
+        .Replay(_) -> CheckScope.Project
+    }
+    jet_foundation.CanonicalPass.clear()
+    selected_target :: if request.scope == { .Target(target) -> Some(target); _ -> None }
+    projection :: check_projection_for_command(OSPath.new(file), gates, profile, setting_overrides, inspect_scope, None, selected_target)
+        .unwrap_or_else((diagnostics) -> render_check_failure(OSPath.new(file), diagnostics, mode.json, mode.color_stderr()))
+    (mir, artifact) :: lower_checked_semantic_mir_program_for(projection.bundle,
+        MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev))
+    additional_rows := projection.diagnostics.iter().filter_map((diagnostic) -> diagnostic.decision_row).collect()
+    additional_rows.extend(jet_jit.plan_mir_tiers(mir, artifact).decision_ledger_rows(mir))
+    ledger :: jet_foundation.MIROptimization.decision_ledger(mir, Some(artifact), profile, "not-observed", additional_rows)
+    rows :: ledger.rows
+    canonical_passes :: jet_foundation.CanonicalPass.take().iter().map(canonical_pass_status_value).collect()
+    if mode.json {
+        payload :: render_status("inspect.decisions", true, StatusFields.new()
+            .with("scope", acceleration_scope_name(request.scope)).with("source", file).with("profile", profile)
+            .with("rows", StatusValue.array(rows.iter().map(decision_row_value)))
+            .with("kinds", decision_kind_status_value(rows)).with("canonical_routes", StatusValue.array(canonical_passes))
+            .with("record_status", "current").with("retention", "bounded").with("redaction", "none"))
+        println("{payload}")
+        return
+    }
+    text := String.new()
+    text.push_str("decisions: scope={acceleration_scope_name(request.scope)} source={file} profile={profile} record_status=current retention=bounded redaction=none\n")
+    loop row in rows {
+        function :: if row.function_name.is_empty() -> "<package>" else -> row.function_name
+        method :: row.evidence_method.map((method) -> method.as_str()).unwrap_or("unavailable")
+        derivation_disposition :: row.derivation_disposition.map((disposition) -> disposition.as_str()).unwrap_or("unknown")
+        derivation_ref :: row.derivation.map((reference) -> reference.id).unwrap_or("unavailable")
+        identity :: row.identity.map((identity) ->
+            "source={identity.source} configuration={identity.configuration} profile={identity.profile} target={identity.target} implementation={identity.implementation} artifact={identity.artifact} run={identity.run}")
+            .unwrap_or("identity=unavailable")
+        text.push_str("decision id={row.id} kind={row.kind.as_str()} disposition={row.disposition.as_str()} derivation_disposition={derivation_disposition} function={function} span={row.span.start}-{row.span.end} rule={row.rule} reason={row.reason} producer={row.producer} evidence={row.evidence} method={method} derivation_ref={derivation_ref} {identity}\n")
+    }
+    loop kind in [MirDecisionKind.Tier, MirDecisionKind.Inline, MirDecisionKind.Vectorize,
+        MirDecisionKind.Parallel, MirDecisionKind.Copy, MirDecisionKind.Bounds, MirDecisionKind.Deopt,
+        MirDecisionKind.Unreachable, MirDecisionKind.LoopInvariant] {
+        present :: rows.iter().any((row) -> row.kind == kind)
+        state :: if present -> "present" else -> "not-applicable"
+        text.push_str("kind {kind.as_str()}: {state}\n")
+    }
+    print("{text}")
+}
+
+// Rust: Source/CmdInspect.rs:3881
+// Dispatch the parser-owned grammar to its existing typed projection.
+pub fn run_inspect(request: InspectRequest, mode: OutputMode, gates: GateSet,
+    profile: String, setting_overrides: [String:String], no_os: Bool) -> {
+    if request.plane == InspectPlane.Decisions {
+        if request.scope == {
+            .Live(pid) -> run_inspect_live(request.plane, pid, mode)
+            .Replay(artifact) -> run_inspect_replay(request.plane, artifact, profile, setting_overrides, mode)
+            .Package -> run_decisions(request, mode, gates, profile, setting_overrides)
+            .Target(_) -> run_decisions(request, mode, gates, profile, setting_overrides)
+        }
+        return
+    }
+    if request.plane == InspectPlane.Accel {
+        run_accel(request, mode, gates, profile, setting_overrides)
+        return
+    }
+    if request.scope == {
+        .Live(pid) -> { run_inspect_live(request.plane, pid, mode); return }
+        .Replay(artifact) -> { run_inspect_replay(request.plane, artifact, profile, setting_overrides, mode); return }
+        .Package -> {}
+        .Target(_) -> {}
+    }
+    if request.plane == InspectPlane.Build && request.options.iter().any((option) ->
+        option == "--coverage" || option.starts_with("--coverage=")) {
+        run_build_coverage(mode)
+        return
+    }
+    file :: inspect_entry_path(request.scope)
+    args := [file]
+    args.extend(request.options)
+    if request.plane == {
+        .Decisions -> run_decisions(request, mode, gates, profile, setting_overrides)
+        .Types -> run_types(args, mode.json)
+        .Shapes -> run_shapes(args, mode.json)
+        .Accel -> panic("accel inspect is routed before live/replay dispatch")
+        .Rights -> {
+            inspect_scope :: if request.scope == {
+                .Package -> CheckScope.Project
+                .Target(target) -> if OSPath.new(target).is_dir() -> CheckScope.Project else -> CheckScope.ExplicitFile
+                _ -> panic("live and replay inspect scopes returned above")
+            }
+            selected_target :: if request.scope == { .Target(target) -> Some(target); _ -> None }
+            projection :: check_projection_for_command(OSPath.new(file), gates, profile, setting_overrides, inspect_scope, None, selected_target)
+                .unwrap_or_else((diagnostics) -> render_check_failure(OSPath.new(file), diagnostics, mode.json, mode.color_stderr()))
+            run_rights(projection, inspect_scope, file, mode.json)
+        }
+        .Claims -> run_claims(args[0], mode.json)
+        .Structure -> jet.CmdStructure.run_structure(args, mode.json, mode.color_stderr(), gates)
+        .Build -> {
+            query_args :: args.iter().collect()
+            jet.CmdCompile.run_build_query("graph", query_args, mode)
+        }
+        .Gates -> jet.CmdGates.run(args, mode.json, mode.color_stderr(), gates, false)
+    }
+    _ :: (profile, no_os)
+}
+
+// Rust: Source/CmdInspect.rs:3994
+fn coverage_fact_value(fact: jet_foundation.Coverage.CoverageFact) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("plane", fact.plane).with("rows", fact.rows)
+        .with("edit_covered", fact.edit_covered).with("reason_covered", fact.reason_covered)
+        .with("behavior_reasons", fact.behavior_reasons).with("design_reasons", fact.design_reasons)
+        .with("ambiguous_reasons", fact.ambiguous_reasons).with("uncovered", fact.uncovered))
+}
+
+// Rust: Source/CmdInspect.rs:4008
+fn run_build_coverage(mode: OutputMode) -> {
+    entries :: Registry.diagnostic_coverage_entries()
+    facts :: jet_foundation.Coverage.try_facts(entries).expect("registered diagnostic coverage rows must be valid")
+    validation :: Registry.validate_diagnostic_coverage(entries)
+    if mode.json {
+        ok :: validation.is_ok()
+        coverage :: StatusValue.array(facts.iter().map(coverage_fact_value))
+        fields := StatusFields.new().with("coverage", coverage)
+        if validation == .Err(error) -> fields = fields.with("validation_error", error)
+        println("{render_status(\"inspect.build\", ok, fields)}")
+        return
+    }
+    println("diagnostic coverage")
+    println("plane\trows\twith fix_edits\twith reason\tuncovered\tstate")
+    loop fact in facts {
+        state :: if fact.is_closed() -> "closed" else -> "open"
+        println("{fact.plane}\t{fact.rows}\t{fact.edit_covered}\t{fact.reason_covered}\t{fact.uncovered}\t{state}")
+    }
+    if validation == .Err(error) -> println("coverage validation error: {error}")
+}
 

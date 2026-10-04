@@ -1,2166 +1,1067 @@
-// PORT-PENDING 0700 source-cmdpackage-slice-1493: Source/CmdPackage.rs:1493-3654
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
-//RS     let planned = options.dry_run || options.explain;
-//RS     let target = options
-//RS         .target
-//RS         .ok_or_else(|| "`jet package --kind game` needs an explicit `--target`".to_string())?;
-//RS     let profile = options.profile.clone().unwrap_or_else(|| "release".into());
-//RS     validate_game_profile_name(&profile)?;
-//RS     let backend = options.backend.clone().unwrap_or_else(|| "aot".into());
-//RS     if backend != "aot" {
-//RS         return Err(format!(
-//RS             "unsupported game backend `{backend}`; the only artifact-producing backend is `aot`"
-//RS         ));
-//RS     }
-//RS     let renderer = options.renderer.clone().unwrap_or_else(|| "headless".into());
-//RS     if !matches!(renderer.as_str(), "headless" | "raylib") {
-//RS         return Err(format!("unknown game renderer `{renderer}`; use `headless` or `raylib`"));
-//RS     }
-//RS     let export_preset = options
-//RS         .export_preset
-//RS         .clone()
-//RS         .unwrap_or_else(|| "default".into());
-//RS     if !matches!(export_preset.as_str(), "default" | "store" | "headless") {
-//RS         return Err(format!(
-//RS             "unknown game export preset `{export_preset}`; use `default`, `store`, or `headless`"
-//RS         ));
-//RS     }
-//RS     if export_preset == "headless" && renderer != "headless" {
-//RS         return Err("the `headless` export preset requires `--renderer headless`".into());
-//RS     }
-//RS     let requested_cook_mode = options.cook_mode.clone();
-//RS     let crash_reporter = options
-//RS         .crash_reporter
-//RS         .clone()
-//RS         .unwrap_or_else(|| "off".into());
-//RS     if !matches!(crash_reporter.as_str(), "off" | "on" | "opt-in") {
-//RS         return Err(format!(
-//RS             "unknown crash reporter policy `{crash_reporter}`; use `off`, `on`, or `opt-in`"
-//RS         ));
-//RS     }
-//RS     let crash_consent = options
-//RS         .crash_consent
-//RS         .clone()
-//RS         .unwrap_or_else(|| "not-requested".into());
-//RS     if !matches!(crash_consent.as_str(), "not-requested" | "granted" | "denied") {
-//RS         return Err(format!(
-//RS             "unknown crash reporter consent `{crash_consent}`; use `not-requested`, `granted`, or `denied`"
-//RS         ));
-//RS     }
-//RS     if crash_reporter == "on" && crash_consent != "granted" {
-//RS         return Err("crash reporter `on` requires `--crash-consent granted`".into());
-//RS     }
-//RS     if crash_reporter == "off" && crash_consent == "granted" {
-//RS         return Err("crash reporter consent cannot be granted when the reporter is off".into());
-//RS     }
-//RS     let phases = game_phase_names(options.phase.as_deref())?;
-//RS     let (root, source_entry) = resolve_game_root(options)?;
-//RS     let generated_hint = source_entry.clone().unwrap_or_else(|| root.join("run.jet"));
-//RS     let generated_root = generated_project_root(&generated_hint)?;
-//RS     let tree = collect_game_tree(&root)?;
-//RS     let facts = jet::Package::PackageFacts::load_checked(&root)
-//RS         .map_err(|error| format!("could not load package authority in `{}`: {error}", root.display()))?;
-//RS     let source_revision = game_source_revision(&tree, facts.as_ref());
-//RS     validate_declared_game_profile(&profile, facts.as_ref())?;
-//RS     let declared_profile = facts
-//RS         .as_ref()
-//RS         .and_then(|facts| facts.build_profiles.iter().find(|candidate| candidate.name == profile));
-//RS     let cook_mode = requested_cook_mode.unwrap_or_else(|| {
-//RS         declared_profile
-//RS             .and_then(|candidate| candidate.game_cook_mode.clone())
-//RS             .unwrap_or_else(|| {
-//RS                 if options.scripts_only {
-//RS                     "scripts-only".into()
-//RS                 } else if profile_is_development(&profile) {
-//RS                     "fast".into()
-//RS                 } else {
-//RS                     "reproducible".into()
-//RS                 }
-//RS             })
-//RS     });
-//RS     if !matches!(cook_mode.as_str(), "fast" | "reproducible" | "scripts-only") {
-//RS         return Err(format!(
-//RS             "unknown game cook mode `{cook_mode}`; use `fast`, `reproducible`, or `scripts-only`"
-//RS         ));
-//RS     }
-//RS     if options.scripts_only && cook_mode != "scripts-only" {
-//RS         return Err("`--scripts-only` conflicts with an explicit non-script cook mode".into());
-//RS     }
-//RS     let development_stripping = declared_profile
-//RS         .and_then(|candidate| candidate.game_development_stripping)
-//RS         .unwrap_or_else(|| !profile_is_development(&profile));
-//RS     let authority_result = game_authority_identity(facts.as_ref(), &renderer);
-//RS     let authority_error = authority_result.as_ref().err().cloned();
-//RS     let authority_identity = authority_result.unwrap_or_else(|_| "rejected".into());
-//RS     let effect_identity = game_effect_identity(&renderer, &backend);
-//RS     let mut header = GameHeader {
-//RS         target: target.as_str().into(),
-//RS         profile: profile.clone(),
-//RS         backend: backend.clone(),
-//RS         renderer: renderer.clone(),
-//RS         cook_mode: cook_mode.clone(),
-//RS         export_preset: export_preset.clone(),
-//RS         source_revision: source_revision.clone(),
-//RS         build_identity: "planned".into(),
-//RS         authority_identity,
-//RS         effect_identity,
-//RS         development_stripping,
-//RS         crash_reporter: crash_reporter.clone(),
-//RS         crash_consent: crash_consent.clone(),
-//RS         crash_runtime: requested_game_crash_runtime(&crash_reporter, &crash_consent),
-//RS     };
-//RS     if let Some(error) = authority_error.as_deref() {
-//RS         let authority_started = Instant::now();
-//RS         let diagnostic = game_authority_diagnostic(error);
-//RS         let phase = game_phase(
-//RS             "authority",
-//RS             "error",
-//RS             &header,
-//RS             authority_started,
-//RS             false,
-//RS             "renderer effect is not authorized".into(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             Some(diagnostic),
-//RS         );
-//RS         let authority_phases = vec!["authority".to_string()];
-//RS         let report = game_report_json(
-//RS             &header,
-//RS             &authority_phases,
-//RS             std::slice::from_ref(&phase),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             options.explain,
-//RS             planned,
-//RS         );
-//RS         return Ok(GameRun {
-//RS             report,
-//RS             phases: vec![phase],
-//RS             input_paths: tree.iter().map(|file| root.join(&file.relative)).collect(),
-//RS             root: generated_root.clone(),
-//RS             output: None,
-//RS             success: false,
-//RS         });
-//RS     }
-//RS     if let Err(error) = validate_game_renderer_selection(&renderer, &tree) {
-//RS         return Err(error);
-//RS     }
-//RS     if options.cancel {
-//RS         let cancel_started = Instant::now();
-//RS         let (cancelled, status, invalidation) = if planned {
-//RS             (
-//RS                 None,
-//RS                 "planned",
-//RS                 "dry-run cancellation planned".to_string(),
-//RS             )
-//RS         } else {
-//RS             let (cancelled, invalidation) = cancel_game_stages(&generated_root)?;
-//RS             (cancelled, "cancelled", invalidation)
-//RS         };
-//RS         let phase = game_phase(
-//RS             "cancel",
-//RS             status,
-//RS             &header,
-//RS             cancel_started,
-//RS             false,
-//RS             invalidation,
-//RS             cancelled.map(|path| path.display().to_string()),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         );
-//RS         let cancel_phases = vec!["cancel".to_string()];
-//RS         let report = game_report_json(
-//RS             &header,
-//RS             &cancel_phases,
-//RS             std::slice::from_ref(&phase),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             options.explain,
-//RS             planned,
-//RS         );
-//RS         return Ok(GameRun {
-//RS             report,
-//RS             phases: vec![phase],
-//RS             input_paths: tree.iter().map(|file| root.join(&file.relative)).collect(),
-//RS             root: generated_root.clone(),
-//RS             output: None,
-//RS             success: true,
-//RS         });
-//RS     }
-//RS     let mut input_paths = tree
-//RS         .iter()
-//RS         .map(|file| root.join(&file.relative))
-//RS         .collect::<Vec<_>>();
-//RS     let mut phases_receipt = Vec::new();
-//RS     let build_started = Instant::now();
-//RS     let (executable_path, executable_bytes, build_cache_hit, build_invalidation) =
-//RS         if let Some(path) = options.executable.as_ref() {
-//RS             ensure_regular_game_file(path, "executable")?;
-//RS             let bytes = fs::read(path)
-//RS                 .map_err(|error| format!("could not read executable `{}`: {error}", path.display()))?;
-//RS             (
-//RS                 path.clone(),
-//RS                 bytes,
-//RS                 true,
-//RS                 "explicit executable input".into(),
-//RS             )
-//RS         } else if let Some(entry) = source_entry.as_ref() {
-//RS             if planned {
-//RS                 (
-//RS                     generated_root
-//RS                         .join(".jet")
-//RS                         .join("build")
-//RS                         .join(crate::CmdCompile::stem(&entry.to_string_lossy())),
-//RS                     Vec::new(),
-//RS                     false,
-//RS                     "dry-run build planned from source".into(),
-//RS                 )
-//RS             } else {
-//RS                 let path = build_game_entry(&root, entry, &profile, target)?;
-//RS                 let bytes = fs::read(&path)
-//RS                     .map_err(|error| format!("could not read built game executable `{}`: {error}", path.display()))?;
-//RS                 (path, bytes, false, "source revision changed or build cache missed".into())
-//RS             }
-//RS         } else if planned {
-//RS             (
-//RS                 generated_root.join(".jet").join("build").join("game"),
-//RS                 Vec::new(),
-//RS                 false,
-//RS                 "dry-run build planned without a source entry".into(),
-//RS             )
-//RS         } else {
-//RS             return Err("game packaging needs `--executable <path>` or a project source entry".into());
-//RS         };
-//RS     if !executable_bytes.is_empty()
-//RS         && header.crash_reporter != "off"
-//RS         && header.crash_consent == "granted"
-//RS     {
-//RS         if !executable_bytes
-//RS             .windows(GAME_CRASH_REPORTER_ABI.len())
-//RS             .any(|window| window == GAME_CRASH_REPORTER_ABI.as_bytes())
-//RS         {
-//RS             return Err(
-//RS                 "active game crash reporter requires a binary built with Jet's game reporter bootstrap; \
-//RS                  build from a game source entry or use `--crash-reporter off`"
-//RS                     .into(),
-//RS             );
-//RS         }
-//RS         header.crash_runtime = GameCrashReporterSpec::installed();
-//RS     }
-//RS 
-//RS     header.build_identity = if executable_bytes.is_empty() {
-//RS         "planned".into()
-//RS     } else {
-//RS         let executable_digest = jet::SHA256::sha256_hex(&executable_bytes);
-//RS         format!(
-//RS             "sha256:{}",
-//RS             jet::SHA256::sha256_hex(
-//RS                 format!(
-//RS                     "jet-game-build-v1\0{}\0{}\0{}\0{}\0{}",
-//RS                     source_revision,
-//RS                     target.as_str(),
-//RS                     backend,
-//RS                     renderer,
-//RS                     executable_digest
-//RS                 )
-//RS                 .as_bytes(),
-//RS             )
-//RS         )
-//RS     };
-//RS     phases_receipt.push(game_phase(
-//RS         "build",
-//RS         "planned",
-//RS         &header,
-//RS         build_started,
-//RS         build_cache_hit,
-//RS         build_invalidation,
-//RS         Some(executable_path.display().to_string()),
-//RS         if executable_bytes.is_empty() {
-//RS             None
-//RS         } else {
-//RS             Some(jet::SHA256::sha256_hex(&executable_bytes))
-//RS         },
-//RS         Some(executable_bytes.len() as u64),
-//RS         None,
-//RS     ));
-//RS     if !planned {
-//RS         if let Some(phase) = phases_receipt.last_mut() {
-//RS             phase.status = "ok".into();
-//RS         }
-//RS     }
-//RS     input_paths.push(executable_path.clone());
-//RS     dedup_paths(&mut input_paths);
-//RS     let mut cooked = None;
-//RS     if phases.iter().any(|phase| phase == "cook") {
-//RS         let cook_started = Instant::now();
-//RS         let result = cook_game_assets(
-//RS             &generated_root,
-//RS             &tree,
-//RS             &header,
-//RS             options.force_clean,
-//RS             options.resume,
-//RS             planned,
-//RS         )?;
-//RS         phases_receipt.push(game_phase(
-//RS             "cook",
-//RS             if planned { "planned" } else { "ok" },
-//RS             &header,
-//RS             cook_started,
-//RS             result.cache_hit,
-//RS             result.invalidation.clone(),
-//RS             Some(if header.cook_mode == "fast" {
-//RS                 "on-the-fly cook (persistent cache bypassed)".into()
-//RS             } else {
-//RS                 generated_root.join(".jet").join("game-cache").display().to_string()
-//RS             }),
-//RS             Some(result.digest.clone()),
-//RS             Some(result.assets.iter().map(|asset| asset.bytes.len() as u64).sum()),
-//RS             None,
-//RS         ));
-//RS         cooked = Some(result);
-//RS     }
-//RS     let mut plan = None;
-//RS     let mut stage_root = None;
-//RS     let mut output = None;
-//RS     let mut artifact = None;
-//RS     if phases.iter().any(|phase| phase == "stage") {
-//RS         let cooked = cooked
-//RS             .as_ref()
-//RS             .ok_or_else(|| "game stage requires the cook phase".to_string())?;
-//RS         let (game_plan, package_inputs) = make_game_plan(
-//RS             options,
-//RS             target,
-//RS             &header,
-//RS             &executable_path,
-//RS             &executable_bytes,
-//RS             cooked,
-//RS         )?;
-//RS         input_paths.extend(package_inputs);
-//RS         dedup_paths(&mut input_paths);
-//RS         let stage_started = Instant::now();
-//RS         let stage_path = stage_game_plan(
-//RS             &generated_root,
-//RS             &game_plan,
-//RS             options.force_clean,
-//RS             options.resume,
-//RS             planned,
-//RS         )?;
-//RS         stage_root = Some(stage_path.clone());
-//RS         phases_receipt.push(game_phase(
-//RS             "stage",
-//RS             "planned",
-//RS             &header,
-//RS             stage_started,
-//RS             false,
-//RS             if options.force_clean {
-//RS                 "forced-clean requested".into()
-//RS             } else if options.resume {
-//RS                 "resumed canonical plan staging".into()
-//RS             } else {
-//RS                 "new canonical plan staging".into()
-//RS             },
-//RS             Some(stage_path.display().to_string()),
-//RS             Some(game_plan.identity.clone()),
-//RS             Some(game_plan.files.iter().map(|file| file.bytes.len() as u64).sum()),
-//RS             None,
-//RS         ));
-//RS         if !planned {
-//RS             if let Some(phase) = phases_receipt.last_mut() {
-//RS                 phase.status = "ok".into();
-//RS             }
-//RS         }
-//RS         output = Some(resolve_output_path(options.output.clone(), &game_plan.artifact_name)?);
-//RS         plan = Some(game_plan);
-//RS     }
-//RS     if phases.iter().any(|phase| phase == "package") {
-//RS         let package_started = Instant::now();
-//RS         let game_plan = plan
-//RS             .as_ref()
-//RS             .ok_or_else(|| "game package requires the stage phase".to_string())?;
-//RS         let package_output = output
-//RS             .as_ref()
-//RS             .ok_or_else(|| "game package has no output path".to_string())?;
-//RS         if planned {
-//RS             phases_receipt.push(game_phase(
-//RS                 "package",
-//RS                 "planned",
-//RS                 &header,
-//RS                 package_started,
-//RS                 false,
-//RS                 "dry-run materialization planned".into(),
-//RS                 Some(package_output.display().to_string()),
-//RS                 Some(game_plan.identity.clone()),
-//RS                 Some(game_plan.files.iter().map(|file| file.bytes.len() as u64).sum()),
-//RS                 None,
-//RS             ));
-//RS         } else {
-//RS             let Some(stage_path) = stage_root.as_deref() else {
-//RS                 return Err("game package requires the canonical stage output".into());
-//RS             };
-//RS             verify_game_stage_files(stage_path, game_plan)?;
-//RS             let facts = materialize_package(game_plan, package_output)?;
-//RS             let mut packaged = game_plan.materialized_artifact(facts.sha256.clone(), facts.bytes);
-//RS             packaged.receipt.record_materializer(facts.materializer);
-//RS             if let Some(signing) = facts.signing {
-//RS                 packaged.receipt.record_signing(signing);
-//RS             }
-//RS             phases_receipt.push(game_phase(
-//RS                 "package",
-//RS                 "ok",
-//RS                 &header,
-//RS                 package_started,
-//RS                 false,
-//RS                 "canonical staged plan materialized".into(),
-//RS                 Some(package_output.display().to_string()),
-//RS                 Some(facts.sha256),
-//RS                 Some(facts.bytes),
-//RS                 None,
-//RS             ));
-//RS             artifact = Some(packaged);
-//RS         }
-//RS     }
-//RS     if phases.iter().any(|phase| phase == "export") {
-//RS         let export_started = Instant::now();
-//RS         if output.is_none() {
-//RS             return Err("game export requires the package phase".to_string());
-//RS         }
-//RS         let game_plan = plan
-//RS             .as_ref()
-//RS             .ok_or_else(|| "game export requires the stage plan".to_string())?;
-//RS         let export_destination = root
-//RS             .join(".jet")
-//RS             .join("game-exports")
-//RS             .join(&export_preset)
-//RS             .join(&game_plan.artifact_name);
-//RS         let mut export_status = if planned { "planned" } else { "ok" };
-//RS         let mut export_invalidation = format!("export preset `{export_preset}`");
-//RS         let mut export_output = Some(export_destination);
-//RS         let mut export_digest = artifact.as_ref().map(|value| value.digest());
-//RS         let mut export_bytes = artifact.as_ref().map(|value| value.bytes());
-//RS         let mut export_diagnostic = None;
-//RS         if planned {
-//RS             export_invalidation = "dry-run native export planned".into();
-//RS         } else {
-//RS             match export_game_output(
-//RS                 &generated_root,
-//RS                 game_plan,
-//RS                 target,
-//RS                 &export_preset,
-//RS                 options.force_clean,
-//RS             ) {
-//RS                 Ok((path, facts)) => {
-//RS                     export_output = Some(path.clone());
-//RS                     export_digest = Some(facts.sha256.clone());
-//RS                     export_bytes = Some(facts.bytes);
-//RS                     let mut exported = game_plan.materialized_artifact(facts.sha256.clone(), facts.bytes);
-//RS                     exported.receipt.record_materializer(facts.materializer);
-//RS                     if let Some(signing) = facts.signing {
-//RS                         exported.receipt.record_signing(signing);
-//RS                     }
-//RS                     artifact = Some(exported);
-//RS                     output = Some(path.clone());
-//RS                     export_invalidation = "native export adapter materialized output".into();
-//RS                 }
-//RS                 Err(error) => {
-//RS                     export_status = "error";
-//RS                     export_output = None;
-//RS                     export_digest = None;
-//RS                     export_bytes = None;
-//RS                     export_invalidation = "export adapter refused output".into();
-//RS                     export_diagnostic = Some(GameDiagnostic {
-//RS                         code: "E2109".into(),
-//RS                         what: error,
-//RS                         fix: "choose a supported preset/target and pass `--clean` for an owned export".into(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         phases_receipt.push(game_phase(
-//RS             "export",
-//RS             export_status,
-//RS             &header,
-//RS             export_started,
-//RS             false,
-//RS             export_invalidation,
-//RS             export_output.map(|path| path.display().to_string()),
-//RS             export_digest,
-//RS             export_bytes,
-//RS             export_diagnostic,
-//RS         ));
-//RS     }
-//RS     if phases.iter().any(|phase| phase == "deploy") {
-//RS         let deploy_started = Instant::now();
-//RS         let destination = options
-//RS             .deploy_to
-//RS             .as_ref()
-//RS             .map(|path| resolve_game_destination(&root, path));
-//RS         let mut status = "planned";
-//RS         let mut invalidation = "deployment is explicit and destination-scoped".to_string();
-//RS         let mut diagnostic = None;
-//RS         let mut deployed = destination.clone();
-//RS         if destination.is_none() {
-//RS             status = "skipped";
-//RS             invalidation = "deploy destination was not provided".into();
-//RS             diagnostic = Some(GameDiagnostic {
-//RS                 code: "E2104".into(),
-//RS                 what: "deploy phase has no destination".into(),
-//RS                 fix: "pass `--deploy-to <path>` or omit the deploy phase".into(),
-//RS             });
-//RS             deployed = None;
-//RS         } else if planned {
-//RS             invalidation = "dry-run deployment planned".into();
-//RS         } else if let Some(package_output) = output.as_ref() {
-//RS             match deploy_game_output(package_output, destination.as_ref().expect("destination checked"), options.force_clean) {
-//RS                 Ok(path) => {
-//RS                     deployed = Some(path);
-//RS                     invalidation = "package artifact deployed atomically".into();
-//RS                 }
-//RS                 Err(error) => {
-//RS                     status = "skipped";
-//RS                     invalidation = "deployment refused".into();
-//RS                     diagnostic = Some(GameDiagnostic {
-//RS                         code: "E2106".into(),
-//RS                         what: error,
-//RS                         fix: "choose an empty destination or pass `--clean` for an owned output".into(),
-//RS                     });
-//RS                     deployed = None;
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             status = "skipped";
-//RS             invalidation = "deploy requires a materialized package output".into();
-//RS             diagnostic = Some(GameDiagnostic {
-//RS                 code: "E2107".into(),
-//RS                 what: "deploy phase has no package artifact".into(),
-//RS                 fix: "include the package phase before deploy".into(),
-//RS             });
-//RS             deployed = None;
-//RS         }
-//RS         phases_receipt.push(game_phase(
-//RS             "deploy",
-//RS             status,
-//RS             &header,
-//RS             deploy_started,
-//RS             false,
-//RS             invalidation,
-//RS             deployed.map(|path| path.display().to_string()),
-//RS             artifact.as_ref().map(|value| value.digest()),
-//RS             artifact.as_ref().map(|value| value.bytes()),
-//RS             diagnostic,
-//RS         ));
-//RS     }
-//RS     if phases.iter().any(|phase| phase == "run") {
-//RS         let run_started = Instant::now();
-//RS         let mut status = "skipped";
-//RS         let mut invalidation = "run requires explicit `--run-now`".to_string();
-//RS         let mut diagnostic = None;
-//RS         if options.run_now {
-//RS             if planned {
-//RS                 invalidation = "dry-run launch planned".into();
-//RS             } else if let Some(game_output) = output.as_ref() {
-//RS                 match launch_game_output(game_output, target, &renderer) {
-//RS                     Ok(pid) => {
-//RS                         status = "ok";
-//RS                         invalidation = format!("launched packaged game process pid {pid}");
-//RS                     }
-//RS                     Err(error) => {
-//RS                         invalidation = "run launch refused".into();
-//RS                         diagnostic = Some(GameDiagnostic {
-//RS                             code: "E2108".into(),
-//RS                             what: error,
-//RS                             fix: "package for the host target or omit `--run-now`".into(),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             } else {
-//RS                 invalidation = "run requires a materialized package output".into();
-//RS                 diagnostic = Some(GameDiagnostic {
-//RS                     code: "E2107".into(),
-//RS                     what: "run phase has no package artifact".into(),
-//RS                     fix: "include the package phase before run".into(),
-//RS                 });
-//RS             }
-//RS         } else {
-//RS             diagnostic = Some(GameDiagnostic {
-//RS                 code: "E2105".into(),
-//RS                 what: "run phase was requested without `--run-now`".into(),
-//RS                 fix: "pass `--run-now` to opt into process launch".into(),
-//RS             });
-//RS         }
-//RS         phases_receipt.push(game_phase(
-//RS             "run",
-//RS             status,
-//RS             &header,
-//RS             run_started,
-//RS             false,
-//RS             invalidation,
-//RS             output.as_ref().map(|path| path.display().to_string()),
-//RS             artifact.as_ref().map(|value| value.digest()),
-//RS             artifact.as_ref().map(|value| value.bytes()),
-//RS             diagnostic,
-//RS         ));
-//RS     }
-//RS     let artifact_sha256 = artifact.as_ref().map(|value| value.digest());
-//RS     let plan_identity = plan.as_ref().map(|value| value.identity.clone());
-//RS     let report = game_report_json(
-//RS         &header,
-//RS         &phases,
-//RS         &phases_receipt,
-//RS         plan_identity.as_deref(),
-//RS         plan.as_ref(),
-//RS         artifact_sha256.as_deref(),
-//RS         output.as_deref(),
-//RS         artifact.as_ref(),
-//RS         options.explain,
-//RS         planned,
-//RS     );
-//RS     let success = !phases_receipt
-//RS         .iter()
-//RS         .any(|phase| phase.status == "error" || phase.diagnostic.is_some());
-//RS     Ok(GameRun {
-//RS         report,
-//RS         phases: phases_receipt,
-//RS         input_paths,
-//RS         root: generated_root,
-//RS         output,
-//RS         success,
-//RS     })
-//RS }
-//RS fn validate_game_profile_name(profile: &str) -> Result<(), String> {
-//RS     if profile.is_empty()
-//RS         || profile.chars().any(|character| {
-//RS             character.is_control()
-//RS                 || matches!(character, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*')
-//RS         })
-//RS     {
-//RS         return Err(format!("invalid game profile `{profile}`"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn profile_is_development(profile: &str) -> bool {
-//RS     matches!(profile, "dev" | "debug" | "ci" | "development")
-//RS }
-//RS 
-//RS fn validate_declared_game_profile(
-//RS     profile: &str,
-//RS     facts: Option<&jet::Package::PackageFacts>,
-//RS ) -> Result<(), String> {
-//RS     if let Some(facts) = facts {
-//RS         if !facts.build_profiles.is_empty()
-//RS             && !facts.build_profiles.iter().any(|candidate| candidate.name == profile)
-//RS         {
-//RS             let names = facts
-//RS                 .build_profiles
-//RS                 .iter()
-//RS                 .map(|candidate| candidate.name.as_str())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             return Err(format!(
-//RS                 "game profile `{profile}` is not declared by package.jet; available profiles: {names}"
-//RS             ));
-//RS         }
-//RS     } else if !matches!(profile, "dev" | "debug" | "release" | "hardened" | "ci" | "development") {
-//RS         return Err(format!(
-//RS             "game profile `{profile}` needs a package.jet build declaration"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn game_phase_names(raw: Option<&str>) -> Result<Vec<String>, String> {
-//RS     const ORDER: [&str; 7] = ["build", "cook", "stage", "package", "export", "deploy", "run"];
-//RS     let raw = raw.unwrap_or("build,cook,stage,package,export");
-//RS     let mut requested = BTreeSet::new();
-//RS     for phase in raw.split(',').map(str::trim).filter(|phase| !phase.is_empty()) {
-//RS         if phase == "all" {
-//RS             requested.extend(ORDER);
-//RS             continue;
-//RS         }
-//RS         if !ORDER.contains(&phase) {
-//RS             return Err(format!(
-//RS                 "unknown game phase `{phase}`; use build,cook,stage,package,export,deploy,run"
-//RS             ));
-//RS         }
-//RS         requested.insert(phase);
-//RS     }
-//RS     if requested.is_empty() {
-//RS         return Err("`--phase` needs at least one game phase".into());
-//RS     }
-//RS     let last = ORDER
-//RS         .iter()
-//RS         .rposition(|phase| requested.contains(phase))
-//RS         .unwrap_or(0);
-//RS     Ok(ORDER[..=last].iter().map(|phase| (*phase).into()).collect())
-//RS }
-//RS 
-//RS fn resolve_game_root(options: &PackageOptions) -> Result<(PathBuf, Option<PathBuf>), String> {
-//RS     let base = options.source.clone().unwrap_or(
-//RS         std::env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?,
-//RS     );
-//RS     let metadata = fs::symlink_metadata(&base)
-//RS         .map_err(|error| format!("could not inspect game source `{}`: {error}", base.display()))?;
-//RS     if metadata.file_type().is_symlink() {
-//RS         return Err(format!("game source `{}` must not be a symlink", base.display()));
-//RS     }
-//RS     if metadata.is_file() {
-//RS         let entry = fs::canonicalize(&base)
-//RS             .map_err(|error| format!("could not canonicalize game source `{}`: {error}", base.display()))?;
-//RS         let parent = entry.parent().unwrap_or_else(|| Path::new("."));
-//RS         if entry.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
-//RS             let root = jet::Loader::find_manifest_root(parent).unwrap_or_else(|| parent.to_path_buf());
-//RS             return Ok((root.clone(), find_game_entry(&root)));
-//RS         }
-//RS         let root = jet::Loader::find_manifest_root(parent).unwrap_or_else(|| parent.to_path_buf());
-//RS         return Ok((root, Some(entry)));
-//RS     }
-//RS     if !metadata.is_dir() {
-//RS         return Err(format!("game source `{}` is not a regular file or directory", base.display()));
-//RS     }
-//RS     let root = jet::Loader::find_manifest_root(&base).unwrap_or(base);
-//RS     let entry = find_game_entry(&root);
-//RS     Ok((root, entry))
-//RS }
-//RS fn generated_project_root(path: &Path) -> Result<PathBuf, String> {
-//RS     jet::build_project_root(&path.to_string_lossy()).map_err(|diagnostics| {
-//RS         format!(
-//RS             "could not resolve generated project root for `{}`: {diagnostics:?}",
-//RS             path.display()
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn find_game_entry(root: &Path) -> Option<PathBuf> {
-//RS     [
-//RS         root.join("main.jet"),
-//RS         root.join("src").join("main.jet"),
-//RS         root.join("src").join("Scene.jet"),
-//RS         root.join("game.jet"),
-//RS     ]
-//RS     .into_iter()
-//RS     .find(|candidate| {
-//RS         fs::symlink_metadata(candidate)
-//RS             .ok()
-//RS             .is_some_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-//RS     })
-//RS }
-//RS fn collect_game_tree(root: &Path) -> Result<Vec<GameTreeFile>, String> {
-//RS     let mut files = Vec::new();
-//RS     collect_game_tree_at(root, Path::new(""), &mut files)?;
-//RS     files.sort_by(|left, right| left.relative.cmp(&right.relative));
-//RS     Ok(files)
-//RS }
-//RS fn game_source_revision(
-//RS     tree: &[GameTreeFile],
-//RS     facts: Option<&jet::Package::PackageFacts>,
-//RS ) -> String {
-//RS     let mut input = Vec::new();
-//RS     input.extend_from_slice(b"jet-game-source-v2\0");
-//RS     frame(&mut input, env!("CARGO_PKG_VERSION").as_bytes());
-//RS     if let Some(facts) = facts {
-//RS         frame(&mut input, facts.semantic_digest().as_bytes());
-//RS     }
-//RS     for file in tree {
-//RS         frame(&mut input, file.relative.as_bytes());
-//RS         input.extend_from_slice(&file.mode.to_be_bytes());
-//RS         frame(&mut input, &file.bytes);
-//RS     }
-//RS     format!("sha256:{}", jet::SHA256::sha256_hex(&input))
-//RS }
-//RS 
-//RS fn collect_game_tree_at(
-//RS     root: &Path,
-//RS     relative: &Path,
-//RS     files: &mut Vec<GameTreeFile>,
-//RS ) -> Result<(), String> {
-//RS     const MAX_GAME_FILE_BYTES: u64 = 256 * 1024 * 1024;
-//RS     let directory = root.join(relative);
-//RS     let metadata = fs::symlink_metadata(&directory)
-//RS         .map_err(|error| format!("could not inspect game path `{}`: {error}", directory.display()))?;
-//RS     if metadata.file_type().is_symlink() {
-//RS         return Err(format!("game path `{}` must not be a symlink", directory.display()));
-//RS     }
-//RS     if metadata.is_file() {
-//RS         if metadata.len() > MAX_GAME_FILE_BYTES {
-//RS             return Err(format!(
-//RS                 "game input `{}` exceeds the {} byte limit",
-//RS                 directory.display(),
-//RS                 MAX_GAME_FILE_BYTES
-//RS             ));
-//RS         }
-//RS         let bytes = fs::read(&directory)
-//RS             .map_err(|error| format!("could not read game input `{}`: {error}", directory.display()))?;
-//RS         let relative = relative
-//RS             .to_str()
-//RS             .ok_or_else(|| format!("game input `{}` is not valid UTF-8", directory.display()))?
-//RS             .replace('\\', "/");
-//RS         let mode = game_file_mode(&metadata);
-//RS         files.push(GameTreeFile {
-//RS             relative,
-//RS             mode,
-//RS             bytes,
-//RS         });
-//RS         return Ok(());
-//RS     }
-//RS     if !metadata.is_dir() {
-//RS         return Err(format!("game path `{}` is not a regular file or directory", directory.display()));
-//RS     }
-//RS     let mut entries = fs::read_dir(&directory)
-//RS         .map_err(|error| format!("could not enumerate game path `{}`: {error}", directory.display()))?
-//RS         .collect::<Result<Vec<_>, _>>()
-//RS         .map_err(|error| format!("could not enumerate game path `{}`: {error}", directory.display()))?;
-//RS     entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-//RS     for entry in entries {
-//RS         let name = entry
-//RS             .file_name()
-//RS             .to_str()
-//RS             .ok_or_else(|| format!("game path `{}` is not valid UTF-8", entry.path().display()))?
-//RS             .to_string();
-//RS         if relative.as_os_str().is_empty()
-//RS             && matches!(
-//RS                 name.as_str(),
-//RS                 ".git" | ".jet" | "build" | "target" | "node_modules" | "dist"
-//RS             )
-//RS         {
-//RS             continue;
-//RS         }
-//RS         collect_game_tree_at(root, &relative.join(name), files)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn game_file_mode(metadata: &fs::Metadata) -> u32 {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         let mode = metadata.permissions().mode() & 0o777;
-//RS         if mode == 0 { 0o644 } else { mode }
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = metadata;
-//RS         0o644
-//RS     }
-//RS }
-//RS fn ensure_regular_game_file(path: &Path, label: &str) -> Result<(), String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("could not inspect {label} `{}`: {error}", path.display()))?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS         return Err(format!("{label} `{}` is not a regular file", path.display()));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn game_build_target(target: BundleTarget) -> Result<&'static str, String> {
-//RS     let arch = std::env::consts::ARCH;
-//RS     let triple = match (target, arch) {
-//RS         (BundleTarget::LinuxAppImage, "x86_64") => "x86_64-unknown-linux-gnu",
-//RS         (BundleTarget::LinuxAppImage, "aarch64") => "aarch64-unknown-linux-gnu",
-//RS         (BundleTarget::LinuxAppImage, "i686") => "i686-unknown-linux-gnu",
-//RS         (BundleTarget::MacOSApp, "x86_64") => "x86_64-apple-darwin",
-//RS         (BundleTarget::MacOSApp, "aarch64") => "aarch64-apple-darwin",
-//RS         (BundleTarget::WindowsMsix, "x86_64") => "x86_64-pc-windows-gnu",
-//RS         (BundleTarget::WindowsMsix, "aarch64") => "aarch64-pc-windows-msvc",
-//RS         (BundleTarget::WindowsMsix, "i686") => "i686-pc-windows-gnu",
-//RS         (target, arch) => {
-//RS             return Err(format!(
-//RS                 "game target `{}` has no compiler target mapping for host architecture `{arch}`",
-//RS                 target.as_str()
-//RS             ))
-//RS         }
-//RS     };
-//RS     Ok(triple)
-//RS }
-//RS 
-//RS fn build_game_entry(
-//RS     root: &Path,
-//RS     entry: &Path,
-//RS     profile: &str,
-//RS     target: BundleTarget,
-//RS ) -> Result<PathBuf, String> {
-//RS     let target_triple = game_build_target(target)?;
-//RS     let jet = std::env::current_exe()
-//RS         .map_err(|error| format!("could not resolve jet executable for game build: {error}"))?;
-//RS     let profile = match profile {
-//RS         "debug" | "development" => "dev",
-//RS         "hardened" => "release",
-//RS         value => value,
-//RS     };
-//RS     let output = Command::new(&jet)
-//RS         .arg("build")
-//RS         .arg(entry)
-//RS         .arg("--profile")
-//RS         .arg(profile)
-//RS         .arg("--target")
-//RS         .arg(target_triple)
-//RS         .arg("--quiet")
-//RS         .current_dir(root)
-//RS         .output()
-//RS         .map_err(|error| format!("could not start game build: {error}"))?;
-//RS     if !output.status.success() {
-//RS         return Err(format!(
-//RS             "game build failed ({}){}",
-//RS             output.status,
-//RS             command_output_detail(&output.stdout, &output.stderr)
-//RS         ));
-//RS     }
-//RS     let generated_root = generated_project_root(entry)?;
-//RS     let path = generated_root
-//RS         .join(".jet")
-//RS         .join("build")
-//RS         .join(crate::CmdCompile::stem(&entry.to_string_lossy()));
-//RS     ensure_regular_game_file(&path, "built game executable")?;
-//RS     Ok(path)
-//RS }
-//RS 
-//RS fn command_output_detail(stdout: &[u8], stderr: &[u8]) -> String {
-//RS     const MAX_DETAIL_BYTES: usize = 4096;
-//RS     let stdout = String::from_utf8_lossy(&stdout[..stdout.len().min(MAX_DETAIL_BYTES)])
-//RS         .trim()
-//RS         .to_string();
-//RS     let stderr = String::from_utf8_lossy(&stderr[..stderr.len().min(MAX_DETAIL_BYTES)])
-//RS         .trim()
-//RS         .to_string();
-//RS     match (stdout.is_empty(), stderr.is_empty()) {
-//RS         (true, true) => String::new(),
-//RS         (false, true) => format!(": stdout: {stdout}"),
-//RS         (true, false) => format!(": stderr: {stderr}"),
-//RS         (false, false) => format!(": stdout: {stdout}; stderr: {stderr}"),
-//RS     }
-//RS }
-//RS 
-//RS fn dedup_paths(paths: &mut Vec<PathBuf>) {
-//RS     paths.sort();
-//RS     paths.dedup();
-//RS }
-//RS fn game_authority_identity(
-//RS     facts: Option<&jet::Package::PackageFacts>,
-//RS     renderer: &str,
-//RS ) -> Result<String, String> {
-//RS     let mut authority = if let Some(facts) = facts {
-//RS         jet_foundation::Authority::ApplicationAuthority::from_policy(
-//RS             facts.authority.holds.allow.as_deref(),
-//RS             facts.authority.holds.deny.as_deref(),
-//RS             "package.jet authority.holds",
-//RS         )
-//RS     } else {
-//RS         jet_foundation::Authority::ApplicationAuthority::ambient_basics()
-//RS     };
-//RS     let policy_identity = format!("{authority:?}");
-//RS     let required_effect = if renderer == "raylib" { "GPU" } else { "none" };
-//RS     if renderer == "raylib" {
-//RS         authority.required_effects.insert("GPU".into());
-//RS         if let Some(diagnostic) = authority.policy_diagnostic() {
-//RS             return Err(format!(
-//RS                 "{}: renderer `{renderer}` requires effect `GPU`; {}; {}; fix: {}",
-//RS                 diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(format!(
-//RS         "sha256:{}",
-//RS         jet::SHA256::sha256_hex(
-//RS             format!("jet-game-authority-v1\0{policy_identity}\0{required_effect}").as_bytes()
-//RS         )
-//RS     ))
-//RS }
-//RS fn game_authority_diagnostic(error: &str) -> GameDiagnostic {
-//RS     let (code, body) = error
-//RS         .split_once(':')
-//RS         .map_or(("E1803", error), |(code, body)| (code.trim(), body.trim()));
-//RS     let (what, fix) = body
-//RS         .split_once("fix:")
-//RS         .map_or((body.trim(), "declare `GPU` in package.jet authority.holds.allow"), |(what, fix)| {
-//RS             (what.trim(), fix.trim())
-//RS         });
-//RS     GameDiagnostic {
-//RS         code: code.into(),
-//RS         what: what.into(),
-//RS         fix: fix.into(),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn validate_game_renderer_selection(
-//RS     renderer: &str,
-//RS     tree: &[GameTreeFile],
-//RS ) -> Result<(), String> {
-//RS     if renderer != "raylib" {
-//RS         return Ok(());
-//RS     }
-//RS     let bridge = b"core.game.raylib";
-//RS     if tree.iter().any(|file| {
-//RS         file.relative.ends_with(".jet")
-//RS             && file.bytes.windows(bridge.len()).any(|window| window == bridge)
-//RS     }) {
-//RS         return Ok(());
-//RS     }
-//RS     Err(
-//RS         "renderer `raylib` was selected, but the source does not use the checked `core.game.raylib` bridge"
-//RS             .into(),
-//RS     )
-//RS }
-//RS 
-//RS fn game_effect_identity(renderer: &str, backend: &str) -> String {
-//RS     let effect = if renderer == "raylib" { "GPU" } else { "none" };
-//RS     format!(
-//RS         "sha256:{}",
-//RS         jet::SHA256::sha256_hex(format!("jet-game-effect-v1\0{backend}\0{effect}").as_bytes())
-//RS     )
-//RS }
-//RS 
-//RS fn cook_game_assets(
-//RS     root: &Path,
-//RS     tree: &[GameTreeFile],
-//RS     header: &GameHeader,
-//RS     force_clean: bool,
-//RS     resume: bool,
-//RS     dry_run: bool,
-//RS ) -> Result<CookedGameAssets, String> {
-//RS     let mut assets = tree
-//RS         .iter()
-//RS         .filter_map(|file| file.relative.strip_prefix("assets/").map(|path| (path, file)))
-//RS         .filter(|(path, _)| header.cook_mode != "scripts-only" || is_game_script(path))
-//RS         .filter(|(path, _)| !header.development_stripping || !is_game_debug_asset(path))
-//RS         .map(|(path, file)| {
-//RS             validate_game_asset_relative_path(path)?;
-//RS             Ok(GameBundleAsset::new(path, file.mode, file.bytes.clone()))
-//RS         })
-//RS         .collect::<Result<Vec<_>, String>>()?;
-//RS     assets.sort_by(|left, right| {
-//RS         left.path
-//RS             .cmp(&right.path)
-//RS             .then(left.digest().cmp(&right.digest()))
-//RS     });
-//RS     let mut digest_input = Vec::new();
-//RS     digest_input.extend_from_slice(b"jet-game-cook-assets-v1\0");
-//RS     for asset in &assets {
-//RS         frame(&mut digest_input, asset.path.as_bytes());
-//RS         digest_input.extend_from_slice(&asset.mode.to_be_bytes());
-//RS         frame(&mut digest_input, &asset.bytes);
-//RS     }
-//RS     let asset_digest = jet::SHA256::sha256_hex(&digest_input);
-//RS     let identity = jet::SHA256::sha256_hex(
-//RS         format!(
-//RS             "jet-game-cook-v1\0{}\0{}\0{}\0{}\0{}",
-//RS             header.target, header.profile, header.backend, header.cook_mode, asset_digest
-//RS         )
-//RS         .as_bytes(),
-//RS     );
-//RS     let invalidation = if force_clean {
-//RS         if header.cook_mode == "scripts-only" {
-//RS             "forced-clean requested; scripts-only asset set rebuilt".into()
-//RS         } else {
-//RS             "forced-clean requested; asset set rebuilt".into()
-//RS         }
-//RS     } else if header.cook_mode == "scripts-only" {
-//RS         "scripts-only invalidation scope".into()
-//RS     } else {
-//RS         "asset content or cook identity changed".into()
-//RS     };
-//RS     if dry_run {
-//RS         return Ok(CookedGameAssets {
-//RS             assets,
-//RS             digest: format!("sha256:{asset_digest}"),
-//RS             cache_hit: false,
-//RS             invalidation: format!("dry-run {} cook planned", header.cook_mode),
-//RS         });
-//RS     }
-//RS     if header.cook_mode == "fast" {
-//RS         return Ok(CookedGameAssets {
-//RS             assets,
-//RS             digest: format!("sha256:{asset_digest}"),
-//RS             cache_hit: false,
-//RS             invalidation: if force_clean {
-//RS                 "forced-clean requested; fast on-the-fly cook bypassed persistent cache".into()
-//RS             } else {
-//RS                 "fast on-the-fly cook; persistent cache bypassed".into()
-//RS             },
-//RS         });
-//RS     }
-//RS     let cache_root = root.join(".jet").join("game-cache");
-//RS     let object_root = cache_root.join("objects");
-//RS     let cooked_root = cache_root.join("cooked");
-//RS     fs::create_dir_all(&object_root)
-//RS         .map_err(|error| format!("could not create game asset cache `{}`: {error}", object_root.display()))?;
-//RS     fs::create_dir_all(&cooked_root)
-//RS         .map_err(|error| format!("could not create game cook cache `{}`: {error}", cooked_root.display()))?;
-//RS     for asset in &assets {
-//RS         write_content_addressed_blob(&object_root, asset)?;
-//RS     }
-//RS     let final_dir = cooked_root.join(&identity);
-//RS     let marker = game_cook_marker(&identity, header, &asset_digest);
-//RS     if fs::symlink_metadata(&final_dir).is_ok() {
-//RS         if force_clean {
-//RS             ensure_owned_directory(&final_dir, &marker, "game cook cache")?;
-//RS             fs::remove_dir_all(&final_dir).map_err(|error| {
-//RS                 format!("could not remove game cook cache `{}`: {error}", final_dir.display())
-//RS             })?;
-//RS         } else {
-//RS             ensure_owned_directory(&final_dir, &marker, "game cook cache")?;
-//RS             let cached_assets = load_cached_game_assets(&final_dir, &assets)?;
-//RS             return Ok(CookedGameAssets {
-//RS                 assets: cached_assets,
-//RS                 digest: format!("sha256:{asset_digest}"),
-//RS                 cache_hit: true,
-//RS                 invalidation: "content-addressed cooked assets reused".into(),
-//RS             });
-//RS         }
-//RS     }
-//RS     let staging = cooked_root.join(format!(".{identity}-staging"));
-//RS     if fs::symlink_metadata(&staging).is_ok() {
-//RS         if force_clean {
-//RS             ensure_owned_directory(&staging, &marker, "game cook staging")?;
-//RS             fs::remove_dir_all(&staging).map_err(|error| {
-//RS                 format!("could not remove game cook staging `{}`: {error}", staging.display())
-//RS             })?;
-//RS         } else if resume {
-//RS             ensure_owned_directory(&staging, &marker, "game cook staging")?;
-//RS             fs::remove_dir_all(&staging).map_err(|error| {
-//RS                 format!("could not resume game cook staging `{}`: {error}", staging.display())
-//RS             })?;
-//RS         } else {
-//RS             return Err(format!(
-//RS                 "game cook staging `{}` already exists; use `--resume` only after inspecting it or `--clean` for owned staging",
-//RS                 staging.display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     let result: Result<(), String> = (|| {
-//RS         fs::create_dir(&staging)
-//RS             .map_err(|error| format!("could not create game cook staging `{}`: {error}", staging.display()))?;
-//RS         write_atomic_bytes(&staging.join("staging.json"), marker.as_bytes())?;
-//RS         for asset in &assets {
-//RS             let destination = staging.join("assets").join(&asset.path);
-//RS             if let Some(parent) = destination.parent() {
-//RS                 fs::create_dir_all(parent).map_err(|error| {
-//RS                     format!("could not create cooked asset directory `{}`: {error}", parent.display())
-//RS                 })?;
-//RS             }
-//RS             fs::write(&destination, &asset.bytes)
-//RS                 .map_err(|error| format!("could not write cooked asset `{}`: {error}", destination.display()))?;
-//RS             set_mode(&destination, asset.mode)?;
-//RS         }
-//RS         fs::rename(&staging, &final_dir).map_err(|error| {
-//RS             format!(
-//RS                 "could not atomically publish cooked game assets `{}`: {error}",
-//RS                 final_dir.display()
-//RS             )
-//RS         })?;
-//RS         Ok(())
-//RS     })();
-//RS     if result.is_err() {
-//RS         cleanup_staging(&staging, true);
-//RS     }
-//RS     result?;
-//RS     Ok(CookedGameAssets {
-//RS         assets,
-//RS         digest: format!("sha256:{asset_digest}"),
-//RS         cache_hit: false,
-//RS         invalidation,
-//RS     })
-//RS }
-//RS fn load_cached_game_assets(
-//RS     cooked_dir: &Path,
-//RS     expected: &[GameBundleAsset],
-//RS ) -> Result<Vec<GameBundleAsset>, String> {
-//RS     expected
-//RS         .iter()
-//RS         .map(|asset| {
-//RS             let path = cooked_dir.join("assets").join(&asset.path);
-//RS             ensure_regular_game_file(&path, "cooked game asset")?;
-//RS             let bytes = fs::read(&path)
-//RS                 .map_err(|error| format!("could not read cooked game asset `{}`: {error}", path.display()))?;
-//RS             if jet::SHA256::sha256_hex(&bytes) != asset.digest() {
-//RS                 return Err(format!("cooked game asset `{}` has a foreign digest", path.display()));
-//RS             }
-//RS             Ok(GameBundleAsset::new(&asset.path, asset.mode, bytes))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS 
-//RS fn validate_game_asset_relative_path(path: &str) -> Result<(), String> {
-//RS     if path.is_empty() || path.contains('\\') || path.chars().any(char::is_control) {
-//RS         return Err(format!("game asset path `{path}` is invalid"));
-//RS     }
-//RS     if path
-//RS         .split('/')
-//RS         .any(|component| component.is_empty() || component == "." || component == "..")
-//RS     {
-//RS         return Err(format!("game asset path `{path}` is invalid"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn is_game_script(path: &str) -> bool {
-//RS     Path::new(path)
-//RS         .extension()
-//RS         .and_then(|extension| extension.to_str())
-//RS         .is_some_and(|extension| {
-//RS             matches!(extension.to_ascii_lowercase().as_str(), "jet" | "lua" | "js" | "ts" | "gd" | "json" | "txt")
-//RS         })
-//RS }
-//RS 
-//RS fn is_game_debug_asset(path: &str) -> bool {
-//RS     Path::new(path)
-//RS         .extension()
-//RS         .and_then(|extension| extension.to_str())
-//RS         .is_some_and(|extension| {
-//RS             matches!(
-//RS                 extension.to_ascii_lowercase().as_str(),
-//RS                 "pdb" | "dsym" | "debug" | "dbg" | "map"
-//RS             )
-//RS         })
-//RS }
-//RS 
-//RS fn game_cook_marker(identity: &str, header: &GameHeader, asset_digest: &str) -> String {
-//RS     format!(
-//RS         "jet-game-cook-v1\nidentity={identity}\ntarget={}\nprofile={}\nbackend={}\ncook_mode={}\nassets_sha256={asset_digest}\n",
-//RS         header.target, header.profile, header.backend, header.cook_mode
-//RS     )
-//RS }
-//RS 
-//RS fn write_content_addressed_blob(root: &Path, asset: &GameBundleAsset) -> Result<(), String> {
-//RS     let digest = asset.digest();
-//RS     let destination = root.join(&digest);
-//RS     if fs::symlink_metadata(&destination).is_ok() {
-//RS         ensure_regular_game_file(&destination, "game asset cache object")?;
-//RS         let existing = fs::read(&destination)
-//RS             .map_err(|error| format!("could not read game asset cache object `{}`: {error}", destination.display()))?;
-//RS         if jet::SHA256::sha256_hex(&existing) != digest {
-//RS             return Err(format!(
-//RS                 "game asset cache object `{}` has a foreign digest",
-//RS                 destination.display()
-//RS             ));
-//RS         }
-//RS         return Ok(());
-//RS     }
-//RS     let temporary = root.join(format!(".{digest}-{}", std::process::id()));
-//RS     if fs::symlink_metadata(&temporary).is_ok() {
-//RS         return Err(format!(
-//RS             "game asset cache staging `{}` already exists",
-//RS             temporary.display()
-//RS         ));
-//RS     }
-//RS     fs::write(&temporary, &asset.bytes)
-//RS         .map_err(|error| format!("could not write game asset cache object `{}`: {error}", temporary.display()))?;
-//RS     if let Err(error) = fs::rename(&temporary, &destination) {
-//RS         cleanup_staging(&temporary, false);
-//RS         if fs::symlink_metadata(&destination).is_err() {
-//RS             return Err(format!(
-//RS                 "could not publish game asset cache object `{}`: {error}",
-//RS                 destination.display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn ensure_owned_directory(path: &Path, marker: &str, label: &str) -> Result<(), String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("could not inspect {label} `{}`: {error}", path.display()))?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         return Err(format!("{label} `{}` is not an owned directory", path.display()));
-//RS     }
-//RS     let marker_path = path.join("staging.json");
-//RS     let existing = fs::read_to_string(&marker_path)
-//RS         .map_err(|error| format!("could not read {label} marker `{}`: {error}", marker_path.display()))?;
-//RS     if existing != marker {
-//RS         return Err(format!(
-//RS             "{label} `{}` has a foreign or stale identity; refusing to reuse it",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
-//RS     let parent = path
-//RS         .parent()
-//RS         .ok_or_else(|| format!("path `{}` has no parent", path.display()))?;
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create staging parent `{}`: {error}", parent.display()))?;
-//RS     let file_name = path
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .unwrap_or("staging");
-//RS     let temporary = parent.join(format!(".{file_name}-{}", std::process::id()));
-//RS     fs::write(&temporary, bytes)
-//RS         .map_err(|error| format!("could not write staging file `{}`: {error}", temporary.display()))?;
-//RS     fs::rename(&temporary, path).map_err(|error| {
-//RS         cleanup_staging(&temporary, false);
-//RS         format!("could not publish staging file `{}`: {error}", path.display())
-//RS     })
-//RS }
-//RS fn make_game_plan(
-//RS     options: &PackageOptions,
-//RS     target: BundleTarget,
-//RS     header: &GameHeader,
-//RS     executable_path: &Path,
-//RS     executable_bytes: &[u8],
-//RS     cooked: &CookedGameAssets,
-//RS ) -> Result<(PackageBundlePlan, Vec<PathBuf>), String> {
-//RS     let executable_name = options
-//RS         .name
-//RS         .clone()
-//RS         .or_else(|| executable_path.file_stem().map(|value| value.to_string_lossy().into_owned()))
-//RS         .filter(|value| !value.is_empty())
-//RS         .ok_or_else(|| "game package needs a non-empty executable name".to_string())?;
-//RS     let package = options.package.clone().unwrap_or_else(|| executable_name.clone());
-//RS     let version = options.version.clone().unwrap_or_else(|| "0.1.0".into());
-//RS     let display_name = options.name.clone().unwrap_or_else(|| package.clone());
-//RS     let mut metadata = BundleMetadata::new(package.clone(), display_name);
-//RS     metadata.publisher = if options.publisher.is_empty() {
-//RS         "Jet".into()
-//RS     } else {
-//RS         options.publisher.clone()
-//RS     };
-//RS     metadata.description = options.description.clone();
-//RS     let executable = BundleExecutable::new(
-//RS         executable_name,
-//RS         executable_path.to_string_lossy().into_owned(),
-//RS         executable_bytes.to_vec(),
-//RS     );
-//RS     let mut game = GameBundleSpec::new(
-//RS         header.profile.clone(),
-//RS         header.export_preset.clone(),
-//RS         header.source_revision.clone(),
-//RS         header.backend.clone(),
-//RS         header.renderer.clone(),
-//RS         header.cook_mode.clone(),
-//RS     );
-//RS 
-//RS     game.build_identity = header.build_identity.clone();
-//RS     game.development_stripping = header.development_stripping;
-//RS     game.crash_reporter = header.crash_reporter.clone();
-//RS     game.crash_consent = header.crash_consent.clone();
-//RS     game.crash_runtime = header.crash_runtime.clone();
-//RS     game.assets = cooked.assets.clone();
-//RS     let mut spec = BundleSpec::game(
-//RS         target,
-//RS         package.clone(),
-//RS         version,
-//RS         executable,
-//RS         metadata,
-//RS     );
-//RS     spec.game = Some(game);
-//RS     let mut input_paths = Vec::new();
-//RS     if let Some(icon_path) = options.icon.as_ref() {
-//RS         ensure_regular_game_file(icon_path, "icon")?;
-//RS         let icon_bytes = fs::read(icon_path)
-//RS             .map_err(|error| format!("could not read icon `{}`: {error}", icon_path.display()))?;
-//RS         let format = options
-//RS             .icon_format
-//RS             .or_else(|| icon_path.extension().and_then(|extension| IconFormat::parse(&extension.to_string_lossy())))
-//RS             .ok_or_else(|| "`--icon` needs `--icon-format` when the extension is unknown".to_string())?;
-//RS         spec.icons.push(
-//RS             BundleIcon::new(package, format, options.icon_size, icon_bytes)
-//RS                 .with_source(icon_path.to_string_lossy().into_owned()),
-//RS         );
-//RS         input_paths.push(icon_path.clone());
-//RS     }
-//RS     if options.update_channel.is_some() != options.update_url.is_some() {
-//RS         return Err("`--update-channel` and `--update-url` must be supplied together".into());
-//RS     }
-//RS     if let (Some(channel), Some(url)) = (options.update_channel.as_ref(), options.update_url.as_ref()) {
-//RS         spec.updater = Some(UpdaterSpec::new(channel, url));
-//RS     }
-//RS     let plan = PackageBundlePlan::from_spec(&spec).map_err(|error| error.to_string())?;
-//RS     Ok((plan, input_paths))
-//RS }
-//RS fn launch_game_output(path: &Path, target: BundleTarget, renderer: &str) -> Result<u32, String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("could not inspect game package `{}`: {error}", path.display()))?;
-//RS     if metadata.file_type().is_symlink() {
-//RS         return Err(format!("game package `{}` must not be a symlink", path.display()));
-//RS     }
-//RS     let mut command = match target {
-//RS         BundleTarget::LinuxAppImage if metadata.is_file() => Command::new(path),
-//RS         BundleTarget::MacOSApp if metadata.is_dir() && cfg!(target_os = "macos") => {
-//RS             let mut command = Command::new("open");
-//RS             command.arg(path);
-//RS             command
-//RS         }
-//RS         BundleTarget::LinuxAppImage | BundleTarget::MacOSApp => {
-//RS             return Err(format!(
-//RS                 "game target `{}` is not runnable by this host",
-//RS                 target.as_str()
-//RS             ))
-//RS         }
-//RS         BundleTarget::WindowsMsix if metadata.is_file() && cfg!(target_os = "windows") => {
-//RS             let mut command = Command::new("explorer.exe");
-//RS             command.arg(path);
-//RS             command
-//RS         }
-//RS         BundleTarget::WindowsMsix => {
-//RS             return Err("windows-msix game packages require a Windows host for `--run-now`".into())
-//RS         }
-//RS     };
-//RS     if renderer == "raylib" {
-//RS         command.env("JET_RAYLIB_DISPLAY", "1");
-//RS     } else {
-//RS         command.env_remove("JET_RAYLIB_DISPLAY");
-//RS     }
-//RS     let child = command
-//RS         .spawn()
-//RS         .map_err(|error| format!("could not launch game package `{}`: {error}", path.display()))?;
-//RS     Ok(child.id())
-//RS }
-//RS 
-//RS fn resolve_game_destination(root: &Path, path: &Path) -> PathBuf {
-//RS     if path.is_absolute() {
-//RS         path.to_path_buf()
-//RS     } else {
-//RS         root.join(path)
-//RS     }
-//RS }
-//RS 
-//RS fn deploy_game_output(source: &Path, destination: &Path, force_clean: bool) -> Result<PathBuf, String> {
-//RS     let source_metadata = fs::symlink_metadata(source)
-//RS         .map_err(|error| format!("could not inspect game package `{}`: {error}", source.display()))?;
-//RS     if source_metadata.file_type().is_symlink() {
-//RS         return Err(format!("game package `{}` must not be a symlink", source.display()));
-//RS     }
-//RS     if source_metadata.is_file() {
-//RS         let destination_metadata = fs::symlink_metadata(destination).ok();
-//RS         if let Some(metadata) = destination_metadata.as_ref() {
-//RS             if metadata.file_type().is_symlink() {
-//RS                 return Err(format!("deploy destination `{}` must not be a symlink", destination.display()));
-//RS             }
-//RS         }
-//RS         let final_path = if destination_metadata.as_ref().is_some_and(|metadata| metadata.is_dir()) {
-//RS             destination.join(
-//RS                 source
-//RS                     .file_name()
-//RS                     .ok_or_else(|| format!("game package `{}` has no file name", source.display()))?,
-//RS             )
-//RS         } else {
-//RS             destination.to_path_buf()
-//RS         };
-//RS         if let Ok(metadata) = fs::symlink_metadata(&final_path) {
-//RS             if metadata.file_type().is_symlink() {
-//RS                 return Err(format!("deploy destination `{}` must not be a symlink", final_path.display()));
-//RS             }
-//RS             if !force_clean {
-//RS                 return Err(format!(
-//RS                     "deploy destination `{}` already exists; pass `--clean` to replace it",
-//RS                     final_path.display()
-//RS                 ));
-//RS             }
-//RS             if metadata.is_dir() {
-//RS                 return Err(format!("deploy destination `{}` is a directory", final_path.display()));
-//RS             }
-//RS             fs::remove_file(&final_path)
-//RS                 .map_err(|error| format!("could not replace deploy destination `{}`: {error}", final_path.display()))?;
-//RS         }
-//RS         let parent = final_path
-//RS             .parent()
-//RS             .ok_or_else(|| format!("deploy destination `{}` has no parent", final_path.display()))?;
-//RS         fs::create_dir_all(parent)
-//RS             .map_err(|error| format!("could not create deploy directory `{}`: {error}", parent.display()))?;
-//RS         let temporary = parent.join(format!(
-//RS             ".{}-deploy-{}",
-//RS             final_path.file_name().and_then(|name| name.to_str()).unwrap_or("game"),
-//RS             std::process::id()
-//RS         ));
-//RS         if fs::symlink_metadata(&temporary).is_ok() {
-//RS             return Err(format!("deploy staging `{}` already exists", temporary.display()));
-//RS         }
-//RS         let result: Result<(), String> = (|| {
-//RS             fs::copy(source, &temporary)
-//RS                 .map_err(|error| format!("could not copy game package `{}`: {error}", source.display()))?;
-//RS             set_mode(&temporary, game_file_mode(&source_metadata))?;
-//RS             fs::rename(&temporary, &final_path).map_err(|error| {
-//RS                 format!(
-//RS                     "could not atomically publish deployed game package `{}`: {error}",
-//RS                     final_path.display()
-//RS                 )
-//RS             })?;
-//RS             Ok(())
-//RS         })();
-//RS         if result.is_err() {
-//RS             cleanup_staging(&temporary, false);
-//RS         }
-//RS         result?;
-//RS         return Ok(final_path);
-//RS     }
-//RS     if !source_metadata.is_dir() {
-//RS         return Err(format!("game package `{}` is not a regular file or directory", source.display()));
-//RS     }
-//RS     if let Ok(metadata) = fs::symlink_metadata(destination) {
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!("deploy destination `{}` must not be a symlink", destination.display()));
-//RS         }
-//RS         if !force_clean {
-//RS             return Err(format!(
-//RS                 "deploy destination `{}` already exists; pass `--clean` to replace it",
-//RS                 destination.display()
-//RS             ));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             fs::remove_dir_all(destination)
-//RS                 .map_err(|error| format!("could not replace deploy destination `{}`: {error}", destination.display()))?;
-//RS         } else {
-//RS             fs::remove_file(destination)
-//RS                 .map_err(|error| format!("could not replace deploy destination `{}`: {error}", destination.display()))?;
-//RS         }
-//RS     }
-//RS     let parent = destination
-//RS         .parent()
-//RS         .ok_or_else(|| format!("deploy destination `{}` has no parent", destination.display()))?;
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create deploy directory `{}`: {error}", parent.display()))?;
-//RS     let temporary = parent.join(format!(
-//RS         ".{}-deploy-{}",
-//RS         destination.file_name().and_then(|name| name.to_str()).unwrap_or("game"),
-//RS         std::process::id()
-//RS     ));
-//RS     if fs::symlink_metadata(&temporary).is_ok() {
-//RS         return Err(format!("deploy staging `{}` already exists", temporary.display()));
-//RS     }
-//RS     let result: Result<(), String> = (|| {
-//RS         fs::create_dir(&temporary)
-//RS             .map_err(|error| format!("could not create deploy staging `{}`: {error}", temporary.display()))?;
-//RS         copy_game_directory(source, &temporary)?;
-//RS         set_mode(&temporary, game_file_mode(&source_metadata))?;
-//RS         fs::rename(&temporary, destination).map_err(|error| {
-//RS             format!(
-//RS                 "could not atomically publish deployed game package `{}`: {error}",
-//RS                 destination.display()
-//RS             )
-//RS         })?;
-//RS         Ok(())
-//RS     })();
-//RS     if result.is_err() {
-//RS         cleanup_staging(&temporary, true);
-//RS     }
-//RS     result?;
-//RS     Ok(destination.to_path_buf())
-//RS }
-//RS 
-//RS fn copy_game_directory(source: &Path, destination: &Path) -> Result<(), String> {
-//RS     let mut entries = fs::read_dir(source)
-//RS         .map_err(|error| format!("could not enumerate game package `{}`: {error}", source.display()))?
-//RS         .collect::<Result<Vec<_>, _>>()
-//RS         .map_err(|error| format!("could not enumerate game package `{}`: {error}", source.display()))?;
-//RS     entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-//RS     for entry in entries {
-//RS         let source_path = entry.path();
-//RS         let destination_path = destination.join(entry.file_name());
-//RS         let metadata = fs::symlink_metadata(&source_path)
-//RS             .map_err(|error| format!("could not inspect game package `{}`: {error}", source_path.display()))?;
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!("game package `{}` must not contain symlinks", source_path.display()));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             fs::create_dir(&destination_path)
-//RS                 .map_err(|error| format!("could not create deployed game directory `{}`: {error}", destination_path.display()))?;
-//RS             copy_game_directory(&source_path, &destination_path)?;
-//RS             set_mode(&destination_path, game_file_mode(&metadata))?;
-//RS         } else if metadata.is_file() {
-//RS             fs::copy(&source_path, &destination_path)
-//RS                 .map_err(|error| format!("could not copy deployed game file `{}`: {error}", source_path.display()))?;
-//RS             set_mode(&destination_path, game_file_mode(&metadata))?;
-//RS         } else {
-//RS             return Err(format!("game package `{}` is not a regular file or directory", source_path.display()));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn stage_game_plan(
-//RS     root: &Path,
-//RS     plan: &PackageBundlePlan,
-//RS     force_clean: bool,
-//RS     resume: bool,
-//RS     dry_run: bool,
-//RS ) -> Result<PathBuf, String> {
-//RS     let stage_root = root.join(".jet").join("game-stages");
-//RS     let identity = plan.identity.replace(':', "-");
-//RS     let final_dir = stage_root.join(&identity);
-//RS     if dry_run {
-//RS         return Ok(final_dir);
-//RS     }
-//RS     let marker = CanonicalJson::object([
-//RS         ("plan_identity".into(), CanonicalJson::String(plan.identity.clone())),
-//RS         ("schema".into(), CanonicalJson::String("jet.game.stage".into())),
-//RS     ])
-//RS     .map_err(|error| format!("could not create game stage marker: {error}"))?
-//RS     .bytes();
-//RS     if fs::symlink_metadata(&final_dir).is_ok() {
-//RS         ensure_game_stage_marker(&final_dir, &marker)?;
-//RS         if force_clean {
-//RS             fs::remove_dir_all(&final_dir)
-//RS                 .map_err(|error| format!("could not remove game stage `{}`: {error}", final_dir.display()))?;
-//RS         } else {
-//RS             if resume {
-//RS                 return Ok(final_dir);
-//RS             }
-//RS             return Ok(final_dir);
-//RS         }
-//RS 
-//RS     } else if resume {
-//RS         return Err(format!(
-//RS             "no resumable game stage exists for plan `{}`",
-//RS             plan.identity
-//RS         ));
-//RS     }
-//RS     fs::create_dir_all(&stage_root)
-//RS         .map_err(|error| format!("could not create game stage root `{}`: {error}", stage_root.display()))?;
-//RS     let staging = stage_root.join(format!(".{identity}-staging"));
-//RS     if fs::symlink_metadata(&staging).is_ok() {
-//RS         return Err(format!(
-//RS             "game stage `{}` already exists; refusing stale or foreign staging",
-//RS             staging.display()
-//RS         ));
-//RS     }
-//RS     let result: Result<(), String> = (|| {
-//RS         fs::create_dir(&staging)
-//RS             .map_err(|error| format!("could not create game stage `{}`: {error}", staging.display()))?;
-//RS         write_atomic_bytes(&staging.join("staging.json"), &marker)?;
-//RS         write_atomic_bytes(&staging.join("plan.json"), &plan.to_json().bytes())?;
-//RS         for file in &plan.files {
-//RS             let destination = staging.join("files").join(&file.path);
-//RS             if let Some(parent) = destination.parent() {
-//RS                 fs::create_dir_all(parent).map_err(|error| {
-//RS                     format!("could not create staged game directory `{}`: {error}", parent.display())
-//RS                 })?;
-//RS             }
-//RS             fs::write(&destination, &file.bytes)
-//RS                 .map_err(|error| format!("could not write staged game file `{}`: {error}", destination.display()))?;
-//RS             set_mode(&destination, file.mode)?;
-//RS         }
-//RS         fs::rename(&staging, &final_dir).map_err(|error| {
-//RS             format!(
-//RS                 "could not atomically publish game stage `{}`: {error}",
-//RS                 final_dir.display()
-//RS             )
-//RS         })?;
-//RS         Ok(())
-//RS     })();
-//RS     if result.is_err() {
-//RS         cleanup_staging(&staging, true);
-//RS     }
-//RS     result?;
-//RS     Ok(final_dir)
-//RS }
-//RS fn verify_game_stage_files(stage: &Path, plan: &PackageBundlePlan) -> Result<(), String> {
-//RS 
-//RS     let marker = CanonicalJson::object([
-//RS         ("plan_identity".into(), CanonicalJson::String(plan.identity.clone())),
-//RS         ("schema".into(), CanonicalJson::String("jet.game.stage".into())),
-//RS     ])
-//RS     .map_err(|error| format!("could not create game stage marker: {error}"))?
-//RS     .bytes();
-//RS     ensure_game_stage_marker(stage, &marker)?;
-//RS     for file in &plan.files {
-//RS         let path = stage.join("files").join(&file.path);
-//RS         ensure_regular_game_file(&path, "staged game file")?;
-//RS         let bytes = fs::read(&path)
-//RS             .map_err(|error| format!("could not read staged game file `{}`: {error}", path.display()))?;
-//RS         if bytes != file.bytes || jet::SHA256::sha256_hex(&bytes) != file.digest() {
-//RS             return Err(format!("staged game file `{}` has a foreign digest", path.display()));
-//RS         }
-//RS         let metadata = fs::symlink_metadata(&path)
-//RS             .map_err(|error| format!("could not inspect staged game file `{}`: {error}", path.display()))?;
-//RS         if game_file_mode(&metadata) != file.mode {
-//RS             return Err(format!("staged game file `{}` has a foreign mode", path.display()));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS fn export_game_output(
-//RS     root: &Path,
-//RS     plan: &PackageBundlePlan,
-//RS     target: BundleTarget,
-//RS     preset: &str,
-//RS     force_clean: bool,
-//RS ) -> Result<(PathBuf, MaterializedFacts), String> {
-//RS     if plan.target != target {
-//RS         return Err(format!(
-//RS             "export target `{}` does not match package plan target `{}`",
-//RS             target.as_str(),
-//RS             plan.target.as_str()
-//RS         ));
-//RS     }
-//RS     if preset == "store" && target != BundleTarget::WindowsMsix {
-//RS         return Err("the `store` export preset requires `windows-msix`".into());
-//RS     }
-//RS     if preset == "headless"
-//RS         && plan
-//RS             .game
-//RS             .as_ref()
-//RS             .is_some_and(|game| game.renderer != "headless")
-//RS     {
-//RS         return Err("the `headless` export preset requires a headless renderer".into());
-//RS     }
-//RS     let export_root = root.join(".jet").join("game-exports").join(preset);
-//RS     fs::create_dir_all(&export_root)
-//RS         .map_err(|error| format!("could not create game export directory `{}`: {error}", export_root.display()))?;
-//RS     let destination = export_root.join(&plan.artifact_name);
-//RS     prepare_export_destination(&destination, force_clean)?;
-//RS     let facts = materialize_package(plan, &destination)?;
-//RS     Ok((destination, facts))
-//RS }
-//RS 
-//RS fn prepare_export_destination(path: &Path, force_clean: bool) -> Result<(), String> {
-//RS     let metadata = match fs::symlink_metadata(path) {
-//RS         Ok(metadata) => metadata,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-//RS         Err(error) => {
-//RS             return Err(format!(
-//RS                 "could not inspect existing export `{}`: {error}",
-//RS                 path.display()
-//RS             ))
-//RS         }
-//RS     };
-//RS     if metadata.file_type().is_symlink() {
-//RS         return Err(format!("export destination `{}` must not be a symlink", path.display()));
-//RS     }
-//RS     if !force_clean {
-//RS         return Err(format!(
-//RS             "export destination `{}` already exists; pass `--clean` to replace an owned export",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     if metadata.is_dir() {
-//RS         fs::remove_dir_all(path)
-//RS     } else {
-//RS         fs::remove_file(path)
-//RS     }
-//RS     .map_err(|error| format!("could not remove existing export `{}`: {error}", path.display()))
-//RS }
-//RS 
-//RS fn cancel_game_stages(root: &Path) -> Result<(Option<PathBuf>, String), String> {
-//RS     let stage_root = root.join(".jet").join("game-stages");
-//RS     let metadata = match fs::symlink_metadata(&stage_root) {
-//RS         Ok(metadata) => metadata,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             return Ok((None, "no owned game staging exists".into()))
-//RS         }
-//RS         Err(error) => {
-//RS             return Err(format!(
-//RS                 "could not inspect game stage root `{}`: {error}",
-//RS                 stage_root.display()
-//RS             ))
-//RS         }
-//RS     };
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         return Err(format!(
-//RS             "game stage root `{}` is not an owned directory",
-//RS             stage_root.display()
-//RS         ));
-//RS     }
-//RS     let mut cancelled = None;
-//RS     let entries = fs::read_dir(&stage_root)
-//RS         .map_err(|error| format!("could not enumerate game stages `{}`: {error}", stage_root.display()))?
-//RS         .collect::<Result<Vec<_>, _>>()
-//RS         .map_err(|error| format!("could not enumerate game stages `{}`: {error}", stage_root.display()))?;
-//RS     for entry in entries {
-//RS         let path = entry.path();
-//RS         let name = entry.file_name().to_string_lossy().into_owned();
-//RS         if name.starts_with('.') && !name.ends_with("-staging") {
-//RS             continue;
-//RS         }
-//RS         let path_metadata = fs::symlink_metadata(&path)
-//RS             .map_err(|error| format!("could not inspect game stage `{}`: {error}", path.display()))?;
-//RS         if path_metadata.file_type().is_symlink() || !path_metadata.is_dir() {
-//RS             return Err(format!("game stage `{}` is not an owned directory", path.display()));
-//RS         }
-//RS         let marker = fs::read(path.join("staging.json")).map_err(|error| {
-//RS             format!("could not read game stage marker `{}`: {error}", path.join("staging.json").display())
-//RS         })?;
-//RS         if !marker
-//RS             .windows(b"\"schema\":\"jet.game.stage\"".len())
-//RS             .any(|window| window == b"\"schema\":\"jet.game.stage\"")
-//RS         {
-//RS             return Err(format!(
-//RS                 "game stage `{}` has a foreign marker; refusing cancellation",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         fs::remove_dir_all(&path)
-//RS             .map_err(|error| format!("could not cancel game stage `{}`: {error}", path.display()))?;
-//RS         cancelled = Some(path);
-//RS     }
-//RS     Ok((
-//RS         cancelled,
-//RS         "owned canonical game stages cancelled".into(),
-//RS     ))
-//RS }
-//RS 
-//RS fn ensure_game_stage_marker(path: &Path, expected: &[u8]) -> Result<(), String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("could not inspect game stage `{}`: {error}", path.display()))?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         return Err(format!("game stage `{}` is not an owned directory", path.display()));
-//RS     }
-//RS     let marker = path.join("staging.json");
-//RS     let bytes = fs::read(&marker)
-//RS         .map_err(|error| format!("could not read game stage marker `{}`: {error}", marker.display()))?;
-//RS     if bytes != expected {
-//RS         return Err(format!(
-//RS             "game stage `{}` has a foreign or stale identity; refusing to reuse it",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn game_phase(
-//RS     phase: &str,
-//RS     status: &str,
-//RS     header: &GameHeader,
-//RS     started: Instant,
-//RS     cache_hit: bool,
-//RS     invalidation: String,
-//RS     output: Option<String>,
-//RS     sha256: Option<String>,
-//RS     bytes: Option<u64>,
-//RS     diagnostic: Option<GameDiagnostic>,
-//RS ) -> GamePhaseReceipt {
-//RS     GamePhaseReceipt {
-//RS         phase: phase.into(),
-//RS         status: status.into(),
-//RS         header: header.clone(),
-//RS         cache_hit,
-//RS         invalidation,
-//RS         output,
-//RS         sha256,
-//RS         bytes,
-//RS         duration_ms: started.elapsed().as_millis() as u64,
-//RS         diagnostic,
-//RS     }
-//RS }
-//RS 
-//RS fn game_phase_json(phase: &GamePhaseReceipt) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("authority_identity".into(), CanonicalJson::String(phase.header.authority_identity.clone())),
-//RS         ("backend".into(), CanonicalJson::String(phase.header.backend.clone())),
-//RS         ("build_identity".into(), CanonicalJson::String(phase.header.build_identity.clone())),
-//RS         ("bytes".into(), phase.bytes.map(json_integer).unwrap_or(CanonicalJson::Null)),
-//RS         ("cache_hit".into(), CanonicalJson::Bool(phase.cache_hit)),
-//RS         ("cook_mode".into(), CanonicalJson::String(phase.header.cook_mode.clone())),
-//RS         ("crash_consent".into(), CanonicalJson::String(phase.header.crash_consent.clone())),
-//RS         ("crash_reporter".into(), CanonicalJson::String(phase.header.crash_reporter.clone())),
-//RS         ("crash_runtime".into(), game_crash_runtime_json(&phase.header.crash_runtime)),
-//RS         ("development_stripping".into(), CanonicalJson::Bool(phase.header.development_stripping)),
-//RS         ("diagnostic".into(), phase.diagnostic.as_ref().map(game_diagnostic_json).unwrap_or(CanonicalJson::Null)),
-//RS         ("duration_ms".into(), json_integer(phase.duration_ms)),
-//RS         ("effect_identity".into(), CanonicalJson::String(phase.header.effect_identity.clone())),
-//RS         ("invalidation".into(), CanonicalJson::String(phase.invalidation.clone())),
-//RS         ("output".into(), phase.output.as_deref().map(json_text_value).unwrap_or(CanonicalJson::Null)),
-//RS         ("phase".into(), CanonicalJson::String(phase.phase.clone())),
-//RS         ("profile".into(), CanonicalJson::String(phase.header.profile.clone())),
-//RS         ("renderer".into(), CanonicalJson::String(phase.header.renderer.clone())),
-//RS         ("sha256".into(), phase.sha256.as_deref().map(json_text_value).unwrap_or(CanonicalJson::Null)),
-//RS         ("source_revision".into(), CanonicalJson::String(phase.header.source_revision.clone())),
-//RS         ("status".into(), CanonicalJson::String(phase.status.clone())),
-//RS         ("target".into(), CanonicalJson::String(phase.header.target.clone())),
-//RS     ])
-//RS     .expect("fixed game phase JSON keys")
-//RS }
-//RS 
-//RS fn game_diagnostic_json(diagnostic: &GameDiagnostic) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("code".into(), CanonicalJson::String(diagnostic.code.clone())),
-//RS         ("fix".into(), CanonicalJson::String(diagnostic.fix.clone())),
-//RS         ("what".into(), CanonicalJson::String(diagnostic.what.clone())),
-//RS     ])
-//RS     .expect("fixed game diagnostic JSON keys")
-//RS }
-//RS 
-//RS fn game_crash_runtime_json(runtime: &GameCrashReporterSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("abi".into(), CanonicalJson::String(GAME_CRASH_REPORTER_ABI.into())),
-//RS         ("installation".into(), json_text_value(&runtime.installation)),
-//RS         (
-//RS             "memory".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_logs".into(), json_integer(runtime.memory_logs)),
-//RS                 ("max_stacks".into(), json_integer(runtime.memory_stacks)),
-//RS             ])
-//RS             .expect("fixed game crash memory JSON keys"),
-//RS         ),
-//RS         (
-//RS             "retention".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_reports".into(), json_integer(runtime.retention_limit)),
-//RS                 ("mode".into(), json_text_value(&runtime.retention_mode)),
-//RS                 ("path".into(), json_text_value(&runtime.retention_path)),
-//RS             ])
-//RS             .expect("fixed game crash retention JSON keys"),
-//RS         ),
-//RS         ("routing".into(), json_text_value(&runtime.routing)),
-//RS         ("upload_policy".into(), json_text_value(&runtime.upload_policy)),
-//RS     ])
-//RS     .expect("fixed game crash runtime JSON keys")
-//RS }
-//RS 
-//RS fn game_materialization_json(
-//RS     status: &str,
-//RS     artifact_sha256: Option<&str>,
-//RS     output: Option<&Path>,
-//RS     artifact: Option<&PackageBundleArtifact>,
-//RS ) -> CanonicalJson {
-//RS     let materializer = artifact
-//RS         .and_then(|value| value.receipt.materializer.as_ref())
-//RS         .map(game_materializer_json)
-//RS         .unwrap_or(CanonicalJson::Null);
-//RS     CanonicalJson::object([
-//RS         ("artifact_sha256".into(), artifact_sha256.map(json_text_value).unwrap_or(CanonicalJson::Null)),
-//RS         (
-//RS             "bytes".into(),
-//RS             artifact
-//RS                 .map(|value| json_integer(value.bytes()))
-//RS                 .unwrap_or(CanonicalJson::Null),
-//RS         ),
-//RS         (
-//RS             "output".into(),
-//RS             output
-//RS                 .map(|path| json_text_value(&path.display().to_string()))
-//RS                 .unwrap_or(CanonicalJson::Null),
-//RS         ),
-//RS         ("materializer".into(), materializer),
-//RS         ("status".into(), json_text_value(status)),
-//RS     ])
-//RS     .expect("fixed game materialization JSON keys")
-//RS }
-//RS 
-//RS fn game_materializer_json(materializer: &BundleMaterializerFact) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("authority".into(), json_text_value(&materializer.authority)),
-//RS         ("executable".into(), json_text_value(&materializer.executable)),
-//RS         ("mechanism".into(), json_text_value(&materializer.mechanism)),
-//RS         ("policy".into(), json_text_value(&materializer.policy)),
-//RS         ("tool".into(), json_text_value(&materializer.tool)),
-//RS         ("tool_identity".into(), json_text_value(&materializer.tool_identity)),
-//RS         ("tool_version".into(), json_text_value(&materializer.tool_version)),
-//RS     ])
-//RS     .expect("fixed game materializer JSON keys")
-//RS }
-//RS 
-//RS fn game_report_json(
-//RS     header: &GameHeader,
-//RS     phases: &[String],
-//RS     receipts: &[GamePhaseReceipt],
-//RS     plan_identity: Option<&str>,
-//RS     plan: Option<&PackageBundlePlan>,
-//RS     artifact_sha256: Option<&str>,
-//RS     output: Option<&Path>,
-//RS     artifact: Option<&PackageBundleArtifact>,
-//RS     explain: bool,
-//RS     planned: bool,
-//RS ) -> CanonicalJson {
-//RS     let status = if receipts
-//RS         .iter()
-//RS         .any(|phase| phase.status == "error" || phase.diagnostic.is_some())
-//RS     {
-//RS         "error"
-//RS     } else if receipts.iter().any(|phase| phase.status == "cancelled") {
-//RS         "cancelled"
-//RS     } else {
-//RS         "ok"
-//RS     };
-//RS     let execution = if planned {
-//RS         "planned"
-//RS     } else if artifact.is_some() {
-//RS         "materialized"
-//RS     } else {
-//RS         "not-materialized"
-//RS     };
-//RS     let artifact_status = if artifact.is_some() {
-//RS         "materialized"
-//RS     } else if plan.is_some() {
-//RS         "planned"
-//RS     } else {
-//RS         "none"
-//RS     };
-//RS     let signing_status = artifact
-//RS         .map(|value| value.receipt.signing_status().as_str())
-//RS         .or_else(|| {
-//RS             plan.map(|value| {
-//RS                 if value.signing_hooks.is_empty() {
-//RS                     "not-requested"
-//RS                 } else {
-//RS                     "requested"
-//RS                 }
-//RS             })
-//RS         })
-//RS         .unwrap_or("not-requested");
-//RS     let materialization = game_materialization_json(
-//RS         execution,
-//RS         artifact_sha256,
-//RS         output,
-//RS         artifact,
-//RS     );
-//RS     let mut fields = vec![
-//RS         (
-//RS             "artifact".into(),
-//RS             artifact.map(|value| value.to_json()).unwrap_or(CanonicalJson::Null),
-//RS         ),
-//RS         ("artifact_status".into(), json_text_value(artifact_status)),
-//RS         ("artifact_sha256".into(), artifact_sha256.map(json_text_value).unwrap_or(CanonicalJson::Null)),
-//RS         ("execution".into(), json_text_value(execution)),
-//RS         ("authority_identity".into(), CanonicalJson::String(header.authority_identity.clone())),
-//RS         ("backend".into(), CanonicalJson::String(header.backend.clone())),
-//RS         ("build_identity".into(), CanonicalJson::String(header.build_identity.clone())),
-//RS         ("cook_mode".into(), CanonicalJson::String(header.cook_mode.clone())),
-//RS         ("crash_consent".into(), CanonicalJson::String(header.crash_consent.clone())),
-//RS         ("crash_reporter".into(), CanonicalJson::String(header.crash_reporter.clone())),
-//RS         ("development_stripping".into(), CanonicalJson::Bool(header.development_stripping)),
-//RS         ("crash_runtime".into(), game_crash_runtime_json(&header.crash_runtime)),
-//RS         ("effect_identity".into(), CanonicalJson::String(header.effect_identity.clone())),
-//RS         ("export_preset".into(), CanonicalJson::String(header.export_preset.clone())),
-//RS         ("format".into(), CanonicalJson::String(GAME_PACKAGE_RECEIPT_SCHEMA.into())),
-//RS         ("output".into(), output.map(|path| json_text_value(&path.display().to_string())).unwrap_or(CanonicalJson::Null)),
-//RS         ("materialization".into(), materialization),
-//RS         ("phases".into(), CanonicalJson::Array(receipts.iter().map(game_phase_json).collect())),
-//RS         ("plan".into(), plan.map(|value| value.to_json()).unwrap_or(CanonicalJson::Null)),
-//RS         ("plan_identity".into(), plan_identity.map(json_text_value).unwrap_or(CanonicalJson::Null)),
-//RS         ("profile".into(), CanonicalJson::String(header.profile.clone())),
-//RS         ("renderer".into(), CanonicalJson::String(header.renderer.clone())),
-//RS         ("requested_phases".into(), CanonicalJson::Array(phases.iter().map(|phase| json_text_value(phase)).collect())),
-//RS         ("schema".into(), CanonicalJson::String(GAME_PACKAGE_RECEIPT_SCHEMA.into())),
-//RS         ("source_revision".into(), CanonicalJson::String(header.source_revision.clone())),
-//RS         ("status".into(), CanonicalJson::String(status.into())),
-//RS         ("planned".into(), CanonicalJson::Bool(planned)),
-//RS         ("target".into(), CanonicalJson::String(header.target.clone())),
-//RS         ("signing_status".into(), json_text_value(signing_status)),
-//RS     ];
-//RS     if explain {
-//RS         let cook = receipts.iter().find(|phase| phase.phase == "cook");
-//RS         let cache_identity = cook
-//RS             .and_then(|phase| phase.sha256.as_deref())
-//RS             .unwrap_or("not computed");
-//RS         fields.push((
-//RS             "explain".into(),
-//RS             CanonicalJson::object([
-//RS                 ("authority_identity".into(), json_text_value(&header.authority_identity)),
-//RS                 ("cache_identity".into(), json_text_value(cache_identity)),
-//RS                 ("execution".into(), json_text_value(execution)),
-//RS                 ("planned".into(), CanonicalJson::Bool(planned)),
-//RS                 (
-//RS                     "inputs".into(),
-//RS                     artifact
-//RS                         .map(|value| value.receipt.to_json())
-//RS                         .or_else(|| plan.map(|value| value.to_json()))
-//RS                         .unwrap_or(CanonicalJson::Null),
-//RS                 ),
-//RS                 ("phases".into(), CanonicalJson::Array(receipts.iter().map(|phase| json_text_value(&phase.phase)).collect())),
-//RS                 ("pipeline".into(), CanonicalJson::Array(phases.iter().map(|phase| json_text_value(phase)).collect())),
-//RS             ])
-//RS             .expect("fixed game explanation JSON keys"),
-//RS         ));
-//RS     }
-//RS     CanonicalJson::object(fields).expect("fixed game package receipt JSON keys")
-//RS }
-//RS 
-//RS fn json_text_value(value: &str) -> CanonicalJson {
-//RS     CanonicalJson::String(value.into())
-//RS }
-//RS 
-//RS fn json_integer(value: impl ToString) -> CanonicalJson {
-//RS     CanonicalJson::Integer(value.to_string())
-//RS }
-//RS fn write_game_receipt(path: &Path, report: &CanonicalJson) -> Result<(), String> {
-//RS     let bytes = report.bytes();
-//RS     write_atomic_bytes(path, &bytes)
-//RS }
-//RS 
-//RS fn record_game_receipt(
-//RS     args: &[String],
-//RS     input_paths: &[PathBuf],
-//RS     report: &CanonicalJson,
-//RS     phases: &[GamePhaseReceipt],
-//RS ) -> Result<jet::ReceiptStore::Receipt, String> {
-//RS     let cwd = std::env::current_dir()
-//RS         .map_err(|error| format!("could not read current directory: {error}"))?;
-//RS     let root = jet::ReceiptStore::receipt_root_for("package", args, &cwd);
-//RS     let store = jet::ReceiptStore::ReceiptStore::new(root);
-//RS     let mut sections = Vec::with_capacity(phases.len() + 1);
-//RS     sections.push(
-//RS         jet::ReceiptStore::ReceiptSection::from_json(
-//RS             "game",
-//RS             "GamePackageReceipt",
-//RS             report.clone(),
-//RS         )
-//RS         .map_err(|error| format!("could not encode game package receipt section: {error}"))?,
-//RS     );
-//RS     for phase in phases {
-//RS         sections.push(
-//RS             jet::ReceiptStore::ReceiptSection::from_json(
-//RS                 format!("game.{}", phase.phase),
-//RS                 "GamePhaseReceipt",
-//RS                 game_phase_json(phase),
-//RS             )
-//RS             .map_err(|error| format!("could not encode {} receipt section: {error}", phase.phase))?,
-//RS         );
-//RS     }
-//RS     store.record_with_sections(
-//RS         "package",
-//RS         args,
-//RS         input_paths,
-//RS         0,
-//RS         &report.bytes(),
-//RS         &[],
-//RS         &sections,
-//RS     )
-//RS }
-//RS 
-//RS fn render_game_report(
-//RS     run: &GameRun,
-//RS     report_path: &Path,
-//RS     receipt_digest: &str,
-//RS     mode: crate::OutputMode,
-//RS ) {
-//RS     if mode.json {
-//RS         let game = status_value(&run.report);
-//RS         let fields = StatusFields::new()
-//RS             .with("kind", "game")
-//RS             .with("game", game)
-//RS             .with("receipt", report_path.display().to_string())
-//RS             .with("receipt_digest", receipt_digest);
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("package", run.success)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS         return;
-//RS     }
-//RS     println!("game package: {}", if run.success { "ok" } else { "error" });
-//RS     if let Some(phase) = run.phases.first() {
-//RS         println!(
-//RS             "target: {} profile: {} backend: {} renderer: {}",
-//RS             phase.header.target, phase.header.profile, phase.header.backend, phase.header.renderer
-//RS         );
-//RS     }
-//RS     for phase in &run.phases {
-//RS         println!(
-//RS             "{}: {}{}",
-//RS             phase.phase,
-//RS             phase.status,
-//RS             phase
-//RS                 .output
-//RS                 .as_ref()
-//RS                 .map(|output| format!(" ({output})"))
-//RS                 .unwrap_or_default()
-//RS         );
-//RS     }
-//RS     if let Some(output) = run.output.as_ref() {
-//RS         println!("output: {}", output.display());
-//RS     }
-//RS     println!("receipt: {} ({receipt_digest})", report_path.display());
-//RS }
-// END-PORT-PENDING 0700 Source/CmdPackage.rs:1493-3654
+use jet_foundation.TEXT_NUL
+use jet.Package.PackageFacts
+use jet.SHA256.sha256_hex
+use core.files as fs
+use core.time.Instant
+use core.process.Command
+// GATE #4494: native filesystem, clock and child-process operations.
+
+// Rust: Source/CmdPackage.rs:1493
+fn execute_game_package(options: PackageOptions) -> GameRun Err! {
+    planned :: options.dry_run || options.explain
+    target :: options.target.ok_or_else(() -> "`jet package --kind game` needs an explicit `--target`")?
+    profile :: options.profile.unwrap_or("release")
+    validate_game_profile_name(profile)?
+    backend :: options.backend.unwrap_or("aot")
+    if backend != "aot" -> return Err("unsupported game backend `{backend}`; the only artifact-producing backend is `aot`")
+    renderer :: options.renderer.unwrap_or("headless")
+    if renderer != "headless" && renderer != "raylib" -> return Err("unknown game renderer `{renderer}`; use `headless` or `raylib`")
+    export_preset :: options.export_preset.unwrap_or("default")
+    if export_preset != "default" && export_preset != "store" && export_preset != "headless" -> return Err("unknown game export preset `{export_preset}`; use `default`, `store`, or `headless`")
+    if export_preset == "headless" && renderer != "headless" -> return Err("the `headless` export preset requires `--renderer headless`")
+    requested_cook_mode :: options.cook_mode
+    crash_reporter :: options.crash_reporter.unwrap_or("off")
+    if crash_reporter != "off" && crash_reporter != "on" && crash_reporter != "opt-in" -> return Err("unknown crash reporter policy `{crash_reporter}`; use `off`, `on`, or `opt-in`")
+    crash_consent :: options.crash_consent.unwrap_or("not-requested")
+    if crash_consent != "not-requested" && crash_consent != "granted" && crash_consent != "denied" -> return Err("unknown crash reporter consent `{crash_consent}`; use `not-requested`, `granted`, or `denied`")
+    if crash_reporter == "on" && crash_consent != "granted" -> return Err("crash reporter `on` requires `--crash-consent granted`")
+    if crash_reporter == "off" && crash_consent == "granted" -> return Err("crash reporter consent cannot be granted when the reporter is off")
+    phases :: game_phase_names(options.phase)?
+    (root, source_entry) :: resolve_game_root(options)?
+    generated_hint :: source_entry.unwrap_or_else(() -> root.join("run.jet"))
+    generated_root :: generated_project_root(generated_hint)?
+    tree :: collect_game_tree(root)?
+    facts :: PackageFacts.load_checked(root).map_err((error) -> "could not load package authority in `{root.display()}`: {error}")?
+    source_revision :: game_source_revision(tree, facts)
+    validate_declared_game_profile(profile, facts)?
+    declared_profile :: facts.and_then((facts) -> facts.build_profiles.iter().find((candidate) -> candidate.name == profile))
+    cook_mode :: requested_cook_mode.unwrap_or_else(() -> declared_profile.and_then((candidate) -> candidate.game_cook_mode)
+        .unwrap_or_else(() -> if options.scripts_only -> "scripts-only" else if profile_is_development(profile) -> "fast" else -> "reproducible"))
+    if cook_mode != "fast" && cook_mode != "reproducible" && cook_mode != "scripts-only" -> return Err("unknown game cook mode `{cook_mode}`; use `fast`, `reproducible`, or `scripts-only`")
+    if options.scripts_only && cook_mode != "scripts-only" -> return Err("`--scripts-only` conflicts with an explicit non-script cook mode")
+    development_stripping :: declared_profile.and_then((candidate) -> candidate.game_development_stripping).unwrap_or_else(() -> !profile_is_development(profile))
+    authority_result :: game_authority_identity(facts, renderer)
+    authority_error :: authority_result.err()
+    authority_identity :: authority_result.unwrap_or_else((_) -> "rejected")
+    effect_identity :: game_effect_identity(renderer, backend)
+    header := GameHeader{target: target.as_str(), profile: profile, backend: backend, renderer: renderer,
+        cook_mode: cook_mode, export_preset: export_preset, source_revision: source_revision, build_identity: "planned",
+        authority_identity: authority_identity, effect_identity: effect_identity, development_stripping: development_stripping,
+        crash_reporter: crash_reporter, crash_consent: crash_consent, crash_runtime: requested_game_crash_runtime(crash_reporter, crash_consent)}
+    if authority_error == .Some(error) {
+        authority_started :: Instant.now()
+        diagnostic :: game_authority_diagnostic(error)
+        phase :: game_phase("authority", "error", header, authority_started, false, "renderer effect is not authorized", None, None, None, Some(diagnostic))
+        report :: game_report_json(header, ["authority"], [phase], None, None, None, None, None, options.explain, planned)
+        return Ok(GameRun{report: report, phases: [phase], input_paths: tree.iter().map((file) -> root.join(file.relative)).collect(),
+            root: generated_root, output: None, success: false})
+    }
+    validate_game_renderer_selection(renderer, tree)?
+    if options.cancel {
+        cancel_started :: Instant.now()
+        (cancelled, status, invalidation) :: if planned -> (None, "planned", "dry-run cancellation planned") else -> {
+            (cancelled, invalidation) :: cancel_game_stages(generated_root)?
+            (cancelled, "cancelled", invalidation)
+        }
+        phase :: game_phase("cancel", status, header, cancel_started, false, invalidation, cancelled.map((path) -> path.display().to_string()), None, None, None)
+        report :: game_report_json(header, ["cancel"], [phase], None, None, None, None, None, options.explain, planned)
+        return Ok(GameRun{report: report, phases: [phase], input_paths: tree.iter().map((file) -> root.join(file.relative)).collect(),
+            root: generated_root, output: None, success: true})
+    }
+    input_paths := tree.iter().map((file) -> root.join(file.relative)).collect()
+    phases_receipt := [GamePhaseReceipt]{}
+    build_started :: Instant.now()
+    (executable_path, executable_bytes, build_cache_hit, build_invalidation) :: if options.executable == .Some(path) -> {
+        ensure_regular_game_file(path, "executable")?
+        bytes :: fs.read(path).map_err((error) -> "could not read executable `{path.display()}`: {error}")?
+        (path, bytes, true, "explicit executable input")
+    } else if source_entry == .Some(entry) -> {
+        if planned -> (generated_root.join(".jet").join("build").join(jet.CmdCompile.stem(entry.to_string_lossy())), [], false, "dry-run build planned from source")
+        else -> {
+            path :: build_game_entry(root, entry, profile, target)?
+            bytes :: fs.read(path).map_err((error) -> "could not read built game executable `{path.display()}`: {error}")?
+            (path, bytes, false, "source revision changed or build cache missed")
+        }
+    } else if planned -> (generated_root.join(".jet").join("build").join("game"), [], false, "dry-run build planned without a source entry")
+    else -> return Err("game packaging needs `--executable <path>` or a project source entry")
+    if !executable_bytes.is_empty() && header.crash_reporter != "off" && header.crash_consent == "granted" {
+        if !executable_bytes.windows(GAME_CRASH_REPORTER_ABI.len()).any((window) -> window == GAME_CRASH_REPORTER_ABI.as_bytes()) {
+            return Err("active game crash reporter requires a binary built with Jet's game reporter bootstrap; build from a game source entry or use `--crash-reporter off`")
+        }
+        header.crash_runtime = GameCrashReporterSpec.installed()
+    }
+    header.build_identity = if executable_bytes.is_empty() -> "planned" else -> {
+        executable_digest :: sha256_hex(executable_bytes)
+        "sha256:{sha256_hex(\"jet-game-build-v1{TEXT_NUL}{source_revision}{TEXT_NUL}{target.as_str()}{TEXT_NUL}{backend}{TEXT_NUL}{renderer}{TEXT_NUL}{executable_digest}\".as_bytes())}"
+    }
+    phases_receipt.push(game_phase("build", "planned", header, build_started, build_cache_hit, build_invalidation,
+        Some(executable_path.display().to_string()), if executable_bytes.is_empty() -> None else -> Some(sha256_hex(executable_bytes)),
+        Some(UInt64.from(executable_bytes.len())), None))
+    if !planned && phases_receipt.last_mut() == .Some(phase) -> phase.status = "ok"
+    input_paths.push(executable_path)
+    dedup_paths(&input_paths)
+    cooked := CookedGameAssets?{None}
+    if phases.iter().any((phase) -> phase == "cook") {
+        cook_started :: Instant.now()
+        result :: cook_game_assets(generated_root, tree, header, options.force_clean, options.resume, planned)?
+        cook_output :: if header.cook_mode == "fast" -> "on-the-fly cook (persistent cache bypassed)" else -> generated_root.join(".jet").join("game-cache").display().to_string()
+        phases_receipt.push(game_phase("cook", if planned -> "planned" else -> "ok", header, cook_started, result.cache_hit,
+            result.invalidation, Some(cook_output), Some(result.digest), Some(result.assets.iter().map((asset) -> UInt64.from(asset.bytes.len())).sum()), None))
+        cooked = Some(result)
+    }
+    plan := PackageBundlePlan?{None}
+    stage_root := OSPath?{None}
+    output := OSPath?{None}
+    artifact := PackageBundleArtifact?{None}
+    if phases.iter().any((phase) -> phase == "stage") {
+        cooked_assets :: cooked.ok_or_else(() -> "game stage requires the cook phase")?
+        (game_plan, package_inputs) :: make_game_plan(options, target, header, executable_path, executable_bytes, cooked_assets)?
+        input_paths.extend(package_inputs)
+        dedup_paths(&input_paths)
+        stage_started :: Instant.now()
+        stage_path :: stage_game_plan(generated_root, game_plan, options.force_clean, options.resume, planned)?
+        stage_root = Some(stage_path)
+        invalidation :: if options.force_clean -> "forced-clean requested" else if options.resume -> "resumed canonical plan staging" else -> "new canonical plan staging"
+        phases_receipt.push(game_phase("stage", "planned", header, stage_started, false, invalidation,
+            Some(stage_path.display().to_string()), Some(game_plan.identity), Some(game_plan.files.iter().map((file) -> UInt64.from(file.bytes.len())).sum()), None))
+        if !planned && phases_receipt.last_mut() == .Some(phase) -> phase.status = "ok"
+        output = Some(resolve_output_path(options.output, game_plan.artifact_name)?)
+        plan = Some(game_plan)
+    }
+    if phases.iter().any((phase) -> phase == "package") {
+        package_started :: Instant.now()
+        game_plan :: plan.ok_or_else(() -> "game package requires the stage phase")?
+        package_output :: output.ok_or_else(() -> "game package has no output path")?
+        if planned {
+            phases_receipt.push(game_phase("package", "planned", header, package_started, false, "dry-run materialization planned",
+                Some(package_output.display().to_string()), Some(game_plan.identity), Some(game_plan.files.iter().map((file) -> UInt64.from(file.bytes.len())).sum()), None))
+        } else {
+            stage_path :: stage_root.ok_or_else(() -> "game package requires the canonical stage output")?
+            verify_game_stage_files(stage_path, game_plan)?
+            materialized :: materialize_package(game_plan, package_output)?
+            packaged := game_plan.materialized_artifact(materialized.sha256, materialized.bytes)
+            packaged.receipt.record_materializer(materialized.materializer)
+            if materialized.signing == .Some(signing) -> packaged.receipt.record_signing(signing)
+            phases_receipt.push(game_phase("package", "ok", header, package_started, false, "canonical staged plan materialized",
+                Some(package_output.display().to_string()), Some(materialized.sha256), Some(materialized.bytes), None))
+            artifact = Some(packaged)
+        }
+    }
+    if phases.iter().any((phase) -> phase == "export") {
+        export_started :: Instant.now()
+        if output == None -> return Err("game export requires the package phase")
+        game_plan :: plan.ok_or_else(() -> "game export requires the stage plan")?
+        export_destination :: root.join(".jet").join("game-exports").join(export_preset).join(game_plan.artifact_name)
+        export_status := if planned -> "planned" else -> "ok"
+        export_invalidation := "export preset `{export_preset}`"
+        export_output := Some(export_destination)
+        export_digest := artifact.map((value) -> value.digest())
+        export_bytes := artifact.map((value) -> value.bytes())
+        export_diagnostic := GameDiagnostic?{None}
+        if planned -> export_invalidation = "dry-run native export planned"
+        else {
+            if export_game_output(generated_root, game_plan, target, export_preset, options.force_clean) == {
+                .Ok((path, materialized)) -> {
+                    export_output = Some(path)
+                    export_digest = Some(materialized.sha256)
+                    export_bytes = Some(materialized.bytes)
+                    exported := game_plan.materialized_artifact(materialized.sha256, materialized.bytes)
+                    exported.receipt.record_materializer(materialized.materializer)
+                    if materialized.signing == .Some(signing) -> exported.receipt.record_signing(signing)
+                    artifact = Some(exported)
+                    output = Some(path)
+                    export_invalidation = "native export adapter materialized output"
+                }
+                .Err(error) -> {
+                    export_status = "error"; export_output = None; export_digest = None; export_bytes = None
+                    export_invalidation = "export adapter refused output"
+                    export_diagnostic = Some(GameDiagnostic{code: "E2109", what: error,
+                        fix: "choose a supported preset/target and pass `--clean` for an owned export"})
+                }
+            }
+        }
+        phases_receipt.push(game_phase("export", export_status, header, export_started, false, export_invalidation,
+            export_output.map((path) -> path.display().to_string()), export_digest, export_bytes, export_diagnostic))
+    }
+    if phases.iter().any((phase) -> phase == "deploy") {
+        deploy_started :: Instant.now()
+        destination :: options.deploy_to.map((path) -> resolve_game_destination(root, path))
+        status := "planned"
+        invalidation := "deployment is explicit and destination-scoped"
+        diagnostic := GameDiagnostic?{None}
+        deployed := destination
+        if destination == None {
+            status = "skipped"; invalidation = "deploy destination was not provided"
+            diagnostic = Some(GameDiagnostic{code: "E2104", what: "deploy phase has no destination", fix: "pass `--deploy-to <path>` or omit the deploy phase"})
+            deployed = None
+        } else if planned -> invalidation = "dry-run deployment planned"
+        else if output == .Some(package_output) {
+            if deploy_game_output(package_output, destination.expect("destination checked"), options.force_clean) == {
+                .Ok(path) -> { deployed = Some(path); invalidation = "package artifact deployed atomically" }
+                .Err(error) -> {
+                    status = "skipped"; invalidation = "deployment refused"
+                    diagnostic = Some(GameDiagnostic{code: "E2106", what: error, fix: "choose an empty destination or pass `--clean` for an owned output"})
+                    deployed = None
+                }
+            }
+        } else {
+            status = "skipped"; invalidation = "deploy requires a materialized package output"
+            diagnostic = Some(GameDiagnostic{code: "E2107", what: "deploy phase has no package artifact", fix: "include the package phase before deploy"})
+            deployed = None
+        }
+        phases_receipt.push(game_phase("deploy", status, header, deploy_started, false, invalidation,
+            deployed.map((path) -> path.display().to_string()), artifact.map((value) -> value.digest()), artifact.map((value) -> value.bytes()), diagnostic))
+    }
+    if phases.iter().any((phase) -> phase == "run") {
+        run_started :: Instant.now()
+        status := "skipped"
+        invalidation := "run requires explicit `--run-now`"
+        diagnostic := GameDiagnostic?{None}
+        if options.run_now {
+            if planned -> invalidation = "dry-run launch planned"
+            else if output == .Some(game_output) {
+                if launch_game_output(game_output, target, renderer) == {
+                    .Ok(pid) -> { status = "ok"; invalidation = "launched packaged game process pid {pid}" }
+                    .Err(error) -> {
+                        invalidation = "run launch refused"
+                        diagnostic = Some(GameDiagnostic{code: "E2108", what: error, fix: "package for the host target or omit `--run-now`"})
+                    }
+                }
+            } else {
+                invalidation = "run requires a materialized package output"
+                diagnostic = Some(GameDiagnostic{code: "E2107", what: "run phase has no package artifact", fix: "include the package phase before run"})
+            }
+        } else -> diagnostic = Some(GameDiagnostic{code: "E2105", what: "run phase was requested without `--run-now`", fix: "pass `--run-now` to opt into process launch"})
+        phases_receipt.push(game_phase("run", status, header, run_started, false, invalidation,
+            output.map((path) -> path.display().to_string()), artifact.map((value) -> value.digest()), artifact.map((value) -> value.bytes()), diagnostic))
+    }
+    artifact_sha256 :: artifact.map((value) -> value.digest())
+    plan_identity :: plan.map((value) -> value.identity)
+    report :: game_report_json(header, phases, phases_receipt, plan_identity, plan, artifact_sha256, output, artifact, options.explain, planned)
+    success :: !phases_receipt.iter().any((phase) -> phase.status == "error" || phase.diagnostic != None)
+    Ok(GameRun{report: report, phases: phases_receipt, input_paths: input_paths, root: generated_root, output: output, success: success})
+}
+
+// Rust: Source/CmdPackage.rs:2128
+fn validate_game_profile_name(profile: String) -> () Err! {
+    if profile.is_empty() || profile.chars().any((character) ->
+        character.is_control() || ['/', '\\', ':', '<', '>', '"', '|', '?', '*'].contains(character)) -> return Err("invalid game profile `{profile}`")
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2140
+fn profile_is_development(profile: String) -> Bool { ["dev", "debug", "ci", "development"].contains(profile) }
+
+// Rust: Source/CmdPackage.rs:2144
+fn validate_declared_game_profile(profile: String, facts: PackageFacts?) -> () Err! {
+    if facts == .Some(package) {
+        if !package.build_profiles.is_empty() && !package.build_profiles.iter().any((candidate) -> candidate.name == profile) {
+            names :: package.build_profiles.iter().map((candidate) -> candidate.name).collect().join(", ")
+            return Err("game profile `{profile}` is not declared by package.jet; available profiles: {names}")
+        }
+    } else if !["dev", "debug", "release", "hardened", "ci", "development"].contains(profile) -> return Err("game profile `{profile}` needs a package.jet build declaration")
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2170
+fn game_phase_names(raw: String?) -> [String] Err! {
+    const ORDER: [String] = ["build", "cook", "stage", "package", "export", "deploy", "run"]
+    value :: raw.unwrap_or("build,cook,stage,package,export")
+    requested := Set[String].new()
+    loop part in value.split(",") {
+        phase := part.trim() // #4303
+        if phase.is_empty() -> continue
+        if phase == "all" { requested.extend(ORDER); continue }
+        if !ORDER.contains(phase) -> return Err("unknown game phase `{phase}`; use build,cook,stage,package,export,deploy,run")
+        requested.insert(phase)
+    }
+    if requested.is_empty() -> return Err("`--phase` needs at least one game phase")
+    last :: ORDER.iter().rposition((phase) -> requested.contains(phase)).unwrap_or(0)
+    Ok(ORDER[0..<last + 1].iter().collect())
+}
+
+// Rust: Source/CmdPackage.rs:2196
+fn resolve_game_root(options: PackageOptions) -> (OSPath, OSPath?) Err! {
+    base :: options.source.unwrap_or(core.env.current_dir().map_err((error) -> "could not read current directory: {error}")?)
+    metadata :: fs.symlink_metadata(base).map_err((error) -> "could not inspect game source `{base.display()}`: {error}")?
+    if metadata.file_type().is_symlink() -> return Err("game source `{base.display()}` must not be a symlink")
+    if metadata.is_file() {
+        entry :: fs.canonicalize(base).map_err((error) -> "could not canonicalize game source `{base.display()}`: {error}")?
+        parent :: entry.parent().unwrap_or(OSPath.new("."))
+        if entry.file_name().and_then((name) -> name.to_str()) == Some("package.jet") {
+            root :: jet.Loader.find_manifest_root(parent).unwrap_or(parent)
+            return Ok((root, find_game_entry(root)))
+        }
+        root :: jet.Loader.find_manifest_root(parent).unwrap_or(parent)
+        return Ok((root, Some(entry)))
+    }
+    if !metadata.is_dir() -> return Err("game source `{base.display()}` is not a regular file or directory")
+    root :: jet.Loader.find_manifest_root(base).unwrap_or(base)
+    Ok((root, find_game_entry(root)))
+}
+
+// Rust: Source/CmdPackage.rs:2223
+fn generated_project_root(path: OSPath) -> OSPath Err! {
+    jet.build_project_root(path.to_string_lossy()).map_err((diagnostics) ->
+        "could not resolve generated project root for `{path.display()}`: {diagnostics.debug()}")
+}
+
+// Rust: Source/CmdPackage.rs:2232
+fn find_game_entry(root: OSPath) -> OSPath? {
+    [root.join("main.jet"), root.join("src").join("main.jet"), root.join("src").join("Scene.jet"), root.join("game.jet")]
+        .iter().find((candidate) -> fs.symlink_metadata(candidate).ok().is_some_and((metadata) -> metadata.is_file() && !metadata.file_type().is_symlink()))
+}
+
+// Rust: Source/CmdPackage.rs:2246
+fn collect_game_tree(root: OSPath) -> [GameTreeFile] Err! {
+    files := [GameTreeFile]{}
+    collect_game_tree_at(root, OSPath.new(""), &files)?
+    files.sort_by((left, right) -> left.relative.cmp(right.relative))
+    Ok(files)
+}
+
+// Rust: Source/CmdPackage.rs:2252
+fn game_source_revision(tree: [GameTreeFile], facts: PackageFacts?) -> String {
+    input := [UInt8]{}
+    input.extend_from_slice("jet-game-source-v2{TEXT_NUL}".as_bytes())
+    frame(&input, jet.VERSION.as_bytes())
+    if facts == .Some(package) -> frame(&input, package.semantic_digest().as_bytes())
+    loop file in tree {
+        frame(&input, file.relative.as_bytes())
+        input.extend_from_slice(file.mode.to_be_bytes())
+        frame(&input, file.bytes)
+    }
+    "sha256:{sha256_hex(input)}"
+}
+
+// Rust: Source/CmdPackage.rs:2270
+fn collect_game_tree_at(root: OSPath, relative: OSPath, files: &[GameTreeFile]) -> () Err! {
+    const MAX_GAME_FILE_BYTES: UInt64 = 256 * 1024 * 1024
+    directory :: root.join(relative)
+    metadata :: fs.symlink_metadata(directory).map_err((error) -> "could not inspect game path `{directory.display()}`: {error}")?
+    if metadata.file_type().is_symlink() -> return Err("game path `{directory.display()}` must not be a symlink")
+    if metadata.is_file() {
+        if metadata.len() > MAX_GAME_FILE_BYTES -> return Err("game input `{directory.display()}` exceeds the {MAX_GAME_FILE_BYTES} byte limit")
+        bytes :: fs.read(directory).map_err((error) -> "could not read game input `{directory.display()}`: {error}")?
+        relative_text :: relative.to_str().ok_or_else(() -> "game input `{directory.display()}` is not valid UTF-8")?.replace("\\", "/")
+        mode :: game_file_mode(metadata)
+        files.push(GameTreeFile{relative: relative_text, mode: mode, bytes: bytes})
+        return Ok(())
+    }
+    if !metadata.is_dir() -> return Err("game path `{directory.display()}` is not a regular file or directory")
+    entries := fs.read_dir(directory).map_err((error) -> "could not enumerate game path `{directory.display()}`: {error}")?
+        .collect_result().map_err((error) -> "could not enumerate game path `{directory.display()}`: {error}")?
+    entries.sort_by((left, right) -> left.file_name().cmp(right.file_name()))
+    loop entry in entries {
+        name :: entry.file_name().to_str().ok_or_else(() -> "game path `{entry.path().display()}` is not valid UTF-8")?
+        if relative.as_os_str().is_empty() && [".git", ".jet", "build", "target", "node_modules", "dist"].contains(name) -> continue
+        collect_game_tree_at(root, relative.join(name), files)?
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2331
+fn game_file_mode(metadata: fs.Metadata) -> UInt32 {
+    // GATE #4483: selected target family, never compiler host cfg.
+    if core.sys.target.selected_family() == "unix" {
+        mode :: metadata.permissions().mode() & 0o777
+        if mode == 0 -> 0o644 else -> mode
+    } else -> 0o644
+}
+
+// Rust: Source/CmdPackage.rs:2343
+fn ensure_regular_game_file(path: OSPath, label: String) -> () Err! {
+    metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect {label} `{path.display()}`: {error}")?
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("{label} `{path.display()}` is not a regular file")
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2352
+fn game_build_target(target: BundleTarget) -> String Err! {
+    arch :: core.sys.target.selected_arch() // GATE #4483
+    triple :: if (target, arch) == {
+        (.LinuxAppImage, "x86_64") -> "x86_64-unknown-linux-gnu"
+        (.LinuxAppImage, "aarch64") -> "aarch64-unknown-linux-gnu"
+        (.LinuxAppImage, "i686") -> "i686-unknown-linux-gnu"
+        (.MacOSApp, "x86_64") -> "x86_64-apple-darwin"
+        (.MacOSApp, "aarch64") -> "aarch64-apple-darwin"
+        (.WindowsMsix, "x86_64") -> "x86_64-pc-windows-gnu"
+        (.WindowsMsix, "aarch64") -> "aarch64-pc-windows-msvc"
+        (.WindowsMsix, "i686") -> "i686-pc-windows-gnu"
+        _ -> return Err("game target `{target.as_str()}` has no compiler target mapping for host architecture `{arch}`")
+    }
+    Ok(triple)
+}
+
+// Rust: Source/CmdPackage.rs:2373
+fn build_game_entry(root: OSPath, entry: OSPath, profile: String, target: BundleTarget) -> OSPath Err! {
+    target_triple :: game_build_target(target)?
+    jet_exe :: core.env.current_exe().map_err((error) -> "could not resolve jet executable for game build: {error}")?
+    selected_profile :: if profile == { "debug" -> "dev"; "development" -> "dev"; "hardened" -> "release"; value -> value }
+    output :: Command.new(jet_exe).arg("build").arg(entry).arg("--profile").arg(selected_profile)
+        .arg("--target").arg(target_triple).arg("--quiet").current_dir(root).output()
+        .map_err((error) -> "could not start game build: {error}")?
+    if !output.status.success() -> return Err("game build failed ({output.status}){command_output_detail(output.stdout, output.stderr)}")
+    generated_root :: generated_project_root(entry)?
+    path :: generated_root.join(".jet").join("build").join(jet.CmdCompile.stem(entry.to_string_lossy()))
+    ensure_regular_game_file(path, "built game executable")?
+    Ok(path)
+}
+
+// Rust: Source/CmdPackage.rs:2414
+fn command_output_detail(stdout: [UInt8], stderr: [UInt8]) -> String {
+    const MAX_DETAIL_BYTES: USize = 4096
+    stdout_text := String.from_utf8_lossy(stdout[0..<stdout.len().min(MAX_DETAIL_BYTES)]).trim() // #4303
+    stderr_text := String.from_utf8_lossy(stderr[0..<stderr.len().min(MAX_DETAIL_BYTES)]).trim() // #4303
+    if (stdout_text.is_empty(), stderr_text.is_empty()) == {
+        (true, true) -> ""
+        (false, true) -> ": stdout: {stdout_text}"
+        (true, false) -> ": stderr: {stderr_text}"
+        (false, false) -> ": stdout: {stdout_text}; stderr: {stderr_text}"
+    }
+}
+
+// Rust: Source/CmdPackage.rs:2430
+fn dedup_paths(paths: &[OSPath]) -> { paths.sort(); paths.dedup() }
+
+// Rust: Source/CmdPackage.rs:2434
+fn game_authority_identity(facts: PackageFacts?, renderer: String) -> String Err! {
+    authority := if facts == .Some(package) ->
+        jet_foundation.Authority.ApplicationAuthority.from_policy(package.authority.holds.allow, package.authority.holds.deny, "package.jet authority.holds")
+        else -> jet_foundation.Authority.ApplicationAuthority.ambient_basics()
+    policy_identity :: authority.debug()
+    required_effect :: if renderer == "raylib" -> "GPU" else -> "none"
+    if renderer == "raylib" {
+        authority.required_effects.insert("GPU")
+        if authority.policy_diagnostic() == .Some(diagnostic) -> return Err("{diagnostic.code}: renderer `{renderer}` requires effect `GPU`; {diagnostic.what}; {diagnostic.why}; fix: {diagnostic.fix}")
+    }
+    Ok("sha256:{sha256_hex(\"jet-game-authority-v1{TEXT_NUL}{policy_identity}{TEXT_NUL}{required_effect}\".as_bytes())}")
+}
+
+// Rust: Source/CmdPackage.rs:2465
+fn game_authority_diagnostic(error: String) -> GameDiagnostic {
+    (code, body) :: error.split_once(":").map_or(("E1803", error), ((code, body)) -> (code.trim(), body.trim()))
+    (what, fix) :: body.split_once("fix:").map_or((body.trim(), "declare `GPU` in package.jet authority.holds.allow"), ((what, fix)) -> (what.trim(), fix.trim()))
+    code_text := code // #4303
+    what_text := what // #4303
+    fix_text := fix // #4303
+    GameDiagnostic{code: code_text, what: what_text, fix: fix_text}
+}
+
+// Rust: Source/CmdPackage.rs:2482
+fn validate_game_renderer_selection(renderer: String, tree: [GameTreeFile]) -> () Err! {
+    if renderer != "raylib" -> return Ok(())
+    bridge :: "core.game.raylib".as_bytes()
+    if tree.iter().any((file) -> file.relative.ends_with(".jet") && file.bytes.windows(bridge.len()).any((window) -> window == bridge)) -> return Ok(())
+    Err("renderer `raylib` was selected, but the source does not use the checked `core.game.raylib` bridge")
+}
+
+// Rust: Source/CmdPackage.rs:2502
+fn game_effect_identity(renderer: String, backend: String) -> String {
+    effect :: if renderer == "raylib" -> "GPU" else -> "none"
+    "sha256:{sha256_hex(\"jet-game-effect-v1{TEXT_NUL}{backend}{TEXT_NUL}{effect}\".as_bytes())}"
+}
+
+// Rust: Source/CmdPackage.rs:2510
+fn cook_game_assets(root: OSPath, tree: [GameTreeFile], header: GameHeader,
+    force_clean: Bool, resume: Bool, dry_run: Bool) -> CookedGameAssets Err! {
+    assets := [GameBundleAsset]{}
+    loop file in tree {
+        if file.relative.strip_prefix("assets/") == .Some(path) {
+            if header.cook_mode == "scripts-only" && !is_game_script(path) -> continue
+            if header.development_stripping && is_game_debug_asset(path) -> continue
+            validate_game_asset_relative_path(path)?
+            assets.push(GameBundleAsset.new(path, file.mode, file.bytes))
+        }
+    }
+    assets.sort_by((left, right) -> left.path.cmp(right.path).then(left.digest().cmp(right.digest())))
+    digest_input := [UInt8]{}
+    digest_input.extend_from_slice("jet-game-cook-assets-v1{TEXT_NUL}".as_bytes())
+    loop asset in assets {
+        frame(&digest_input, asset.path.as_bytes())
+        digest_input.extend_from_slice(asset.mode.to_be_bytes())
+        frame(&digest_input, asset.bytes)
+    }
+    asset_digest :: sha256_hex(digest_input)
+    identity :: sha256_hex("jet-game-cook-v1{TEXT_NUL}{header.target}{TEXT_NUL}{header.profile}{TEXT_NUL}{header.backend}{TEXT_NUL}{header.cook_mode}{TEXT_NUL}{asset_digest}".as_bytes())
+    invalidation :: if force_clean -> {
+        if header.cook_mode == "scripts-only" -> "forced-clean requested; scripts-only asset set rebuilt" else -> "forced-clean requested; asset set rebuilt"
+    } else if header.cook_mode == "scripts-only" -> "scripts-only invalidation scope" else -> "asset content or cook identity changed"
+    if dry_run -> return Ok(CookedGameAssets{assets: assets, digest: "sha256:{asset_digest}", cache_hit: false, invalidation: "dry-run {header.cook_mode} cook planned"})
+    if header.cook_mode == "fast" -> return Ok(CookedGameAssets{assets: assets, digest: "sha256:{asset_digest}", cache_hit: false,
+        invalidation: if force_clean -> "forced-clean requested; fast on-the-fly cook bypassed persistent cache" else -> "fast on-the-fly cook; persistent cache bypassed"})
+    cache_root :: root.join(".jet").join("game-cache")
+    object_root :: cache_root.join("objects")
+    cooked_root :: cache_root.join("cooked")
+    fs.create_dir_all(object_root).map_err((error) -> "could not create game asset cache `{object_root.display()}`: {error}")?
+    fs.create_dir_all(cooked_root).map_err((error) -> "could not create game cook cache `{cooked_root.display()}`: {error}")?
+    loop asset in assets -> write_content_addressed_blob(object_root, asset)?
+    final_dir :: cooked_root.join(identity)
+    marker :: game_cook_marker(identity, header, asset_digest)
+    if fs.symlink_metadata(final_dir).is_ok() {
+        if force_clean {
+            ensure_owned_directory(final_dir, marker, "game cook cache")?
+            fs.remove_dir_all(final_dir).map_err((error) -> "could not remove game cook cache `{final_dir.display()}`: {error}")?
+        } else {
+            ensure_owned_directory(final_dir, marker, "game cook cache")?
+            cached_assets :: load_cached_game_assets(final_dir, assets)?
+            return Ok(CookedGameAssets{assets: cached_assets, digest: "sha256:{asset_digest}", cache_hit: true, invalidation: "content-addressed cooked assets reused"})
+        }
+    }
+    staging :: cooked_root.join(".{identity}-staging")
+    if fs.symlink_metadata(staging).is_ok() {
+        if force_clean {
+            ensure_owned_directory(staging, marker, "game cook staging")?
+            fs.remove_dir_all(staging).map_err((error) -> "could not remove game cook staging `{staging.display()}`: {error}")?
+        } else if resume {
+            ensure_owned_directory(staging, marker, "game cook staging")?
+            fs.remove_dir_all(staging).map_err((error) -> "could not resume game cook staging `{staging.display()}`: {error}")?
+        } else -> return Err("game cook staging `{staging.display()}` already exists; use `--resume` only after inspecting it or `--clean` for owned staging")
+    }
+    result :: (() -> () Err! {
+        fs.create_dir(staging).map_err((error) -> "could not create game cook staging `{staging.display()}`: {error}")?
+        write_atomic_bytes(staging.join("staging.json"), marker.as_bytes())?
+        loop asset in assets {
+            destination :: staging.join("assets").join(asset.path)
+            if destination.parent() == .Some(parent) -> fs.create_dir_all(parent).map_err((error) -> "could not create cooked asset directory `{parent.display()}`: {error}")?
+            fs.write(destination, asset.bytes).map_err((error) -> "could not write cooked asset `{destination.display()}`: {error}")?
+            set_mode(destination, asset.mode)?
+        }
+        fs.rename(staging, final_dir).map_err((error) -> "could not atomically publish cooked game assets `{final_dir.display()}`: {error}")?
+        Ok(())
+    })()
+    if result.is_err() -> cleanup_staging(staging, true)
+    result?
+    Ok(CookedGameAssets{assets: assets, digest: "sha256:{asset_digest}", cache_hit: false, invalidation: invalidation})
+}
+
+// Rust: Source/CmdPackage.rs:2661
+fn load_cached_game_assets(cooked_dir: OSPath, expected: [GameBundleAsset]) -> [GameBundleAsset] Err! {
+    assets := [GameBundleAsset]{}
+    loop asset in expected {
+        path :: cooked_dir.join("assets").join(asset.path)
+        ensure_regular_game_file(path, "cooked game asset")?
+        bytes :: fs.read(path).map_err((error) -> "could not read cooked game asset `{path.display()}`: {error}")?
+        if sha256_hex(bytes) != asset.digest() -> return Err("cooked game asset `{path.display()}` has a foreign digest")
+        assets.push(GameBundleAsset.new(asset.path, asset.mode, bytes))
+    }
+    Ok(assets)
+}
+
+// Rust: Source/CmdPackage.rs:2681
+fn validate_game_asset_relative_path(path: String) -> () Err! {
+    if path.is_empty() || path.contains("\\") || path.chars().any((character) -> character.is_control()) -> return Err("game asset path `{path}` is invalid")
+    if path.split("/").any((component) -> component.is_empty() || component == "." || component == "..") -> return Err("game asset path `{path}` is invalid")
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2694
+fn is_game_script(path: String) -> Bool {
+    OSPath.new(path).extension().and_then((extension) -> extension.to_str()).is_some_and((extension) ->
+        ["jet", "lua", "js", "ts", "gd", "json", "txt"].contains(extension.to_ascii_lowercase()))
+}
+
+// Rust: Source/CmdPackage.rs:2703
+fn is_game_debug_asset(path: String) -> Bool {
+    OSPath.new(path).extension().and_then((extension) -> extension.to_str()).is_some_and((extension) ->
+        ["pdb", "dsym", "debug", "dbg", "map"].contains(extension.to_ascii_lowercase()))
+}
+
+// Rust: Source/CmdPackage.rs:2715
+fn game_cook_marker(identity: String, header: GameHeader, asset_digest: String) -> String {
+    "jet-game-cook-v1\nidentity={identity}\ntarget={header.target}\nprofile={header.profile}\nbackend={header.backend}\ncook_mode={header.cook_mode}\nassets_sha256={asset_digest}\n"
+}
+
+// Rust: Source/CmdPackage.rs:2722
+fn write_content_addressed_blob(root: OSPath, asset: GameBundleAsset) -> () Err! {
+    digest :: asset.digest()
+    destination :: root.join(digest)
+    if fs.symlink_metadata(destination).is_ok() {
+        ensure_regular_game_file(destination, "game asset cache object")?
+        existing :: fs.read(destination).map_err((error) -> "could not read game asset cache object `{destination.display()}`: {error}")?
+        if sha256_hex(existing) != digest -> return Err("game asset cache object `{destination.display()}` has a foreign digest")
+        return Ok(())
+    }
+    temporary :: root.join(".{digest}-{core.process.id()}")
+    if fs.symlink_metadata(temporary).is_ok() -> return Err("game asset cache staging `{temporary.display()}` already exists")
+    fs.write(temporary, asset.bytes).map_err((error) -> "could not write game asset cache object `{temporary.display()}`: {error}")?
+    if fs.rename(temporary, destination) == .Err(error) {
+        cleanup_staging(temporary, false)
+        if fs.symlink_metadata(destination).is_err() -> return Err("could not publish game asset cache object `{destination.display()}`: {error}")
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2758
+fn ensure_owned_directory(path: OSPath, marker: String, label: String) -> () Err! {
+    metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect {label} `{path.display()}`: {error}")?
+    if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("{label} `{path.display()}` is not an owned directory")
+    marker_path :: path.join("staging.json")
+    existing :: fs.read_to_string(marker_path).map_err((error) -> "could not read {label} marker `{marker_path.display()}`: {error}")?
+    if existing != marker -> return Err("{label} `{path.display()}` has a foreign or stale identity; refusing to reuse it")
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:2776
+fn write_atomic_bytes(path: OSPath, bytes: [UInt8]) -> () Err! {
+    parent :: path.parent().ok_or_else(() -> "path `{path.display()}` has no parent")?
+    fs.create_dir_all(parent).map_err((error) -> "could not create staging parent `{parent.display()}`: {error}")?
+    file_name :: path.file_name().and_then((name) -> name.to_str()).unwrap_or("staging")
+    temporary :: parent.join(".{file_name}-{core.process.id()}")
+    fs.write(temporary, bytes).map_err((error) -> "could not write staging file `{temporary.display()}`: {error}")?
+    fs.rename(temporary, path).map_err((error) -> {
+        cleanup_staging(temporary, false)
+        "could not publish staging file `{path.display()}`: {error}"
+    })
+}
+
+// Rust: Source/CmdPackage.rs:2794
+fn make_game_plan(options: PackageOptions, target: BundleTarget, header: GameHeader,
+    executable_path: OSPath, executable_bytes: [UInt8], cooked: CookedGameAssets) -> (PackageBundlePlan, [OSPath]) Err! {
+    executable_name :: options.name.or_else(() -> executable_path.file_stem().map((value) -> value.to_string_lossy().into_owned()))
+        .filter((value) -> !value.is_empty()).ok_or_else(() -> "game package needs a non-empty executable name")?
+    package :: options.package.unwrap_or(executable_name)
+    version :: options.version.unwrap_or("0.1.0")
+    display_name :: options.name.unwrap_or(package)
+    metadata := BundleMetadata.new(package, display_name)
+    metadata.publisher = if options.publisher.is_empty() -> "Jet" else -> options.publisher
+    metadata.description = options.description
+    executable :: BundleExecutable.new(executable_name, executable_path.to_string_lossy().into_owned(), executable_bytes)
+    game := GameBundleSpec.new(header.profile, header.export_preset, header.source_revision, header.backend, header.renderer, header.cook_mode)
+    game.build_identity = header.build_identity
+    game.development_stripping = header.development_stripping
+    game.crash_reporter = header.crash_reporter
+    game.crash_consent = header.crash_consent
+    game.crash_runtime = header.crash_runtime
+    game.assets = cooked.assets
+    spec := BundleSpec.game(target, package, version, executable, metadata)
+    spec.game = Some(game)
+    input_paths := [OSPath]{}
+    if options.icon == .Some(icon_path) {
+        ensure_regular_game_file(icon_path, "icon")?
+        icon_bytes :: fs.read(icon_path).map_err((error) -> "could not read icon `{icon_path.display()}`: {error}")?
+        format :: options.icon_format.or_else(() -> icon_path.extension().and_then((extension) -> IconFormat.parse(extension.to_string_lossy())))
+            .ok_or_else(() -> "`--icon` needs `--icon-format` when the extension is unknown")?
+        spec.icons.push(BundleIcon.new(package, format, options.icon_size, icon_bytes).with_source(icon_path.to_string_lossy().into_owned()))
+        input_paths.push(icon_path)
+    }
+    if options.update_channel.is_some() != options.update_url.is_some() -> return Err("`--update-channel` and `--update-url` must be supplied together")
+    if (options.update_channel, options.update_url) == (.Some(channel), .Some(url)) -> spec.updater = Some(UpdaterSpec.new(channel, url))
+    plan :: PackageBundlePlan.from_spec(spec).map_err((error) -> error.to_string())?
+    Ok((plan, input_paths))
+}
+
+// Rust: Source/CmdPackage.rs:2870
+fn launch_game_output(path: OSPath, target: BundleTarget, renderer: String) -> UInt32 Err! {
+    metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect game package `{path.display()}`: {error}")?
+    if metadata.file_type().is_symlink() -> return Err("game package `{path.display()}` must not be a symlink")
+    command := if target == {
+        .LinuxAppImage -> {
+            if metadata.is_file() -> Command.new(path)
+            else -> return Err("game target `{target.as_str()}` is not runnable by this host")
+        }
+        .MacOSApp -> {
+            // GATE #4483
+            if metadata.is_dir() && core.sys.target.selected_os() == "macos" -> Command.new("open").arg(path)
+            else -> return Err("game target `{target.as_str()}` is not runnable by this host")
+        }
+        .WindowsMsix -> {
+            if metadata.is_file() && core.sys.target.selected_os() == "windows" -> Command.new("explorer.exe").arg(path)
+            else -> return Err("windows-msix game packages require a Windows host for `--run-now`")
+        }
+    }
+    if renderer == "raylib" -> command.env("JET_RAYLIB_DISPLAY", "1")
+    else -> command.env_remove("JET_RAYLIB_DISPLAY")
+    child :: command.spawn().map_err((error) -> "could not launch game package `{path.display()}`: {error}")?
+    Ok(child.id())
+}
+
+// Rust: Source/CmdPackage.rs:2909
+fn resolve_game_destination(root: OSPath, path: OSPath) -> OSPath {
+    if path.is_absolute() -> path else -> root.join(path)
+}
+
+// Rust: Source/CmdPackage.rs:2917
+fn deploy_game_output(source: OSPath, destination: OSPath, force_clean: Bool) -> OSPath Err! {
+    source_metadata :: fs.symlink_metadata(source).map_err((error) -> "could not inspect game package `{source.display()}`: {error}")?
+    if source_metadata.file_type().is_symlink() -> return Err("game package `{source.display()}` must not be a symlink")
+    if source_metadata.is_file() {
+        destination_metadata :: fs.symlink_metadata(destination).ok()
+        if destination_metadata == .Some(metadata) {
+            if metadata.file_type().is_symlink() -> return Err("deploy destination `{destination.display()}` must not be a symlink")
+        }
+        final_path :: if destination_metadata.is_some_and((metadata) -> metadata.is_dir()) ->
+            destination.join(source.file_name().ok_or_else(() -> "game package `{source.display()}` has no file name")?)
+            else -> destination
+        if fs.symlink_metadata(final_path) == .Ok(metadata) {
+            if metadata.file_type().is_symlink() -> return Err("deploy destination `{final_path.display()}` must not be a symlink")
+            if !force_clean -> return Err("deploy destination `{final_path.display()}` already exists; pass `--clean` to replace it")
+            if metadata.is_dir() -> return Err("deploy destination `{final_path.display()}` is a directory")
+            fs.remove_file(final_path).map_err((error) -> "could not replace deploy destination `{final_path.display()}`: {error}")?
+        }
+        parent :: final_path.parent().ok_or_else(() -> "deploy destination `{final_path.display()}` has no parent")?
+        fs.create_dir_all(parent).map_err((error) -> "could not create deploy directory `{parent.display()}`: {error}")?
+        file_name :: final_path.file_name().and_then((name) -> name.to_str()).unwrap_or("game")
+        temporary :: parent.join(".{file_name}-deploy-{core.process.id()}")
+        if fs.symlink_metadata(temporary).is_ok() -> return Err("deploy staging `{temporary.display()}` already exists")
+        result :: (() -> () Err! {
+            _ :: fs.copy(source, temporary).map_err((error) -> "could not copy game package `{source.display()}`: {error}")?
+            set_mode(temporary, game_file_mode(source_metadata))?
+            fs.rename(temporary, final_path).map_err((error) -> "could not atomically publish deployed game package `{final_path.display()}`: {error}")?
+            Ok(())
+        })()
+        if result.is_err() -> cleanup_staging(temporary, false)
+        result?
+        return Ok(final_path)
+    }
+    if !source_metadata.is_dir() -> return Err("game package `{source.display()}` is not a regular file or directory")
+    if fs.symlink_metadata(destination) == .Ok(metadata) {
+        if metadata.file_type().is_symlink() -> return Err("deploy destination `{destination.display()}` must not be a symlink")
+        if !force_clean -> return Err("deploy destination `{destination.display()}` already exists; pass `--clean` to replace it")
+        if metadata.is_dir() -> fs.remove_dir_all(destination).map_err((error) -> "could not replace deploy destination `{destination.display()}`: {error}")?
+        else -> fs.remove_file(destination).map_err((error) -> "could not replace deploy destination `{destination.display()}`: {error}")?
+    }
+    parent :: destination.parent().ok_or_else(() -> "deploy destination `{destination.display()}` has no parent")?
+    fs.create_dir_all(parent).map_err((error) -> "could not create deploy directory `{parent.display()}`: {error}")?
+    file_name :: destination.file_name().and_then((name) -> name.to_str()).unwrap_or("game")
+    temporary :: parent.join(".{file_name}-deploy-{core.process.id()}")
+    if fs.symlink_metadata(temporary).is_ok() -> return Err("deploy staging `{temporary.display()}` already exists")
+    result :: (() -> () Err! {
+        fs.create_dir(temporary).map_err((error) -> "could not create deploy staging `{temporary.display()}`: {error}")?
+        copy_game_directory(source, temporary)?
+        set_mode(temporary, game_file_mode(source_metadata))?
+        fs.rename(temporary, destination).map_err((error) -> "could not atomically publish deployed game package `{destination.display()}`: {error}")?
+        Ok(())
+    })()
+    if result.is_err() -> cleanup_staging(temporary, true)
+    result?
+    Ok(destination)
+}
+
+// Rust: Source/CmdPackage.rs:3040
+fn copy_game_directory(source: OSPath, destination: OSPath) -> () Err! {
+    entries := fs.read_dir(source).map_err((error) -> "could not enumerate game package `{source.display()}`: {error}")?
+        .collect_result().map_err((error) -> "could not enumerate game package `{source.display()}`: {error}")?
+    entries.sort_by((left, right) -> left.file_name().cmp(right.file_name()))
+    loop entry in entries {
+        source_path :: entry.path()
+        destination_path :: destination.join(entry.file_name())
+        metadata :: fs.symlink_metadata(source_path).map_err((error) -> "could not inspect game package `{source_path.display()}`: {error}")?
+        if metadata.file_type().is_symlink() -> return Err("game package `{source_path.display()}` must not contain symlinks")
+        if metadata.is_dir() {
+            fs.create_dir(destination_path).map_err((error) -> "could not create deployed game directory `{destination_path.display()}`: {error}")?
+            copy_game_directory(source_path, destination_path)?
+            set_mode(destination_path, game_file_mode(metadata))?
+        } else if metadata.is_file() {
+            _ :: fs.copy(source_path, destination_path).map_err((error) -> "could not copy deployed game file `{source_path.display()}`: {error}")?
+            set_mode(destination_path, game_file_mode(metadata))?
+        } else -> return Err("game package `{source_path.display()}` is not a regular file or directory")
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:3070
+fn stage_game_plan(root: OSPath, plan: PackageBundlePlan, force_clean: Bool, resume: Bool, dry_run: Bool) -> OSPath Err! {
+    stage_root :: root.join(".jet").join("game-stages")
+    identity :: plan.identity.replace(":", "-")
+    final_dir :: stage_root.join(identity)
+    if dry_run -> return Ok(final_dir)
+    marker :: CanonicalJson.object([
+        ("plan_identity", CanonicalJson.String(plan.identity)),
+        ("schema", CanonicalJson.String("jet.game.stage")),
+    ]).map_err((error) -> "could not create game stage marker: {error}")?.bytes()
+    if fs.symlink_metadata(final_dir).is_ok() {
+        ensure_game_stage_marker(final_dir, marker)?
+        if force_clean -> fs.remove_dir_all(final_dir).map_err((error) -> "could not remove game stage `{final_dir.display()}`: {error}")?
+        else -> return Ok(final_dir)
+    } else if resume -> return Err("no resumable game stage exists for plan `{plan.identity}`")
+    fs.create_dir_all(stage_root).map_err((error) -> "could not create game stage root `{stage_root.display()}`: {error}")?
+    staging :: stage_root.join(".{identity}-staging")
+    if fs.symlink_metadata(staging).is_ok() -> return Err("game stage `{staging.display()}` already exists; refusing stale or foreign staging")
+    result :: (() -> () Err! {
+        fs.create_dir(staging).map_err((error) -> "could not create game stage `{staging.display()}`: {error}")?
+        write_atomic_bytes(staging.join("staging.json"), marker)?
+        write_atomic_bytes(staging.join("plan.json"), plan.to_json().bytes())?
+        loop file in plan.files {
+            destination :: staging.join("files").join(file.path)
+            if destination.parent() == .Some(parent) -> fs.create_dir_all(parent).map_err((error) -> "could not create staged game directory `{parent.display()}`: {error}")?
+            fs.write(destination, file.bytes).map_err((error) -> "could not write staged game file `{destination.display()}`: {error}")?
+            set_mode(destination, file.mode)?
+        }
+        fs.rename(staging, final_dir).map_err((error) -> "could not atomically publish game stage `{final_dir.display()}`: {error}")?
+        Ok(())
+    })()
+    if result.is_err() -> cleanup_staging(staging, true)
+    result?
+    Ok(final_dir)
+}
+
+// Rust: Source/CmdPackage.rs:3146
+fn verify_game_stage_files(stage: OSPath, plan: PackageBundlePlan) -> () Err! {
+    marker :: CanonicalJson.object([
+        ("plan_identity", CanonicalJson.String(plan.identity)), ("schema", CanonicalJson.String("jet.game.stage")),
+    ]).map_err((error) -> "could not create game stage marker: {error}")?.bytes()
+    ensure_game_stage_marker(stage, marker)?
+    loop file in plan.files {
+        path :: stage.join("files").join(file.path)
+        ensure_regular_game_file(path, "staged game file")?
+        bytes :: fs.read(path).map_err((error) -> "could not read staged game file `{path.display()}`: {error}")?
+        if bytes != file.bytes || sha256_hex(bytes) != file.digest() -> return Err("staged game file `{path.display()}` has a foreign digest")
+        metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect staged game file `{path.display()}`: {error}")?
+        if game_file_mode(metadata) != file.mode -> return Err("staged game file `{path.display()}` has a foreign mode")
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdPackage.rs:3171
+fn export_game_output(root: OSPath, plan: PackageBundlePlan, target: BundleTarget, preset: String, force_clean: Bool) -> (OSPath, MaterializedFacts) Err! {
+    if plan.target != target -> return Err("export target `{target.as_str()}` does not match package plan target `{plan.target.as_str()}`")
+    if preset == "store" && target != BundleTarget.WindowsMsix -> return Err("the `store` export preset requires `windows-msix`")
+    if preset == "headless" && plan.game.is_some_and((game) -> game.renderer != "headless") -> return Err("the `headless` export preset requires a headless renderer")
+    export_root :: root.join(".jet").join("game-exports").join(preset)
+    fs.create_dir_all(export_root).map_err((error) -> "could not create game export directory `{export_root.display()}`: {error}")?
+    destination :: export_root.join(plan.artifact_name)
+    prepare_export_destination(destination, force_clean)?
+    facts :: materialize_package(plan, destination)?
+    Ok((destination, facts))
+}
+
+// Rust: Source/CmdPackage.rs:3205
+fn prepare_export_destination(path: OSPath, force_clean: Bool) -> () Err! {
+    metadata :: if fs.symlink_metadata(path) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if error.kind() == .NotFound -> return Ok(()) // GATE #4409
+            return Err("could not inspect existing export `{path.display()}`: {error}")
+        }
+    }
+    if metadata.file_type().is_symlink() -> return Err("export destination `{path.display()}` must not be a symlink")
+    if !force_clean -> return Err("export destination `{path.display()}` already exists; pass `--clean` to replace an owned export")
+    (if metadata.is_dir() -> fs.remove_dir_all(path) else -> fs.remove_file(path))
+        .map_err((error) -> "could not remove existing export `{path.display()}`: {error}")
+}
+
+// Rust: Source/CmdPackage.rs:3233
+fn cancel_game_stages(root: OSPath) -> (OSPath?, String) Err! {
+    stage_root :: root.join(".jet").join("game-stages")
+    metadata :: if fs.symlink_metadata(stage_root) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if error.kind() == .NotFound -> return Ok((None, "no owned game staging exists")) // GATE #4409
+            return Err("could not inspect game stage root `{stage_root.display()}`: {error}")
+        }
+    }
+    if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("game stage root `{stage_root.display()}` is not an owned directory")
+    cancelled := OSPath?{None}
+    entries :: fs.read_dir(stage_root).map_err((error) -> "could not enumerate game stages `{stage_root.display()}`: {error}")?
+        .collect_result().map_err((error) -> "could not enumerate game stages `{stage_root.display()}`: {error}")?
+    loop entry in entries {
+        path :: entry.path()
+        name :: entry.file_name().to_string_lossy().into_owned()
+        if name.starts_with(".") && !name.ends_with("-staging") -> continue
+        path_metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect game stage `{path.display()}`: {error}")?
+        if path_metadata.file_type().is_symlink() || !path_metadata.is_dir() -> return Err("game stage `{path.display()}` is not an owned directory")
+        marker :: fs.read(path.join("staging.json")).map_err((error) -> "could not read game stage marker `{path.join(\"staging.json\").display()}`: {error}")?
+        schema :: "\"schema\":\"jet.game.stage\"".as_bytes()
+        if !marker.windows(schema.len()).any((window) -> window == schema) -> return Err("game stage `{path.display()}` has a foreign marker; refusing cancellation")
+        fs.remove_dir_all(path).map_err((error) -> "could not cancel game stage `{path.display()}`: {error}")?
+        cancelled = Some(path)
+    }
+    Ok((cancelled, "owned canonical game stages cancelled"))
+}
+
+// Rust: Source/CmdPackage.rs:3291
+fn ensure_game_stage_marker(path: OSPath, expected: [UInt8]) -> () Err! {
+    metadata :: fs.symlink_metadata(path).map_err((error) -> "could not inspect game stage `{path.display()}`: {error}")?
+    if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("game stage `{path.display()}` is not an owned directory")
+    marker :: path.join("staging.json")
+    bytes :: fs.read(marker).map_err((error) -> "could not read game stage marker `{marker.display()}`: {error}")?
+    if bytes != expected -> return Err("game stage `{path.display()}` has a foreign or stale identity; refusing to reuse it")
+    Ok(())
+}
+
+use jet_foundation.[CanonicalJson, StatusFields, StatusEnvelope]
+use jet.ReceiptStore.[ReceiptStore, ReceiptSection, Receipt, receipt_root_for]
+
+// Rust: Source/CmdPackage.rs:3309
+fn game_phase(phase: String, status: String, header: GameHeader, started: Instant,
+    cache_hit: Bool, invalidation: String, output: String?, sha256: String?, bytes: UInt64?, diagnostic: GameDiagnostic?) -> GamePhaseReceipt {
+    GamePhaseReceipt{phase: phase, status: status, header: header, cache_hit: cache_hit,
+        invalidation: invalidation, output: output, sha256: sha256, bytes: bytes,
+        duration_ms: UInt64.from(started.elapsed().as_millis()), diagnostic: diagnostic}
+}
+
+// Rust: Source/CmdPackage.rs:3335
+fn game_phase_json(phase: GamePhaseReceipt) -> CanonicalJson {
+    CanonicalJson.object([
+        ("authority_identity", CanonicalJson.String(phase.header.authority_identity)),
+        ("backend", CanonicalJson.String(phase.header.backend)),
+        ("build_identity", CanonicalJson.String(phase.header.build_identity)),
+        ("bytes", phase.bytes.map(json_integer).unwrap_or(CanonicalJson.Null)),
+        ("cache_hit", CanonicalJson.Bool(phase.cache_hit)),
+        ("cook_mode", CanonicalJson.String(phase.header.cook_mode)),
+        ("crash_consent", CanonicalJson.String(phase.header.crash_consent)),
+        ("crash_reporter", CanonicalJson.String(phase.header.crash_reporter)),
+        ("crash_runtime", game_crash_runtime_json(phase.header.crash_runtime)),
+        ("development_stripping", CanonicalJson.Bool(phase.header.development_stripping)),
+        ("diagnostic", phase.diagnostic.map(game_diagnostic_json).unwrap_or(CanonicalJson.Null)),
+        ("duration_ms", json_integer(phase.duration_ms)),
+        ("effect_identity", CanonicalJson.String(phase.header.effect_identity)),
+        ("invalidation", CanonicalJson.String(phase.invalidation)),
+        ("output", phase.output.map(json_text_value).unwrap_or(CanonicalJson.Null)),
+        ("phase", CanonicalJson.String(phase.phase)),
+        ("profile", CanonicalJson.String(phase.header.profile)),
+        ("renderer", CanonicalJson.String(phase.header.renderer)),
+        ("sha256", phase.sha256.map(json_text_value).unwrap_or(CanonicalJson.Null)),
+        ("source_revision", CanonicalJson.String(phase.header.source_revision)),
+        ("status", CanonicalJson.String(phase.status)),
+        ("target", CanonicalJson.String(phase.header.target)),
+    ]).expect("fixed game phase JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3363
+fn game_diagnostic_json(diagnostic: GameDiagnostic) -> CanonicalJson {
+    CanonicalJson.object([("code", CanonicalJson.String(diagnostic.code)),
+        ("fix", CanonicalJson.String(diagnostic.fix)), ("what", CanonicalJson.String(diagnostic.what))])
+        .expect("fixed game diagnostic JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3372
+fn game_crash_runtime_json(runtime: GameCrashReporterSpec) -> CanonicalJson {
+    CanonicalJson.object([
+        ("abi", CanonicalJson.String(GAME_CRASH_REPORTER_ABI)),
+        ("installation", json_text_value(runtime.installation)),
+        ("memory", CanonicalJson.object([("max_logs", json_integer(runtime.memory_logs)),
+            ("max_stacks", json_integer(runtime.memory_stacks))]).expect("fixed game crash memory JSON keys")),
+        ("retention", CanonicalJson.object([("max_reports", json_integer(runtime.retention_limit)),
+            ("mode", json_text_value(runtime.retention_mode)), ("path", json_text_value(runtime.retention_path))])
+            .expect("fixed game crash retention JSON keys")),
+        ("routing", json_text_value(runtime.routing)), ("upload_policy", json_text_value(runtime.upload_policy)),
+    ]).expect("fixed game crash runtime JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3399
+fn game_materialization_json(status: String, artifact_sha256: String?, output: OSPath?, artifact: PackageBundleArtifact?) -> CanonicalJson {
+    materializer :: artifact.and_then((value) -> value.receipt.materializer).map(game_materializer_json).unwrap_or(CanonicalJson.Null)
+    CanonicalJson.object([
+        ("artifact_sha256", artifact_sha256.map(json_text_value).unwrap_or(CanonicalJson.Null)),
+        ("bytes", artifact.map((value) -> json_integer(value.bytes())).unwrap_or(CanonicalJson.Null)),
+        ("output", output.map((path) -> json_text_value(path.display().to_string())).unwrap_or(CanonicalJson.Null)),
+        ("materializer", materializer), ("status", json_text_value(status)),
+    ]).expect("fixed game materialization JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3429
+fn game_materializer_json(materializer: BundleMaterializerFact) -> CanonicalJson {
+    CanonicalJson.object([
+        ("authority", json_text_value(materializer.authority)), ("executable", json_text_value(materializer.executable)),
+        ("mechanism", json_text_value(materializer.mechanism)), ("policy", json_text_value(materializer.policy)),
+        ("tool", json_text_value(materializer.tool)), ("tool_identity", json_text_value(materializer.tool_identity)),
+        ("tool_version", json_text_value(materializer.tool_version)),
+    ]).expect("fixed game materializer JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3442
+fn game_report_json(header: GameHeader, phases: [String], receipts: [GamePhaseReceipt],
+    plan_identity: String?, plan: PackageBundlePlan?, artifact_sha256: String?, output: OSPath?,
+    artifact: PackageBundleArtifact?, explain: Bool, planned: Bool) -> CanonicalJson {
+    status :: if receipts.iter().any((phase) -> phase.status == "error" || phase.diagnostic != None) -> "error"
+        else if receipts.iter().any((phase) -> phase.status == "cancelled") -> "cancelled" else -> "ok"
+    execution :: if planned -> "planned" else if artifact != None -> "materialized" else -> "not-materialized"
+    artifact_status :: if artifact != None -> "materialized" else if plan != None -> "planned" else -> "none"
+    signing_status :: artifact.map((value) -> value.receipt.signing_status().as_str())
+        .or_else(() -> plan.map((value) -> if value.signing_hooks.is_empty() -> "not-requested" else -> "requested")).unwrap_or("not-requested")
+    materialization :: game_materialization_json(execution, artifact_sha256, output, artifact)
+    fields := [
+        ("artifact", artifact.map((value) -> value.to_json()).unwrap_or(CanonicalJson.Null)),
+        ("artifact_status", json_text_value(artifact_status)),
+        ("artifact_sha256", artifact_sha256.map(json_text_value).unwrap_or(CanonicalJson.Null)),
+        ("execution", json_text_value(execution)),
+        ("authority_identity", CanonicalJson.String(header.authority_identity)),
+        ("backend", CanonicalJson.String(header.backend)),
+        ("build_identity", CanonicalJson.String(header.build_identity)),
+        ("cook_mode", CanonicalJson.String(header.cook_mode)),
+        ("crash_consent", CanonicalJson.String(header.crash_consent)),
+        ("crash_reporter", CanonicalJson.String(header.crash_reporter)),
+        ("development_stripping", CanonicalJson.Bool(header.development_stripping)),
+        ("crash_runtime", game_crash_runtime_json(header.crash_runtime)),
+        ("effect_identity", CanonicalJson.String(header.effect_identity)),
+        ("export_preset", CanonicalJson.String(header.export_preset)),
+        ("format", CanonicalJson.String(GAME_PACKAGE_RECEIPT_SCHEMA)),
+        ("output", output.map((path) -> json_text_value(path.display().to_string())).unwrap_or(CanonicalJson.Null)),
+        ("materialization", materialization),
+        ("phases", CanonicalJson.Array(receipts.iter().map(game_phase_json).collect())),
+        ("plan", plan.map((value) -> value.to_json()).unwrap_or(CanonicalJson.Null)),
+        ("plan_identity", plan_identity.map(json_text_value).unwrap_or(CanonicalJson.Null)),
+        ("profile", CanonicalJson.String(header.profile)),
+        ("renderer", CanonicalJson.String(header.renderer)),
+        ("requested_phases", CanonicalJson.Array(phases.iter().map(json_text_value).collect())),
+        ("schema", CanonicalJson.String(GAME_PACKAGE_RECEIPT_SCHEMA)),
+        ("source_revision", CanonicalJson.String(header.source_revision)),
+        ("status", CanonicalJson.String(status)),
+        ("planned", CanonicalJson.Bool(planned)),
+        ("target", CanonicalJson.String(header.target)),
+        ("signing_status", json_text_value(signing_status)),
+    ]
+    if explain {
+        cook :: receipts.iter().find((phase) -> phase.phase == "cook")
+        cache_identity :: cook.and_then((phase) -> phase.sha256).unwrap_or("not computed")
+        fields.push(("explain", CanonicalJson.object([
+            ("authority_identity", json_text_value(header.authority_identity)),
+            ("cache_identity", json_text_value(cache_identity)), ("execution", json_text_value(execution)),
+            ("planned", CanonicalJson.Bool(planned)),
+            ("inputs", artifact.map((value) -> value.receipt.to_json()).or_else(() -> plan.map((value) -> value.to_json())).unwrap_or(CanonicalJson.Null)),
+            ("phases", CanonicalJson.Array(receipts.iter().map((phase) -> json_text_value(phase.phase)).collect())),
+            ("pipeline", CanonicalJson.Array(phases.iter().map(json_text_value).collect())),
+        ]).expect("fixed game explanation JSON keys")))
+    }
+    CanonicalJson.object(fields).expect("fixed game package receipt JSON keys")
+}
+
+// Rust: Source/CmdPackage.rs:3558
+fn json_text_value(value: String) -> CanonicalJson { CanonicalJson.String(value) }
+
+// Rust: Source/CmdPackage.rs:3562
+fn json_integer[T: ToString](value: T) -> CanonicalJson { CanonicalJson.Integer(value.to_string()) }
+
+// Rust: Source/CmdPackage.rs:3565
+fn write_game_receipt(path: OSPath, report: CanonicalJson) -> () Err! {
+    bytes :: report.bytes()
+    write_atomic_bytes(path, bytes)
+}
+
+// Rust: Source/CmdPackage.rs:3570
+fn record_game_receipt(args: [String], input_paths: [OSPath], report: CanonicalJson, phases: [GamePhaseReceipt]) -> Receipt Err! {
+    cwd :: core.env.current_dir().map_err((error) -> "could not read current directory: {error}")?
+    root :: receipt_root_for("package", args, cwd)
+    store :: ReceiptStore.new(root)
+    sections := [ReceiptSection].with_capacity(phases.len() + 1)
+    sections.push(ReceiptSection.from_json("game", "GamePackageReceipt", report)
+        .map_err((error) -> "could not encode game package receipt section: {error}")?)
+    loop phase in phases {
+        sections.push(ReceiptSection.from_json("game.{phase.phase}", "GamePhaseReceipt", game_phase_json(phase))
+            .map_err((error) -> "could not encode {phase.phase} receipt section: {error}")?)
+    }
+    store.record_with_sections("package", args, input_paths, 0, report.bytes(), [], sections)
+}
+
+// Rust: Source/CmdPackage.rs:3610
+fn render_game_report(run: GameRun, report_path: OSPath, receipt_digest: String, mode: OutputMode) -> {
+    if mode.json {
+        game :: status_value(run.report)
+        fields :: StatusFields.new().with("kind", "game").with("game", game)
+            .with("receipt", report_path.display().to_string()).with("receipt_digest", receipt_digest)
+        println("{StatusEnvelope.new(\"package\", run.success).with_fields(fields).json()}")
+        return
+    }
+    state :: if run.success -> "ok" else -> "error"
+    println("game package: {state}")
+    if run.phases.first() == .Some(phase) -> println("target: {phase.header.target} profile: {phase.header.profile} backend: {phase.header.backend} renderer: {phase.header.renderer}")
+    loop phase in run.phases {
+        suffix :: phase.output.map((output) -> " ({output})").unwrap_or("")
+        println("{phase.phase}: {phase.status}{suffix}")
+    }
+    if run.output == .Some(output) -> println("output: {output.display()}")
+    println("receipt: {report_path.display()} ({receipt_digest})")
+}
 

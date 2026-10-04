@@ -1,0 +1,333 @@
+use jet_foundation.[BuildEffect]
+
+fn jobs02_shells() -> [String] Never! {
+    [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
+}
+fn jobs02_flag_count(name: String) -> Int Never! {
+    count := 0
+    loop flag in JET_CLI_FLAGS { if flag.long == name -> count += 1 }
+    count
+}
+fn jobs02_has_flag(command: String, name: String) -> Bool Never! {
+    loop flag in jet_cli_flags_for_command(command) { if flag.long == name -> return true }
+    false
+}
+fn jobs02_split(words: [String]) -> [String] Never! {
+    args := ~words
+    jet_cli_separate_job_argv(&args)
+    args
+}
+fn jobs02_starts_uppercase(text: String) -> Bool Never! {
+    if text.is_empty() -> return false
+    first :: text.chars()[0]
+    first.is_uppercase()
+}
+
+// Rust: crates/jet-cli/src/CLI.rs:3329
+#Test("job_argv_forwards_every_word_after_the_job_name") {
+    assert_eq(jobs02_split([String]{"jobs", "--interpret", "-p", "api", "web", "--port", "3000"}), [String]{"jobs", "--interpret", "-p", "api", "web", "--", "--port", "3000"})
+    assert_eq(jobs02_split([String]{"jobs", "web", "--", "--port", "--", "x"}), [String]{"jobs", "web", "--", "--port", "--", "x"})
+    loop words in [[String]]{[String]{"jobs", "--graph"}, [String]{"jobs", "-p", "api"}, [String]{"jobs", "web"}, [String]{"run", "main.jet", "--port", "3000"}} -> assert_eq(jobs02_split(words), words)
+}
+// Rust: crates/jet-cli/src/CLI.rs:3359
+#Test("external_completion_rejects_hostile_program_names") {
+    schema :: CLICommandSchema{entry_type: "", description: None, inputs: [TCLIInput]{}, commands: [TCLICommand]{}, jobs: [CLIRecordJob]{}, standard: false, version: None}
+    assert_eq(jet_cli_completion_command_name("build/greeter") ?? panic("usable basename refused"), "greeter")
+    if jet_cli_completion_command_name("safe\nINJECT_COMMAND\rnext") == {
+        .Ok(_) -> panic("control character accepted")
+        .Err(error) -> assert_eq(jet_cli_completion_name_error_message(error), "the program command name contains a control character")
+    }
+    loop shell in [String]{"bash", "zsh", "fish", "powershell"} {
+        script :: jet_cli_completions_for_program(shell, "greeter", schema) ?? panic("supported shell refused")
+        assert(!script.contains("build/greeter"))
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3384
+#Test("typo_finds_closest_command") {
+    assert_eq(jet_cli_closest_command("buld"), Val("build"))
+    assert_eq(jet_cli_closest_command("chekc"), Val("check"))
+    assert_eq(jet_cli_closest_command("rnu"), Val("run"))
+    assert_eq(jet_cli_closest_command("zxqwvbn"), None)
+}
+// Rust: crates/jet-cli/src/CLI.rs:3393
+#Test("typo_finds_closest_flag") {
+    assert_eq(jet_cli_closest_flag("--jsn"), Val("--json"))
+    assert_eq(jet_cli_closest_flag("--colr"), Val("--color"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3399
+#Test("known_flag_ignores_value") {
+    loop flag in [String]{"--color=always", "--json", "--raw-frames", "--dap"} -> assert(jet_cli_is_known_flag(flag))
+    assert(!jet_cli_is_known_flag("--nonsense"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3408
+#Test("dry_run_is_one_shared_flag_row") {
+    assert_eq(jobs02_flag_count(JET_CLI_DRY_RUN_FLAG), 1)
+    assert(jet_cli_is_known_flag(JET_CLI_DRY_RUN_FLAG))
+    assert(jet_cli_man_page("0.0.0").contains(JET_CLI_DRY_RUN_FLAG))
+    assert(jet_cli_completions_bash().contains(JET_CLI_DRY_RUN_FLAG))
+    assert(jet_cli_completions_zsh().contains(JET_CLI_DRY_RUN_FLAG))
+    assert(jet_cli_completions_fish().contains("dry-run"))
+    assert(jet_cli_completions_powershell().contains(JET_CLI_DRY_RUN_FLAG))
+    usage :: jet_cli_group_usage("inspect")
+    assert(usage.contains("codemod <plan.json> --dry-run"))
+    assert(!usage.contains("codemod dry-run"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3428
+#Test("dev_canvas_is_one_registered_surface") {
+    assert_eq(jobs02_flag_count(JET_CLI_CANVAS_FLAG), 1)
+    assert(jet_cli_is_known_flag(JET_CLI_CANVAS_FLAG))
+    assert_eq(jet_cli_command_usage("dev"), "jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]")
+    assert(jobs02_has_flag("dev", JET_CLI_CANVAS_FLAG))
+    loop flag in [String]{"--output", "--target", "--canvas-host", "--canvas-port", "--canvas-transport", "--canvas-authority", "--canvas-audit"} -> assert(jobs02_has_flag("dev", flag), "{flag} must be visible in dev help")
+    assert(jet_cli_man_page("0.0.0").contains("--canvas"))
+    assert(jet_cli_completions_bash().contains("--canvas"))
+    assert(jet_cli_completions_zsh().contains("--canvas"))
+    assert(jet_cli_completions_fish().contains("canvas"))
+    assert(jet_cli_completions_powershell().contains("--canvas"))
+    assert(!jet_cli_is_builtin("canvas"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3467
+#Test("run_prepare_refusal_is_one_registered_surface") {
+    flag :: "--no-prepare"
+    assert_eq(jobs02_flag_count(flag), 1)
+    assert_eq(jet_cli_command_usage("run"), "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]")
+    assert(jobs02_has_flag("run", flag))
+    assert(jet_cli_man_page("0.0.0").contains(flag))
+    assert(jet_cli_completions_bash().contains(flag))
+    assert(jet_cli_completions_zsh().contains(flag))
+    assert(jet_cli_completions_fish().contains("no-prepare"))
+    assert(jet_cli_completions_powershell().contains(flag))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3485
+#Test("flash_registry_matches_parser_surface") {
+    count := 0
+    loop command in JET_CLI_COMMANDS { if command.name == "flash" -> count += 1 }
+    assert_eq(count, 1)
+    assert_eq(jet_cli_command_usage("flash"), "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]")
+    loop flag in [String]{"--target", "--image", "--audit", "--adapter"} -> assert(jobs02_has_flag("flash", flag), "flash help missing {flag}")
+    assert_eq(jobs02_flag_count("--image") + jobs02_flag_count("--audit") + jobs02_flag_count("--adapter"), 3)
+    assert(jet_cli_owns_flag_vocabulary("flash"))
+    loop script in jobs02_shells() -> assert(script.contains("flash"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3516
+#Test("hangar_is_not_a_jet_command_or_help_route") {
+    assert(!jet_cli_is_builtin("hangar"))
+    assert(jet_cli_group_index("hangar") == None)
+    assert(!jet_cli_usage_page_version("0.0.0", HelpOrder.Frequency).to_lower().contains("hangar"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3523
+#Test("completions_mention_every_command") {
+    loop script in jobs02_shells() {
+        loop command in JET_CLI_COMMANDS {
+            if jet_cli_is_canonical_top_level(command.name) -> assert(script.contains(command.name), "completion missing command {command.name}")
+            if command.actions.len() > 0 -> assert(script.contains(command.name), "completion missing group {command.name}")
+            loop action in command.actions -> assert(script.contains(action.name), "completion missing {command.name} {action.name}")
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3556
+#Test("moved_command_registry_agrees_with_dispatch") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            if action.name == "install" {
+                assert_eq(action.handler, "SharedStore")
+                assert(jet_cli_moved_command(action.name) == None)
+                next
+            }
+            if action.also_canonical_top_level {
+                assert(jet_cli_is_canonical_top_level(action.name))
+                assert(jet_cli_moved_command(action.name) == None)
+                next
+            }
+            assert(!jet_cli_is_canonical_top_level(action.name), "moved bare command leaked: {action.name}")
+            owner :: jet_cli_moved_command(action.name) ?? panic("missing moved owner for {action.name}")
+            owner_group :: JET_CLI_COMMANDS[owner.group]
+            assert(jet_cli_group_index(owner_group.name) != None)
+            assert_eq(owner_group.actions[owner.action].name, action.name)
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3595
+#Test("typo_suggestions_never_advertise_moved_bare_actions") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            canonical_bare := false
+            loop command in JET_CLI_COMMANDS {
+                if command.name == action.name && command.actions.is_empty() && jet_cli_is_canonical_top_level(command.name) -> canonical_bare = true
+            }
+            if !action.also_canonical_top_level && !canonical_bare -> assert(jet_cli_closest_command(action.name) != Val(action.name))
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3611
+#Test("every_nested_action_has_canonical_usage") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            assert(!action.usage.trim().is_empty(), "missing usage for {group.name} {action.name}")
+            loop usage in action.usage.split("\n") -> assert(usage == action.name || usage.starts_with("{action.name} "), "usage `{usage}` does not begin with action name `{action.name}`")
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3632
+#Test("every_nested_action_routes_to_a_real_dispatch_seam") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            assert(!action.summary.trim().is_empty(), "missing summary for {group.name} {action.name}")
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("missing handler")
+            handler :: JET_CLI_HANDLERS[handler_index]
+            assert(jet_cli_is_builtin(handler.dispatch_word), "{group.name} {action.name} routes to missing handler {handler.dispatch_word}")
+            nested :: jet_cli_nested_command(group.name, action.name) ?? panic("missing nested action")
+            assert_eq(JET_CLI_COMMANDS[nested.group].actions[nested.action].handler, action.handler)
+            if handler.keeps_group -> assert_eq(handler.dispatch_word, group.name, "kept group must own its dispatcher")
+            normalized := [String]{group.name, action.name, "tail"}
+            if !handler.keeps_group {
+                normalized[0] = handler.dispatch_word
+                &normalized.remove(1)
+            }
+            expected :: if handler.keeps_group -> [String]{group.name, action.name, "tail"} else -> [String]{handler.dispatch_word, "tail"}
+            assert_eq(normalized, expected)
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3683
+#Test("man_mentions_every_command_and_flag") {
+    man :: jet_cli_man_page("0.0.0")
+    loop command in JET_CLI_COMMANDS { if jet_cli_is_canonical_top_level(command.name) -> assert(man.contains(command.name), "man missing command {command.name}") }
+    loop flag in JET_CLI_FLAGS -> assert(man.contains(flag.long), "man missing flag {flag.long}")
+}
+// Rust: crates/jet-cli/src/CLI.rs:3694
+#Test("authority_flags_render_in_registry_completions_and_man") {
+    man :: jet_cli_man_page("0.0.0")
+    scripts :: jobs02_shells()
+    loop canonical in [String]{"--allow", "--deny"} {
+        assert_eq(jobs02_flag_count(canonical), 1, "registry must contain one canonical {canonical} row")
+        assert(jobs02_has_flag("db", canonical))
+        assert(man.contains(canonical), "man missing {canonical}")
+        loop script in scripts -> assert(script.contains(canonical) || script.contains(canonical.slice(2..<canonical.len())), "completion missing {canonical}")
+    }
+    loop effect in [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU} {
+        loop kind in [String]{"allow", "deny"} {
+            retired :: "--{kind}-{effect.flag()}"
+            assert_eq(jobs02_flag_count(retired), 0, "registry must reject retired {retired}")
+            assert(!man.contains(retired), "man contains retired {retired}")
+            loop script in scripts -> assert(!script.contains(retired), "completion contains retired {retired}")
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3741
+#Test("cost_surface_is_registered_for_help_man_and_completions") {
+    assert_eq(jobs02_flag_count("--cost"), 1)
+    assert(jet_cli_is_known_flag("--cost"))
+    assert(jet_cli_command_usage("lint").contains("--cost"))
+    assert(jet_cli_command_usage("explain").contains("<CODE|FACT>"))
+    assert(jet_cli_command_usage("explain").contains("--cost"))
+    assert(jet_cli_man_page("0.0.0").contains("--cost"))
+    loop script in jobs02_shells() -> assert(script.contains("--cost") || script.contains("cost"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3762
+#Test("self_update_keyless_override_is_registered_for_help_and_completions") {
+    assert_eq(jobs02_flag_count("--allow-unofficial"), 1)
+    assert(jet_cli_is_known_flag("--allow-unofficial"))
+    assert(jet_cli_group_usage("self").contains("--allow-unofficial"))
+    assert(jet_cli_man_page("0.0.0").contains("--allow-unofficial"))
+    loop script in jobs02_shells() -> assert(script.contains("--allow-unofficial"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3789
+#Test("no_command_declared_in_both_tables") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            handler :: JET_CLI_HANDLERS[jet_cli_handler_index(action.handler) ?? panic("missing handler")]
+            if handler.keeps_group -> next
+            loop command in JET_CLI_COMMANDS -> assert(command.name != handler.dispatch_word, "`{handler.dispatch_word}` is declared both as a `{group.name}` nested action and again as a top-level COMMANDS row")
+        }
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3806
+#Test("is_help_flag_recognizes_both_spellings") {
+    assert(jet_cli_is_help_flag("--help"))
+    assert(jet_cli_is_help_flag("-h"))
+    assert(!jet_cli_is_help_flag("--json"))
+    assert(!jet_cli_is_help_flag("help"))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3814
+#Test("machine_output_has_one_registered_flag_and_reader_spelling") {
+    assert(jet_cli_machine_output_requested([String]{"inspect", JET_CLI_MACHINE_OUTPUT_FLAG}))
+    assert(!jet_cli_machine_output_requested([String]{"inspect"}))
+    assert_eq(jobs02_flag_count(JET_CLI_MACHINE_OUTPUT_FLAG), 1)
+}
+// Rust: crates/jet-cli/src/CLI.rs:3825
+#Test("output_flags_ignore_program_arguments_after_separator") {
+    args :: [String]{"run", "--quiet", "--", "--verbose", "--json"}
+    flags :: jet_cli_output_flags_parse(args) ?? panic("output flags refused")
+    assert(flags.quiet)
+    assert(!flags.verbose)
+    assert(!flags.json)
+    assert(!jet_cli_machine_output_requested(args))
+    verbose :: jet_cli_output_flags_parse([String]{"run", "--verbose", "--", "--quiet", "--json"}) ?? panic("output flags refused")
+    assert(verbose.verbose)
+    assert(!verbose.quiet)
+    assert(!verbose.json)
+}
+// Rust: crates/jet-cli/src/CLI.rs:3853
+#Test("always_machine_commands_use_the_shared_reader") {
+    assert(jet_cli_machine_output_requested([String]{"inspect", "compiler"}))
+    assert(jet_cli_machine_output_requested([String]{"compiler"}))
+}
+// Rust: crates/jet-cli/src/CLI.rs:3862
+#Test("command_group_usage_lists_every_action") {
+    loop group in JET_CLI_COMMANDS {
+        if group.actions.is_empty() -> next
+        text :: jet_cli_group_usage(group.name)
+        loop action in group.actions -> assert(text.contains(action.name), "{group.name} usage missing action {action.name}")
+    }
+    assert_eq(jet_cli_group_usage("no-such-group"), "")
+}
+// Rust: crates/jet-cli/src/CLI.rs:3878
+#Test("help_copy_uses_sentence_case_descriptions_and_title_case_chrome") {
+    loop command in JET_CLI_COMMANDS {
+        assert(jobs02_starts_uppercase(command.summary))
+        loop action in command.actions -> assert(jobs02_starts_uppercase(action.summary))
+    }
+    loop flag in JET_CLI_FLAGS -> assert(jobs02_starts_uppercase(flag.help))
+    help :: jet_cli_usage_page_version("test", HelpOrder.Frequency)
+    assert(help.contains("\nUsage:\n"))
+    assert(help.contains("\nFlags:\n"))
+    loop group in JET_CLI_COMMANDS {
+        if !group.actions.is_empty() -> assert(help.contains("\n{jet_cli_group_label(group.name)} Commands:\n"))
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3902
+#Test("frequency_ranks_order_every_command_exactly_once") {
+    ranks := [Int]{}
+    expected := [Int]{}
+    loop (index, command) in JET_CLI_COMMANDS {
+        &ranks.push(command.frequency_rank)
+        &expected.push(index + 1)
+    }
+    &ranks.sort()
+    assert_eq(ranks, expected, "run `node Tools/cli-census/census.mjs` to rank every COMMANDS row")
+}
+// Rust: crates/jet-cli/src/CLI.rs:3913
+#Test("retired_routes_have_zero_live_registry_rows") {
+    surfaces := [String]{jet_cli_usage_page_version("0.0.0", HelpOrder.Frequency), jet_cli_man_page("0.0.0")}
+    &surfaces.extend(jobs02_shells())
+    loop retired in JET_CLI_RETIRED {
+        top_count := 0
+        nested_count := 0
+        loop command in JET_CLI_COMMANDS {
+            if command.name == retired.spelling -> top_count += 1
+            loop action in command.actions { if "{command.name} {action.name}" == retired.spelling -> nested_count += 1 }
+        }
+        assert_eq(top_count, 0, "retired route {retired.spelling} remains a top-level row")
+        assert_eq(nested_count, 0, "retired route {retired.spelling} remains a nested row")
+        needle :: "{JET_CLI_BINARY} {retired.spelling}"
+        loop surface in surfaces -> assert(!surface.contains(needle), "retired route leaked into generated surface: {needle}\n{surface}")
+        assert_eq(retired.category, JetCLIRetirementCategory.Semantic)
+        assert_eq(retired.error_code, "E2101")
+    }
+}
+// Rust: crates/jet-cli/src/CLI.rs:3956
+#Test("parser_inventory_guard_is_clean") {
+    violations :: jet_cli_parser_inventory_violations()
+    assert(violations.is_empty(), "CLI parser registry drift: {violations}")
+}

@@ -1,0 +1,67 @@
+use jetpack.CLI.Env.EnvInfo02.[format_env_changes, format_env_ready, write_env_entry_receipt]
+use jet_store.Store.[EnvironmentSelection]
+use std.[env, fs, process]
+use std.io.[ErrorKind]
+use std.time.[Duration, SystemTime, UNIX_EPOCH]
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:2425
+#Test("env_changes_preserve_sorted_categories_and_counts") {
+    previous :: [(name: String, version: String)]{
+        (name: "z", version: "1"), (name: "a", version: "1"),
+        (name: "removed", version: "3"), (name: "removed-z", version: "4")
+    }
+    current :: [(name: String, version: String)]{
+        (name: "z", version: "2"), (name: "a", version: "2"),
+        (name: "added", version: "5"), (name: "added-z", version: "6")
+    }
+    assert_eq(format_env_changes(previous, current), Val("a 1 to 2, 2 tools updated, added 5 added, 2 tools added, removed 3 removed, 2 tools removed"))
+    assert_eq(format_env_changes(current, current), None)
+}
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:2425
+#Test("env_changes_duplicate_names_use_last_version_and_empty_versions_have_no_suffix") {
+    assert_eq(format_env_changes(
+        [(name: String, version: String)]{(name: "tool", version: "old"), (name: "tool", version: "")},
+        [(name: String, version: String)]{(name: "tool", version: "new"), (name: "added", version: "")}
+    ), Val("tool updated, added added"))
+}
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:2410
+#Test("env_ready_uses_original_float_decimal_format") {
+    assert_eq(format_env_ready(Duration.from_millis(1250), 100), "env ready in 1.2s (cache hit 100 percent)")
+    assert_eq(format_env_ready(Duration.from_millis(1500), 0), "env ready in 1.5s (cache hit 0 percent)")
+}
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:2183
+#Test("env_receipt_invalid_identity_is_invalid_input_without_writing") {
+    root :: env.temp_dir().join("jet-env-receipt-validation-{process.id()}")
+    if write_env_entry_receipt(root, "stamp\n", "secret", [EnvironmentSelection]{}) == {
+        .Ok(_) -> panic("line separator must be rejected")
+        .Err(error) -> {
+            assert_eq(error.kind(), ErrorKind.InvalidInput)
+            assert_eq(error.to_string(), "environment entry identity cannot contain line separators")
+        }
+    }
+    if write_env_entry_receipt(root, "stamp", "", [EnvironmentSelection]{}) == {
+        .Ok(_) -> panic("empty secret identity must be rejected")
+        .Err(error) -> assert_eq(error.kind(), ErrorKind.InvalidInput)
+    }
+}
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:2183
+#Test("env_receipt_native_write_is_sorted_and_leaves_no_temporary") {
+    nonce :: SystemTime.now().duration_since(UNIX_EPOCH) ?? panic("clock after epoch")
+    root :: env.temp_dir().join("jet-env-receipt-{process.id()}-{nonce.as_nanos()}")
+    fs.create_dir_all(root) ?? panic("create receipt scratch")
+    packages :: [EnvironmentSelection]{
+        EnvironmentSelection{reference: "z@jetpack", name: "z", version: "2", output_hash: "out-z", metadata: "meta-z"},
+        EnvironmentSelection{reference: "a@jetpack", name: "a", version: "", output_hash: "out-a", metadata: "meta-a"}
+    }
+    write_env_entry_receipt(root, "stamp", "secret", packages) ?? panic("write native receipt")
+    parent :: root.join(".jet/receipts")
+    assert_eq(fs.read_to_string(parent.join("env-entry")) ?? panic("read receipt"),
+        "jetpack-env-entry-v4\nstamp\tstamp\nsecrets\tsecret\na@jetpack\ta\t\tout-a\tmeta-a\nz@jetpack\tz\t2\tout-z\tmeta-z\n")
+    entries :: fs.read_dir(parent) ?? panic("enumerate receipt directory")
+    assert_eq(entries.count(), 1)
+    fs.remove_dir_all(root) ?? panic("remove receipt scratch")
+}

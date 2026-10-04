@@ -1,5 +1,5 @@
-// Rust `Term::Key` (crates/jet-repl/src/Term.rs:233-267). Decoded events only:
-// the shared Tools/REPL terminal host owns byte decoding and raw-mode lifetime.
+// Shared raw-mode terminal lifetime and byte decoder for REPL and help.
+// Rust: crates/jet-repl/src/Term.rs:233
 // Char is one Unicode scalar, never a byte fragment or pasted string.
 pub enum JetCLITermKey {
     Char(Char)
@@ -25,4 +25,239 @@ pub enum JetCLITermKey {
     EOF
     Unknown
     Idle
+}
+
+use core.sys as term_sys
+use std.io as term_io
+use std.process.[Command, Stdio]
+use std.sync.[Arc, AtomicBool, Ordering]
+use std.thread
+use std.time.[Instant, Duration]
+use jet_eval.Comptime as comptime
+use core.sys.unix_signal
+
+// Rust: crates/jet-repl/src/Term.rs:26
+pub struct RawGuard {
+    saved: String
+    restored: Bool
+
+    // Rust: crates/jet-repl/src/Term.rs:37
+    RAW_ARGS :: [String]{"-icanon", "-echo", "-isig", "min", "0", "time", "1"}
+    // Rust: crates/jet-repl/src/Term.rs:42
+    pub fn enable() -> RawGuard? { RawGuard.enable_inner(false) }
+    // Rust: crates/jet-repl/src/Term.rs:50
+    pub fn enable_with_captured_stdout() -> RawGuard? { RawGuard.enable_inner(true) }
+    // Rust: crates/jet-repl/src/Term.rs:54
+    fn enable_inner(ui_on_stderr: Bool) -> RawGuard? {
+        // GATE #4494: native terminal queries and subprocess ownership.
+        if !term_io.stdin().is_terminal() || (!term_io.stdout().is_terminal() && !(ui_on_stderr && term_io.stderr().is_terminal())) -> return None
+        saved_out :: Command.new("stty").arg("-g").stdin(Stdio.inherit()).output() ?? return None
+        if !saved_out.status.success() -> return None
+        saved_view := String.from_utf8_lossy(saved_out.stdout).trim() // #4303
+        saved :: saved_view.to_string()
+        if saved.is_empty() -> return None
+        ok :: if Command.new("stty").args(RawGuard.RAW_ARGS).status() == {
+            .Ok(status) -> status.success()
+            .Err(_) -> false
+        }
+        if !ok {
+            _ :: Command.new("stty").arg(saved).status()
+            return None
+        }
+        Val(RawGuard{saved: ^saved, restored: false})
+    }
+    // Rust: crates/jet-repl/src/Term.rs:96
+    pub fn restore_now(&self) -> {
+        if !self.restored {
+            // GATE #4494: best-effort restoration, exact original failure policy.
+            _ :: Command.new("stty").arg(self.saved).status()
+            self.restored = true
+        }
+    }
+    // Rust: crates/jet-repl/src/Term.rs:105
+    fn drop(&self) -> { self.restore_now() }
+}
+
+// Rust: crates/jet-repl/src/Term.rs:114
+pub struct EvaluationInterruptGuard {
+    // Fields exist only for selected Unix targets; pointer-sized handler remains opaque.
+    // GATE #4483; GATE #4494: selected ABI, shared atomic and owned native thread.
+    saved_terminal: String?
+    previous_handler: USize?
+    stop_watcher: Arc<AtomicBool>?
+    watcher: thread.JoinHandle<Unit>?
+
+    // Rust: crates/jet-repl/src/Term.rs:141
+    pub fn enable() -> EvaluationInterruptGuard? {
+        // GATE #4483: dispatch on selected family, never host cfg.
+        if term_sys.target.selected_family() != "unix" {
+            term_io.stderr().write_all("warning: active REPL evaluation interruption is unavailable on this platform\n".bytes())
+            return None
+        }
+        // GATE #4494: native std process/threads/atomic/clock transport.
+        saved :: Command.new("stty").arg("-g").stdin(Stdio.inherit()).stderr(Stdio.null()).output() ?? return None
+        if !saved.status.success() -> return None
+        saved_view := String.from_utf8_lossy(saved.stdout).trim() // #4303
+        saved_terminal :: saved_view.to_string()
+        if saved_terminal.is_empty() -> return None
+        comptime.begin_repl_interruptible_turn()
+        previous_handler :: #Unsafe("save opaque POSIX signal disposition") {
+            unix_signal.signal(2, note_evaluation_interrupt.as_function_pointer())
+        }
+        enabled :: if Command.new("stty").arg("isig").stdin(Stdio.inherit()).stdout(Stdio.null()).stderr(Stdio.null()).status() == {
+            .Ok(status) -> status.success()
+            .Err(_) -> false
+        }
+        if !enabled {
+            #Unsafe("restore prior POSIX signal disposition after stty failure") {
+                _ :: unix_signal.signal(2, previous_handler)
+            }
+            comptime.end_repl_interruptible_turn()
+            return None
+        }
+        stop_watcher :: Arc.new(AtomicBool.new(false))
+        stop :: stop_watcher.clone()
+        watcher :: thread.spawn(() -> {
+            owned_stop :: ^stop
+            waiting_since := Instant?{None}
+            warned := false
+            loop !owned_stop.load(Ordering.SeqCst) {
+                if comptime.repl_interrupt_count() > 0 && comptime.repl_runtime_call_active() {
+                    if waiting_since == None -> waiting_since = Val(Instant.now())
+                    since :: waiting_since ?? panic("interrupt waiting timestamp absent")
+                    if !warned && since.elapsed() >= Duration.from_millis(100) {
+                        comptime.warn_repl_runtime_call_stopping()
+                        warned = true
+                    }
+                } else {
+                    waiting_since = None
+                }
+                thread.sleep(Duration.from_millis(5))
+            }
+        })
+        Val(EvaluationInterruptGuard{saved_terminal: Val(^saved_terminal), previous_handler: Val(previous_handler), stop_watcher: Val(^stop_watcher), watcher: Val(^watcher)})
+    }
+    // Rust: crates/jet-repl/src/Term.rs:208
+    pub fn count(self) -> USize { comptime.repl_interrupt_count() }
+    // Rust: crates/jet-repl/src/Term.rs:214
+    fn drop(&self) -> {
+        // GATE #4483; GATE #4494.
+        if term_sys.target.selected_family() == "unix" {
+            stop :: self.stop_watcher ?? panic("missing Unix interrupt watcher stop flag")
+            stop.store(true, Ordering.SeqCst)
+            if self.watcher.take() == .Val(watcher) -> _ :: watcher.join()
+            saved :: self.saved_terminal ?? panic("missing Unix saved terminal")
+            _ :: Command.new("stty").arg(saved).stdin(Stdio.inherit()).stdout(Stdio.null()).stderr(Stdio.null()).status()
+            previous :: self.previous_handler ?? panic("missing Unix signal disposition")
+            #Unsafe("restore prior POSIX signal disposition before ending turn") {
+                _ :: unix_signal.signal(2, previous)
+            }
+            comptime.end_repl_interruptible_turn()
+        }
+    }
+}
+// Rust: crates/jet-repl/src/Term.rs:131
+// POSIX signal(3) binding -> core.sys.unix_signal.signal, pointer-sized opaque
+// disposition; no sigaction layout guesses. GATE #4494 / #4483.
+// Rust: crates/jet-repl/src/Term.rs:135
+#FFI(c)
+fn note_evaluation_interrupt(_: I32) -> {
+    comptime.note_repl_interrupt()
+    comptime.warn_repl_runtime_call_stopping()
+}
+
+// Rust: crates/jet-repl/src/Term.rs:270
+pub struct KeyReader<R: term_io.Read> {
+    stdin: R
+    // Rust: crates/jet-repl/src/Term.rs:275
+    pub fn new(stdin: R) -> KeyReader<R> { KeyReader<R>{stdin: ^stdin} }
+    // Rust: crates/jet-repl/src/Term.rs:279
+    fn read_byte(&self) -> U8? {
+        b := [U8]{U8{0}}
+        // GATE #4494: native Read; zero-byte timeout and errors both mean absent.
+        if self.stdin.read(&b) == {
+            .Ok(0) -> None
+            .Ok(_) -> Val(b[0])
+            .Err(_) -> None
+        }
+    }
+    // Rust: crates/jet-repl/src/Term.rs:292
+    pub fn read_key(&self) -> JetCLITermKey {
+        first :: self.read_byte() ?? return JetCLITermKey.Idle
+        b :: Int.from_u8(first)
+        if b == {
+            0x02 -> JetCLITermKey.CtrlB
+            0x03 -> JetCLITermKey.CtrlC
+            0x04 -> JetCLITermKey.EOF
+            0x06 -> JetCLITermKey.CtrlF
+            0x09 -> JetCLITermKey.Tab
+            0x0d | 0x0a -> JetCLITermKey.Enter
+            0x10 -> JetCLITermKey.CtrlP
+            0x12 -> JetCLITermKey.CtrlR
+            0x7f | 0x08 -> JetCLITermKey.Backspace
+            0x1b -> self.read_escape()
+            else -> {
+                if b < 0x20 -> return JetCLITermKey.Unknown
+                if b < 0x80 -> return JetCLITermKey.Char(Char.from_u32(U32{b}) ?? panic("ASCII scalar invalid"))
+                self.read_utf8_char(first)
+            }
+        }
+    }
+    // Rust: crates/jet-repl/src/Term.rs:315
+    fn read_escape(&self) -> JetCLITermKey {
+        first :: self.read_byte() ?? return JetCLITermKey.Escape
+        b1 :: Int.from_u8(first)
+        if b1 == 13 || b1 == 10 -> return JetCLITermKey.EscapeEnter
+        if b1 != 91 && b1 != 79 -> return JetCLITermKey.Unknown
+        second :: self.read_byte() ?? return JetCLITermKey.Unknown
+        if Int.from_u8(second) == {
+            65 -> JetCLITermKey.Up
+            66 -> JetCLITermKey.Down
+            67 -> JetCLITermKey.Right
+            68 -> JetCLITermKey.Left
+            72 -> JetCLITermKey.Home
+            70 -> JetCLITermKey.End
+            80 -> if b1 == 79 -> JetCLITermKey.F1 else -> JetCLITermKey.Unknown
+            82 -> if b1 == 79 -> JetCLITermKey.F3 else -> JetCLITermKey.Unknown
+            49 | 55 -> {
+                _ :: self.read_byte()
+                JetCLITermKey.Home
+            }
+            52 | 56 -> {
+                _ :: self.read_byte()
+                JetCLITermKey.End
+            }
+            51 -> {
+                _ :: self.read_byte()
+                JetCLITermKey.Delete
+            }
+            else -> JetCLITermKey.Unknown
+        }
+    }
+    // Rust: crates/jet-repl/src/Term.rs:353
+    fn read_utf8_char(&self, first: U8) -> JetCLITermKey {
+        b0 :: Int.from_u8(first)
+        extra :: if b0 >= 0xf0 -> 3 else if b0 >= 0xe0 -> 2 else -> 1
+        bytes := [U8]{first}
+        loop _ in 0..<extra {
+            byte :: self.read_byte() ?? break
+            &bytes.push(byte)
+        }
+        text :: String.from_bytes(bytes) ?? return JetCLITermKey.Unknown
+        chars :: text.chars()
+        if chars.is_empty() -> JetCLITermKey.Unknown else -> JetCLITermKey.Char(chars[0])
+    }
+}
+// Rust: crates/jet-repl/src/Term.rs:377
+pub fn terminal_width() -> USize {
+    // GATE #4494: real stty size invocation; reference fallback is exactly 80.
+    output :: Command.new("stty").arg("size").stdin(Stdio.inherit()).output() ?? return 80
+    if !output.status.success() -> return 80
+    text_view := String.from_utf8_lossy(output.stdout).trim() // #4303
+    text :: text_view.to_string()
+    parts :: text.split_whitespace().to_list()
+    if parts.len() < 2 -> return 80
+    // GATE #4483: parse selected-target usize width, including overflow.
+    width :: USize.parse(parts[1]) ?? return 80
+    if width > 0 -> width else -> 80
 }

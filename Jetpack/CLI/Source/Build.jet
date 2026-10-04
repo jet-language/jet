@@ -1,130 +1,100 @@
-// PORT-PENDING 0837 crates-jetpack-build: crates/jetpack/build.rs:1-126
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::env;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS fn main() {
-//RS     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-//RS     let batteries_dir = manifest_dir.join("batteries");
-//RS     println!("cargo:rerun-if-changed={}", batteries_dir.display());
-//RS 
-//RS     let mut packages = Vec::new();
-//RS     if batteries_dir.is_dir() {
-//RS         let mut entries = fs::read_dir(&batteries_dir)
-//RS             .unwrap_or_else(|error| panic!("cannot read {}: {error}", batteries_dir.display()))
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", batteries_dir.display()));
-//RS         entries.sort_by_key(|entry| entry.file_name());
-//RS         for entry in entries {
-//RS             let path = entry.path();
-//RS             let metadata = fs::symlink_metadata(&path)
-//RS                 .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", path.display()));
-//RS             if metadata.file_type().is_symlink() {
-//RS                 panic!("battery registry cannot include symlink {}", path.display());
-//RS             }
-//RS             if !metadata.is_dir() {
-//RS                 panic!("battery registry entry is not a directory: {}", path.display());
-//RS             }
-//RS             let slug = entry
-//RS                 .file_name()
-//RS                 .into_string()
-//RS                 .unwrap_or_else(|_| panic!("battery directory name is not UTF-8: {}", path.display()));
-//RS             if slug.is_empty() || slug == "." || slug == ".." || !is_safe_component(&slug) {
-//RS                 panic!("battery directory name is unsafe: {slug:?}");
-//RS             }
-//RS             println!("cargo:rerun-if-changed={}", path.display());
-//RS             let files = collect_files(&path, &path);
-//RS             if !files.iter().any(|(relative, _, _)| relative == "package.jet") {
-//RS                 panic!("battery {slug} is missing package.jet");
-//RS             }
-//RS             let canonical = format!("{slug}.jet");
-//RS             if !files.iter().any(|(relative, _, _)| relative == &canonical) {
-//RS                 panic!("battery {slug} is missing canonical {canonical}");
-//RS             }
-//RS             packages.push((slug, files));
-//RS         }
-//RS     }
-//RS 
-//RS     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
-//RS     let generated = out_dir.join("batteries_registry.rs");
-//RS     let mut source = String::from("pub(crate) static PACKAGES: &[EmbeddedPackage] = &[\n");
-//RS     for (slug, files) in &packages {
-//RS         source.push_str("    EmbeddedPackage { slug: ");
-//RS         source.push_str(&rust_string(slug));
-//RS         source.push_str(", files: &[\n");
-//RS         for (relative, _, mode) in files {
-//RS             source.push_str("        EmbeddedFile { path: ");
-//RS             source.push_str(&rust_string(relative));
-//RS             source.push_str(", mode: ");
-//RS             source.push_str(&format!("0o{mode:o}"));
-//RS             source.push_str(", bytes: include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), ");
-//RS             source.push_str(&rust_string(&format!("/batteries/{slug}/{relative}")));
-//RS             source.push_str(")), },\n");
-//RS         }
-//RS         source.push_str("    ] },\n");
-//RS     }
-//RS     source.push_str("];\n");
-//RS     fs::write(&generated, source)
-//RS         .unwrap_or_else(|error| panic!("cannot write {}: {error}", generated.display()));
-//RS }
-//RS 
-//RS fn collect_files(root: &Path, current: &Path) -> Vec<(String, Vec<u8>, u32)> {
-//RS     let mut entries = fs::read_dir(current)
-//RS         .unwrap_or_else(|error| panic!("cannot read {}: {error}", current.display()))
-//RS         .collect::<Result<Vec<_>, _>>()
-//RS         .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", current.display()));
-//RS     entries.sort_by_key(|entry| entry.file_name());
-//RS     let mut files = Vec::new();
-//RS     for entry in entries {
-//RS         let path = entry.path();
-//RS         let metadata = fs::symlink_metadata(&path)
-//RS             .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", path.display()));
-//RS         if metadata.file_type().is_symlink() {
-//RS             panic!("battery registry cannot include symlink {}", path.display());
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             files.extend(collect_files(root, &path));
-//RS             continue;
-//RS         }
-//RS         if !metadata.is_file() {
-//RS             panic!("battery registry cannot include non-file {}", path.display());
-//RS         }
-//RS         let relative = path
-//RS             .strip_prefix(root)
-//RS             .expect("collected path must be below package root")
-//RS             .components()
-//RS             .map(|component| match component {
-//RS                 std::path::Component::Normal(name) => name
-//RS                     .to_str()
-//RS                     .unwrap_or_else(|| panic!("battery path is not UTF-8: {}", path.display()))
-//RS                     .to_string(),
-//RS                 _ => panic!("battery path is not a normal relative path: {}", path.display()),
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("/");
-//RS         println!("cargo:rerun-if-changed={}", path.display());
-//RS         #[cfg(unix)]
-//RS         let mode = {
-//RS             use std::os::unix::fs::PermissionsExt;
-//RS             metadata.permissions().mode() & 0o7777
-//RS         };
-//RS         #[cfg(not(unix))]
-//RS         let mode = 0o644;
-//RS         let bytes = fs::read(&path).unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-//RS         files.push((relative, bytes, mode));
-//RS     }
-//RS     files.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     files
-//RS }
-//RS 
-//RS fn is_safe_component(value: &str) -> bool {
-//RS     !value.chars().any(|character| character.is_control())
-//RS         && !value.contains(['/', '\\'])
-//RS }
-//RS 
-//RS fn rust_string(value: &str) -> String {
-//RS     format!("{:?}", value)
-//RS }
-// END-PORT-PENDING 0837 crates/jetpack/build.rs:1-126
+use std.[env, fs]
+use std.path.[Component]
+use core.sys.target.[selected_family]
+use core.text.runtime.kernel_escape_debug.[debug_str_into]
+
+// Rust: crates/jetpack/build.rs:5
+// GATE #4494: native build environment, no-follow metadata and file IO.
+fn main() -> {
+    manifest_dir :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR") ?? panic("CARGO_MANIFEST_DIR"))
+    batteries_dir :: manifest_dir.join("batteries")
+    println("cargo:rerun-if-changed={batteries_dir.display()}")
+    packages := [(slug: String, files: [(relative: String, bytes: [U8], mode: U32)])]{}
+    if batteries_dir.is_dir() {
+        iterator :: fs.read_dir(batteries_dir) ?? error -> panic("cannot read {batteries_dir.display()}: {error}")
+        entries := iterator.collect() ?? error -> panic("cannot inspect {batteries_dir.display()}: {error}")
+        &entries.sort_by_key(entry -> entry.file_name())
+        loop entry in entries {
+            path :: entry.path()
+            metadata :: fs.symlink_metadata(path) ?? error -> panic("cannot inspect {path.display()}: {error}")
+            if metadata.file_type().is_symlink() -> panic("battery registry cannot include symlink {path.display()}")
+            if !metadata.is_dir() -> panic("battery registry entry is not a directory: {path.display()}")
+            slug :: entry.file_name().into_string() ?? panic("battery directory name is not UTF-8: {path.display()}")
+            if slug.is_empty() || slug == "." || slug == ".." || !is_safe_component(slug) -> panic("battery directory name is unsafe: {rust_string(slug)}")
+            println("cargo:rerun-if-changed={path.display()}")
+            files :: collect_files(path, path)
+            if !files.iter().any(file -> file.relative == "package.jet") -> panic("battery {slug} is missing package.jet")
+            canonical :: "{slug}.jet"
+            if !files.iter().any(file -> file.relative == canonical) -> panic("battery {slug} is missing canonical {canonical}")
+            &packages.push((slug: slug, files: files))
+        }
+    }
+    out_dir :: OSPath.from(env.var_os("OUT_DIR") ?? panic("OUT_DIR"))
+    generated :: out_dir.join("batteries_registry.rs")
+    source := "pub(crate) static PACKAGES: &[EmbeddedPackage] = &[\n"
+    loop package in packages {
+        &source.push_str("    EmbeddedPackage {{ slug: ")
+        &source.push_str(rust_string(package.slug))
+        &source.push_str(", files: &[\n")
+        loop file in package.files {
+            &source.push_str("        EmbeddedFile {{ path: ")
+            &source.push_str(rust_string(file.relative))
+            &source.push_str(", mode: ")
+            &source.push_str("0o{file.mode:o}")
+            &source.push_str(", bytes: include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), ")
+            &source.push_str(rust_string("/batteries/{package.slug}/{file.relative}"))
+            &source.push_str(")), }},\n")
+        }
+        &source.push_str("    ] }},\n")
+    }
+    &source.push_str("];\n")
+    fs.write(generated, source) ?? error -> panic("cannot write {generated.display()}: {error}")
+}
+
+// Rust: crates/jetpack/build.rs:70
+fn collect_files(root: OSPath, current: OSPath) -> [(relative: String, bytes: [U8], mode: U32)] {
+    iterator :: fs.read_dir(current) ?? error -> panic("cannot read {current.display()}: {error}")
+    entries := iterator.collect() ?? error -> panic("cannot inspect {current.display()}: {error}")
+    &entries.sort_by_key(entry -> entry.file_name())
+    files := [(relative: String, bytes: [U8], mode: U32)]{}
+    loop entry in entries {
+        path :: entry.path()
+        metadata :: fs.symlink_metadata(path) ?? error -> panic("cannot inspect {path.display()}: {error}")
+        if metadata.file_type().is_symlink() -> panic("battery registry cannot include symlink {path.display()}")
+        if metadata.is_dir() {
+            &files.extend(collect_files(root, path))
+            continue
+        }
+        if !metadata.is_file() -> panic("battery registry cannot include non-file {path.display()}")
+        below :: path.strip_prefix(root) ?? panic("collected path must be below package root")
+        components := [String]{}
+        loop component in below.components() {
+            if component == {
+                .Normal(name) -> &components.push(name.to_str() ?? panic("battery path is not UTF-8: {path.display()}"))
+                _ -> panic("battery path is not a normal relative path: {path.display()}")
+            }
+        }
+        relative :: components.join("/")
+        println("cargo:rerun-if-changed={path.display()}")
+        // GATE #4483: selected-target family, not build-host assumptions.
+        mode: U32 :: if selected_family() == .Unix -> metadata.permissions().mode() & 0o7777 else -> 0o644
+        bytes :: fs.read(path) ?? error -> panic("cannot read {path.display()}: {error}")
+        &files.push((relative: relative, bytes: bytes, mode: mode))
+    }
+    &files.sort_by((left, right) -> left.relative.cmp(right.relative))
+    files
+}
+
+// Rust: crates/jetpack/build.rs:119
+fn is_safe_component(value: String) -> Bool {
+    !value.chars().any(character -> character.is_control()) && !value.contains("/") && !value.contains("\\")
+}
+
+// Rust: crates/jetpack/build.rs:124
+fn rust_string(value: String) -> String {
+    // GATE #4500: canonical Rust Debug escaping for generated registry text.
+    bytes := [U8]{}
+    debug_str_into(&bytes, value)
+    String.from_utf8(bytes) ?? panic("debug string must be UTF-8")
+}
 

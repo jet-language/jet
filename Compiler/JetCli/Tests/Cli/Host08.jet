@@ -1,0 +1,42 @@
+use core.files as fs
+use core.sys.target
+use std.io.[Error, ErrorKind]
+
+// Rust: Source/CmdCompile.rs:13624 (cfg(test) helper)
+fn ensure_web_output_dir(path: &OSPath) -> OSPath Err! {
+    cwd :: fs.canonicalize(".") ?? return Err("error: couldn't resolve the web output root: {err}")
+    ensure_web_directory(path) ?? return Err("error: couldn't create the {path.display()} folder safely: {err}")
+    real :: fs.canonicalize(path) ?? return Err("error: couldn't resolve {path.display()}: {err}")
+    if !real.starts_with(cwd) -> return Err("error: web output directory `{path.display()}` escapes the working directory")
+    real
+}
+// Rust: Source/CmdCompile.rs:13647 (cfg(test) helper)
+fn validate_web_output_file(path: &OSPath, root: &OSPath) -> Void Err! {
+    if fs.symlink_metadata(path) == .Ok(metadata) {
+        if metadata.file_type().is_symlink() -> return Err("error: web output `{path.display()}` must not be a symlink")
+        if web_output_has_multiple_links(metadata) -> return Err("error: web output `{path.display()}` must not be a hard link")
+    }
+    parent :: path.parent() ?? OSPath.new(".")
+    real_parent :: fs.canonicalize(parent) ?? return Err("error: couldn't resolve web output parent: {err}")
+    if !real_parent.starts_with(root) -> return Err("error: web output `{path.display()}` escapes the output directory")
+}
+// Rust: Source/CmdCompile.rs:13676 (cfg(test) helper)
+fn web_output_has_multiple_links(metadata: &fs.Metadata) -> Bool {
+    // GATE #4483: selected target, never the porting host's cfg.
+    // GATE #4494: real native metadata link count.
+    if target.selected_family() == "unix" -> return metadata.is_file() && metadata.nlink() > 1
+    if target.selected_os() == "windows" -> return metadata.is_file() && metadata.number_of_links() > 1
+    false
+}
+// Rust: Source/CmdCompile.rs:13696 (cfg(test) helper)
+fn ensure_web_directory(path: &OSPath) -> Void Error! {
+    // GATE #4409: PermissionDenied, AlreadyExists and NotFound stay distinct.
+    metadata :: fs.symlink_metadata(path) ?? {
+        if err.kind() != .NotFound -> return Err(err)
+        if path.parent().filter(fn(parent) -> !parent.as_os_str().is_empty()) == .Val(parent) -> ensure_web_directory(parent)?
+        return fs.create_dir(path)
+    }
+    if metadata.file_type().is_symlink() -> return Err(Error.new(.PermissionDenied, "web output directory must not be a symlink"))
+    if metadata.is_dir() -> return
+    Err(Error.new(.AlreadyExists, "web output path is not a directory"))
+}

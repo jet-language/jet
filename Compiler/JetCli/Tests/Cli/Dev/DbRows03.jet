@@ -1,0 +1,21 @@
+use crate.[jet_cli_test_comparison_binding_from_root, jet_cli_test_comparison_validate_binding_shape,
+    jet_cli_test_comparison_relation_override, jet_cli_test_comparison_json_output,
+    foundation_parse_protocol_json]
+
+// Rust: Source/CmdTest.rs:39-122
+#Test("comparison_binding_rejects_root_alias_before_missing_required_fields") {
+    root :: foundation_parse_protocol_json("{{\"boundary_digest\":\"digest\"}}").unwrap()
+    error :: jet_cli_test_comparison_validate_binding_shape(root).unwrap_err()
+    assert_eq(error.message, "foreign binding field `boundary_digest` must be nested under `foreign_binding`")
+    empty :: foundation_parse_protocol_json("{{}}").unwrap()
+    missing :: jet_cli_test_comparison_binding_from_root(empty).unwrap_err()
+    assert_eq(missing.message, "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest")
+}
+// Rust: Source/CmdTest.rs:195-198
+#Test("comparison_command_first_relation_override_and_json_selection") {
+    args :: ["--relation=typed_failure", "--relation=ordered_effects", "--json"]
+    assert_eq(jet_cli_test_comparison_relation_override(args), Val("typed_failure"))
+    assert(jet_cli_test_comparison_json_output(args, false))
+    assert(jet_cli_test_comparison_json_output([], true))
+    assert(!jet_cli_test_comparison_json_output([], false))
+}

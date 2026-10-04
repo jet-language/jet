@@ -1,0 +1,15 @@
+use crate.[value_flag, has_flag]
+
+// Rust: Source/CmdRemote.rs:181-192
+#Test("remote_value_flag_preserves_first_occurrence_and_bare_value") {
+    args :: ["remote", "bind", "builder", "--root=/first", "--root", "/second"]
+    assert_eq(value_flag(args, "--root"), Val("/first"))
+    assert_eq(value_flag(["--root", "/second"], "--root"), Val("/second"))
+    assert_eq(value_flag(["--root"], "--root"), None)
+}
+// Rust: Source/CmdRemote.rs:194-197
+#Test("remote_boolean_flags_only_accept_bare_or_true") {
+    assert(has_flag(["--execute"], "--execute"))
+    assert(has_flag(["--execute=true"], "--execute"))
+    assert(!has_flag(["--execute=false"], "--execute"))
+}

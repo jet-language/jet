@@ -1,0 +1,91 @@
+// Rust tests already have complete executable canonical counterparts.
+// Every assertion/fixture below was inspected; avoid duplicate registration.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4223
+// env_entry_receipt_round_trip_reports_changed_tools -> Tests/EnvCommand.jet:14
+// #Test("env entry receipt round trip reports changed tools").
+// Preserves cargo/rustc old/new selections, stamp-a/secret-a and package equality,
+// 1800ms/100-percent ready text, two-tools change text, no-change None and cleanup.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4291
+// job_cache_key_changes_when_job_arguments_change -> Tests/JobRunner.jet:43
+// #Test("job cache key changes when job arguments change").
+// Same real main.jet, default metadata, resolved compiler, empty refs/table,
+// environment-a; arguments one versus two must yield distinct cache keys.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4329
+// task_platform_skip_only_skips_outside_its_declared_host -> Tests/JobRunner.jet:55
+// #Test("task platform skip only skips outside its declared host").
+// All Linux/MacOS host cross-controls and Always("manual") reason retained.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4347
+// strict_cached_jobs_need_declared_inputs_and_reject_overlap -> Tests/JobRunner.jet:65
+// #Test("strict cached jobs need declared inputs and reject overlap").
+// No inputs error, input.txt positive, output overlap error; native file cleanup.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4371
+// strict_cached_jobs_reject_undeclared_project_access -> Tests/JobRunner.jet:78
+// #Test("strict cached jobs reject undeclared project access").
+// Linux-only: real project/trace files, four undeclared normalized paths in
+// exact order, allowed input exclusion, direct and nested sensitive input denial.
+// GATE #4483: canonical sys.is_linux must reflect selected target OS.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4443
+// strace_paths_use_file_arguments_and_decode_escapes -> Tests/JobRunner.jet:116
+// #Test("strace paths use file arguments and decode escapes").
+// All seven controls: execve ignores argv strings; rename two paths/backslash;
+// hex space; statx second argument; linkat two paths; octal UTF-8 café; lexical
+// /project/work/../../outside normalization to /outside.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4479
+// strict_cached_jobs_reject_secret_environment_names -> Tests/JobRunner.jet:126
+// #Test("strict cached jobs reject secret environment names").
+// API_KEY/PRIVATE_KEY/AWS_ACCESS_KEY_ID separately rejected with original phrase.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4494
+// task_cache_key_changes_when_an_unlisted_project_file_changes -> Tests/JobRunner.jet:139
+// #Test("task cache key changes when an unlisted project file changes").
+// Local input=main.jet output=out.txt; undeclared.txt one->two changes real key.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4538
+// task_cache_key_changes_when_environment_module_facts_change -> test below.
+// Native current executable; environment MODE=one->two changes real key.
+// Tests/JobRunner.jet:153 narrows the table to empty: integration replaces
+// that test with this original default-table body rather than registering both.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4581
+// task_environment_hash_changes_when_active_environment_changes -> Tests/JobRunner.jet:165
+// #Test("task environment hash changes when active environment changes").
+// Same empty refs/secrets/table/vars, dev versus ci active environment distinct.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4594
+// task_environment_hash_changes_when_allowed_dotenv_value_changes -> Tests/JobRunner.jet:175
+// #Test("task environment hash changes when allowed dotenv value changes").
+// Same facts and empty refs/secrets/table, PORT=8080 versus 8081 distinct hashes.
+// GATE #4494: canonical native files, executable resolution and receipt IO.
+
+// Rust: crates/jetpack/src/CLI/run_enter_dev.rs:4538
+// Faithful missing control: retain the original default (not empty) table.
+#Test("task_cache_key_changes_when_environment_module_facts_change") {
+    root :: files.tmpdir("jet-job-cache-environment-") ?? panic("create cache scratch")
+    entry :: files.join(root, "main.jet")
+    files.write(entry, "#Job fn build() {{}}\n") ?? panic("write job entry")
+    compiler :: sys.executable()
+    metadata :: JobMetadata{
+        scope: JobScope.Dev,
+        after: [String]{},
+        packages: [String]{},
+        cwd: None,
+        inputs: [String]{"main.jet"},
+        outputs: [String]{"out.txt"},
+        skip: None,
+        cache: JobCachePolicy.Local,
+        parallel: None,
+        limits: [StringMapEntry]{},
+    }
+    table :: SourceTable.default()
+    first :: cli_task_cache_key(root, entry, "build", compiler, metadata, [String]{}, [RefSpec]{}, table, "preset=dev;var=MODE=one") ?? panic("first cache key")
+    second :: cli_task_cache_key(root, entry, "build", compiler, metadata, [String]{}, [RefSpec]{}, table, "preset=dev;var=MODE=two") ?? panic("second cache key")
+    assert(first != second)
+    files.remove_all(root) ?? panic("remove cache scratch")
+}

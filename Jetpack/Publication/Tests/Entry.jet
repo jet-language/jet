@@ -1,0 +1,432 @@
+// Rust: Source/Publish/mod.rs:63
+use Publication.*
+use Publication.[Advisory, Registry, Index, SemVer]
+use jet.[AST, Lock, SHA256]
+use jet.Lock.[LockFile, LockSource, LockedPackage]
+// GATE #4494: original registry tests use real native filesystem and time.
+use std.[fs, env, time]
+// Rust: Source/Publish/mod.rs:69
+fn sv(s: String) -> SemVer.SemVer { SemVer.SemVer.parse(s).expect(s) }
+// Rust: Source/Publish/mod.rs:74
+#Test("semver_parse_basic") {
+    v :: sv("1.2.3")
+    assert_eq(v.major, 1)
+    assert_eq(v.minor, 2)
+    assert_eq(v.patch, 3)
+}
+// Rust: Source/Publish/mod.rs:82
+#Test("semver_parse_with_prefix_v") { assert_eq(sv("v2.0.0").major, 2) }
+// Rust: Source/Publish/mod.rs:88
+#Test("semver_parse_with_pre") {
+    v :: sv("1.0.0-alpha.1")
+    assert_eq(v.major, 1)
+    assert_eq(v.pre, Val("alpha.1"))
+}
+// Rust: Source/Publish/mod.rs:95
+#Test("semver_ordering") {
+    assert(sv("2.0.0") > sv("1.9.9"))
+    assert(sv("1.1.0") > sv("1.0.9"))
+    assert_eq(sv("1.2.3"), sv("1.2.3"))
+}
+// Rust: Source/Publish/mod.rs:102
+#Test("semver_compatible") {
+    v100 :: sv("1.0.0")
+    v120 :: sv("1.2.0")
+    assert(v120.is_compatible_with(v100))
+    assert(!v100.is_compatible_with(v120))
+}
+// Rust: Source/Publish/mod.rs:110
+#Test("classify_bump_kinds") {
+    assert_eq(classify_bump(sv("1.0.0"), sv("2.0.0")), BumpKind.Major)
+    assert_eq(classify_bump(sv("1.0.0"), sv("1.1.0")), BumpKind.Minor)
+    assert_eq(classify_bump(sv("1.0.0"), sv("1.0.1")), BumpKind.Patch)
+    assert_eq(classify_bump(sv("1.0.0"), sv("1.0.0")), BumpKind.Same)
+}
+// Rust: Source/Publish/mod.rs:118
+#Test("version_req_caret") {
+    req :: VersionReq.parse("^1.2").unwrap()
+    assert(req.matches(sv("1.2.0")))
+    assert(req.matches(sv("1.5.3")))
+    assert(!req.matches(sv("2.0.0")))
+    assert(!req.matches(sv("1.1.9")))
+}
+// Rust: Source/Publish/mod.rs:127
+#Test("version_req_exact") {
+    req :: VersionReq.parse("1.2.3").unwrap()
+    assert(req.matches(sv("1.2.3")))
+    assert(!req.matches(sv("1.2.4")))
+}
+// Rust: Source/Publish/mod.rs:134
+#Test("version_req_any") { assert(VersionReq.parse("*").unwrap().matches(sv("99.99.99"))) }
+// Rust: Source/Publish/mod.rs:142
+#Test("semver_parses_build_metadata") {
+    v :: sv("1.2.3+build.5")
+    assert_eq(v.build, Val("build.5"))
+    assert_eq(v.pre, None)
+    v2 :: sv("1.2.3-rc.1+exp.sha.5114f85")
+    assert_eq(v2.pre, Val("rc.1"))
+    assert_eq(v2.build, Val("exp.sha.5114f85"))
+    assert_eq(v2.to_string(), "1.2.3-rc.1+exp.sha.5114f85")
+}
+// Rust: Source/Publish/mod.rs:155
+#Test("semver_build_metadata_ignored_in_precedence") {
+    assert_eq(sv("1.2.3+a"), sv("1.2.3+b"))
+    assert_eq(sv("1.2.3+a").cmp(sv("1.2.3")), std.cmp.Ordering.Equal)
+}
+// Rust: Source/Publish/mod.rs:161
+#Test("semver_rejects_leading_zeros") {
+    assert(SemVer.SemVer.parse("01.2.3").is_none())
+    assert(SemVer.SemVer.parse("1.02.3").is_none())
+    assert(SemVer.SemVer.parse("1.2.3-01").is_none())
+    assert(SemVer.SemVer.parse("1.2").is_none())
+    assert(SemVer.SemVer.parse("1.2.3.4").is_none())
+    assert(SemVer.SemVer.parse("1.2.3+0010").is_some())
+}
+// Rust: Source/Publish/mod.rs:172
+#Test("semver_hostile_numbers_and_ambiguous_ranges_never_panic_or_match") {
+    huge_pre :: "1.0.0-{"9".repeat(200)}"
+    parsed :: SemVer.SemVer.parse(huge_pre).expect("SemVer permits unbounded pre ids")
+    assert(parsed > sv("1.0.0-2"))
+    loop range in ["1 ||", "|| 1", "1 || || 2", "^18446744073709551615", "~1.18446744073709551615", "18446744073709551615.x", ">=", ">", "<", "=", "^", "~", "~>", "~>1.2"] {
+        assert(VersionReq.parse(range).is_none(), "accepted hostile range: {range}")
+    }
+}
+// Rust: Source/Publish/mod.rs:201
+#Test("semver_leading_v_is_consistent_across_versions_and_ranges") {
+    assert_eq(SemVer.SemVer.parse("v1.2.3"), Val(sv("1.2.3")))
+    loop range in ["v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"] {
+        assert(VersionReq.parse(range).unwrap().matches(sv("1.2.3")), "leading v failed in {range}")
+    }
+    assert(VersionReq.parse("v1.2.3 - v2.0.0").unwrap().matches(sv("1.5.0")))
+}
+// Rust: Source/Publish/mod.rs:215
+#Test("semver_prerelease_precedence") {
+    chain :: ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
+    loop w in chain.windows(2) -> assert(sv(w[0]) < sv(w[1]), "{w[0]} should be < {w[1]}")
+}
+// Rust: Source/Publish/mod.rs:233
+#Test("version_req_operators") {
+    assert(VersionReq.parse(">=1.2.0").unwrap().matches(sv("1.5.0")))
+    assert(!VersionReq.parse(">=1.2.0").unwrap().matches(sv("1.1.9")))
+    assert(VersionReq.parse("<2.0.0").unwrap().matches(sv("1.9.9")))
+    assert(!VersionReq.parse("<2.0.0").unwrap().matches(sv("2.0.0")))
+    r :: VersionReq.parse(">=1.2.0 < 2.0.0").unwrap()
+    assert(r.matches(sv("1.5.0")))
+    assert(!r.matches(sv("2.0.0")))
+    assert(!r.matches(sv("1.0.0")))
+}
+// Rust: Source/Publish/mod.rs:246
+#Test("version_req_tilde") {
+    r :: VersionReq.parse("~1.2.3").unwrap()
+    assert(r.matches(sv("1.2.9")))
+    assert(!r.matches(sv("1.3.0")))
+    assert(!r.matches(sv("1.2.2")))
+    r2 :: VersionReq.parse("~1").unwrap()
+    assert(r2.matches(sv("1.9.9")))
+    assert(!r2.matches(sv("2.0.0")))
+}
+// Rust: Source/Publish/mod.rs:257
+#Test("version_req_x_ranges") {
+    r :: VersionReq.parse("1.2.x").unwrap()
+    assert(r.matches(sv("1.2.0")))
+    assert(r.matches(sv("1.2.99")))
+    assert(!r.matches(sv("1.3.0")))
+    r2 :: VersionReq.parse("1").unwrap()
+    assert(r2.matches(sv("1.9.9")))
+    assert(!r2.matches(sv("2.0.0")))
+}
+// Rust: Source/Publish/mod.rs:268
+#Test("version_req_hyphen_and_or") {
+    r :: VersionReq.parse("1.2.3 - 2.3.4").unwrap()
+    assert(r.matches(sv("1.2.3")))
+    assert(r.matches(sv("2.3.4")))
+    assert(!r.matches(sv("2.3.5")))
+    r2 :: VersionReq.parse("1.2.3 - 2.3").unwrap()
+    assert(r2.matches(sv("2.3.9")))
+    assert(!r2.matches(sv("2.4.0")))
+    r3 :: VersionReq.parse("^1.0.0 || ^3.0.0").unwrap()
+    assert(r3.matches(sv("1.5.0")))
+    assert(r3.matches(sv("3.2.0")))
+    assert(!r3.matches(sv("2.0.0")))
+}
+// Rust: Source/Publish/mod.rs:285
+#Test("version_req_prerelease_rule") {
+    assert(!VersionReq.parse(">=1.0.0").unwrap().matches(sv("2.0.0-alpha")))
+    assert(VersionReq.parse(">=1.2.3-alpha").unwrap().matches(sv("1.2.3-beta")))
+    assert(!VersionReq.parse(">=1.2.3-alpha").unwrap().matches(sv("1.2.4-beta")))
+}
+// Rust: Source/Publish/mod.rs:300
+#Test("version_req_caret_zero") {
+    r :: VersionReq.parse("^0.2.3").unwrap()
+    assert(r.matches(sv("0.2.9")))
+    assert(!r.matches(sv("0.3.0")))
+    r2 :: VersionReq.parse("^0.0.3").unwrap()
+    assert(r2.matches(sv("0.0.3")))
+    assert(!r2.matches(sv("0.0.4")))
+}
+// Rust: Source/Publish/mod.rs:312
+#Test("conflict_detection_disjoint_majors") {
+    constraints :: [VersionConstraint{package: "foo", req: VersionReq.parse("^1.0").unwrap(), from: "bar 0.1.0"}, VersionConstraint{package: "foo", req: VersionReq.parse("^2.0").unwrap(), from: "baz 0.1.0"}]
+    diags :: check_conflicts(constraints, [:])
+    assert(!diags.is_empty(), "disjoint caret ranges should be a conflict")
+    assert_eq(diags[0].code, "E2602")
+}
+// Rust: Source/Publish/mod.rs:334
+#Test("conflict_compatible_ranges_no_conflict") {
+    constraints :: [VersionConstraint{package: "foo", req: VersionReq.parse("^1.0").unwrap(), from: "bar 0.1.0"}, VersionConstraint{package: "foo", req: VersionReq.parse("^1.2").unwrap(), from: "baz 0.1.0"}]
+    avail :: ["foo": [sv("1.2.0"), sv("1.3.0")]]
+    assert(check_conflicts(constraints, avail).is_empty(), "compatible ranges with a valid candidate should not conflict")
+}
+// Rust: Source/Publish/mod.rs:358
+#Test("advisory_parse_and_match") {
+    public_key :: "00".repeat(32)
+    key_id :: advisory_key_id(public_key).unwrap()
+    feed :: parse_advisory_feed("{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\nadvisory|JET-2026-0001|mylib|^1.0|1.0.5|Remote code execution via parse|medium\n").unwrap()
+    assert_eq(feed.advisories.len(), 1)
+    adv :: feed.advisories[0]
+    assert_eq(adv.id, "JET-2026-0001")
+    assert(adv.affects(sv("1.0.3")))
+    assert(!adv.affects(sv("1.0.5")))
+    assert(!adv.affects(sv("2.0.0")))
+}
+// Rust: Source/Publish/mod.rs:373
+fn make_lock_pkg(name: String, version: String, fp: String) -> LockedPackage {
+    LockedPackage{name: name, version: version, fingerprint: fp, content_hash: None,
+        source: LockSource.Path(OSPath.new("/tmp/placeholder")), nix_closure: None, locked: None,
+        dependencies: [], layer: None, inferred_layer: None, effects: [], effect_grants: [],
+        required_effects: [], granted_effects: [], denied_effects: [], effect_authority: None,
+        envelope: None, receipt: Default.default(), provenance: None}
+}
+// Rust: Source/Publish/mod.rs:397
+fn make_lock(pkgs: [LockedPackage]) -> LockFile {
+    LockFile{version: 1, packages: pkgs, root_dependencies: [], authority: None,
+        workspace_members: [], workspace_source_digest: None, workspace_overlay_policy: Default.default(),
+        comptime_inputs: [], toolchains: [], browsers: [], source_channels: [], build_stamp: None, build_contributions: []}
+}
+// Rust: Source/Publish/mod.rs:416
+#Test("audit_lockfile_includes_foreign_rust_bridge_packages") {
+    package := make_lock_pkg("base64", "0.22.1", "sha256-aabb")
+    package.source = LockSource.Foreign{language: AST.ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    lock :: make_lock([package])
+    advisories :: [Advisory.Advisory{id: "RUSTSEC-TEST", package: "base64", affected: VersionReq.parse("^0.22").unwrap(), fixed: None, title: "bridge advisory", severity: Severity.High}]
+    matches :: audit_lockfile(lock, advisories).unwrap()
+    assert_eq(matches.len(), 1)
+    assert_eq(matches[0].severity, Severity.High)
+    assert(matches[0].diagnostic.what.contains("base64"))
+}
+// Rust: Source/Publish/mod.rs:439
+#Test("sbom_emits_foreign_rust_bridge_packages") {
+    digest :: "a".repeat(64)
+    package := make_lock_pkg("base64", "0.22.1", "sha256-aabb")
+    package.content_hash = Val("sha256-{digest}")
+    package.source = LockSource.Foreign{language: AST.ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    lock :: make_lock([package])
+    spdx :: emit_spdx(lock, "myapp", "0.1.0")
+    assert(spdx.contains("PackageName: base64"))
+    assert(spdx.contains("PackageVersion: 0.22.1"))
+    assert(spdx.contains("SHA256: {digest}"))
+    cyclonedx :: emit_cyclonedx(lock, "myapp", "0.1.0")
+    assert(cyclonedx.contains("\"name\": \"base64\""))
+    assert(cyclonedx.contains("\"version\": \"0.22.1\""))
+    assert(cyclonedx.contains("\"content\": \"{digest}\""))
+}
+// Rust: Source/Publish/mod.rs:460
+#Test("maturity_window_applies_to_foreign_rust_bridge_packages") {
+    package := make_lock_pkg("base64", "0.22.1", "sha256-aabb")
+    package.source = LockSource.Foreign{language: AST.ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    lock :: make_lock([package])
+    feed :: (releases: [AdvisoryRelease]) -> AdvisoryFeed{sequence: 1, issued_at: 100, expires_at: 200_000,
+        maturity_seconds: DEFAULT_MATURITY_SECONDS, key_id: String.new(), public_key: String.new(), signature: String.new(),
+        releases: releases, advisories: [], exceptions: []}
+    release :: AdvisoryRelease{package: "base64", version: sv("0.22.1"), first_seen: 100, source_class: SourceClass.ThirdParty}
+    (maturity, applied) :: Advisory.lock_maturity_diagnostics(lock, feed([release.clone()]), DEFAULT_MATURITY_SECONDS, 200, []).unwrap()
+    assert(applied.is_empty())
+    assert_eq(maturity.len(), 1, "{maturity:?}")
+    assert_eq(maturity[0].code, "E2609")
+    assert(maturity[0].what.contains("base64#0.22.1"))
+    (past_maturity, _) :: Advisory.lock_maturity_diagnostics(lock, feed([release]), DEFAULT_MATURITY_SECONDS, 100 + DEFAULT_MATURITY_SECONDS, []).unwrap()
+    assert(past_maturity.is_empty(), "{past_maturity:?}")
+    (missing_maturity, _) :: Advisory.lock_maturity_diagnostics(lock, feed([]), DEFAULT_MATURITY_SECONDS, 200, []).unwrap()
+    assert_eq(missing_maturity.len(), 1, "{missing_maturity:?}")
+    assert_eq(missing_maturity[0].code, "E2610")
+}
+// Rust: Source/Publish/mod.rs:526
+#Test("audit_lockfile_emits_e2603") {
+    lock :: make_lock([make_lock_pkg("mylib", "1.0.3", "sha256-aabb")])
+    advisories :: [Advisory.Advisory{id: "ADV-001", package: "mylib", affected: VersionReq.parse("^1.0").unwrap(), fixed: Val(sv("1.0.5")), title: "XSS in template engine", severity: Severity.Medium}]
+    matches :: audit_lockfile(lock, advisories).unwrap()
+    assert_eq(matches.len(), 1)
+    assert_eq(matches[0].diagnostic.code, "E2603")
+    assert_eq(matches[0].severity, Severity.Medium)
+}
+// Rust: Source/Publish/mod.rs:544
+#Test("audit_severity_parsed_from_db") {
+    lock :: make_lock([make_lock_pkg("mylib", "1.0.3", "sha256-aabb")])
+    advisories :: [Advisory.Advisory{id: "ADV-002", package: "mylib", affected: VersionReq.parse("^1.0").unwrap(), fixed: None, title: "Heap overflow", severity: Severity.Critical}]
+    assert_eq(advisories[0].severity, Severity.Critical)
+    matches :: audit_lockfile(lock, advisories).unwrap()
+    assert_eq(matches.len(), 1)
+    assert_eq(matches[0].severity, Severity.Critical)
+}
+// Rust: Source/Publish/mod.rs:561
+#Test("advisory_parser_rejects_partial_ambiguous_and_invalid_records") {
+    public_key :: "00".repeat(32)
+    key_id :: advisory_key_id(public_key).unwrap()
+    loop record in ["missing|fields|only", "advisory|ADV||^1.0||title|critical", "release|pkg@1.0.0|100|third-party", "advisory|ADV|pkg|^1.0|not-a-version|title|critical", "advisory|ADV|pkg|^1.0||title|critical|extra"] {
+        text :: "{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\n{record}\n"
+        assert_eq(parse_advisory_feed(text).unwrap_err().code, "E2607")
+    }
+}
+// Rust: Source/Publish/mod.rs:580
+#Test("signed_advisory_feed_parser_binds_exact_policy_targets") {
+    public_key :: "00".repeat(32)
+    key_id :: advisory_key_id(public_key).unwrap()
+    text :: "{ADVISORY_FEED_MAGIC}\nfeed|7|100|100000|86400|{key_id}|{public_key}|signature\nrelease|mylib#1.0.3|100|third-party\nadvisory|ADV-1|mylib|^1.0|1.0.5|security fix|high\nexception|mylib#1.0.3|incident response|security-team|200000\n"
+    feed :: parse_advisory_feed(text).expect("signed feed records should parse")
+    assert_eq(feed.sequence, 7)
+    assert_eq(feed.releases[0].source_class, SourceClass.ThirdParty)
+    assert_eq(feed.exceptions[0].package, "mylib")
+    assert(advisory_feed_payload(feed).contains("mylib#1.0.3"))
+    at_target :: text.replace("mylib#1.0.3", "mylib@1.0.3")
+    assert_eq(parse_advisory_feed(at_target).unwrap_err().code, "E2607")
+}
+// Rust: Source/Publish/mod.rs:597
+#Test("advisory_trust_and_policy_fail_closed") {
+    duplicate :: "public_key=00\npublic_key=11\n"
+    assert_eq(parse_advisory_trust(duplicate).unwrap_err().code, "E2607")
+    revoked :: parse_advisory_trust("public_key=00\nrevoked_key=00\n").unwrap()
+    assert(revoked.revoked_keys.contains("00"))
+    assert_eq(parse_advisory_trust("public_key=00\nmin_sequence=1\naccepted_digest=bad\n").unwrap_err().code, "E2607")
+    diagnostic :: e2609("mylib", "1.0.3", 86_500, SourceClass.ThirdParty)
+    assert_eq(diagnostic.code, "E2609")
+    assert(diagnostic.what.contains("mylib#1.0.3"))
+    assert(diagnostic.fix.contains("policy.exceptions"))
+    assert(diagnostic.fix.contains("mylib#1.0.3"))
+}
+// Rust: Source/Publish/mod.rs:617
+#Test("audit_lockfile_rejects_invalid_locked_versions") {
+    lock :: make_lock([make_lock_pkg("mylib", "not-semver", "sha256-aabb")])
+    error :: audit_lockfile(lock, []).expect_err("invalid lock versions must fail closed")
+    assert_eq(error.code, "E2610")
+    assert(error.what.contains("mylib"))
+    assert(error.what.contains("not-semver"))
+}
+// Rust: Source/Publish/mod.rs:626
+#Test("malformed_supply_metadata_diagnostic_is_pinned") {
+    diagnostic :: e2607("advisory feed", "line 2 has an invalid fixed version")
+    assert_eq(diagnostic.code, "E2607")
+    assert_eq(diagnostic.what, "advisory feed is malformed: line 2 has an invalid fixed version")
+    assert_eq(diagnostic.why, "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.")
+    assert_eq(diagnostic.fix, "fix the malformed advisory feed record and retry; use the documented parser contract and UTF-8 text.")
+}
+// Rust: Source/Publish/mod.rs:644
+#Test("spdx_sbom_has_required_fields") {
+    lock :: make_lock([make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")])
+    sbom :: emit_spdx(lock, "myapp", "0.1.0")
+    assert_eq(sbom, emit_spdx(lock, "myapp", "0.1.0"))
+    assert(sbom.contains("SPDXVersion: SPDX-2.3"), "must have version header")
+    assert(sbom.contains("PackageName: helpers"), "must list dependency")
+    assert(sbom.contains("PackageVersion: 1.0.0"))
+    assert(sbom.contains("SHA256: abcd1234"))
+    assert(sbom.contains("DEPENDS_ON"), "must have relationship")
+}
+// Rust: Source/Publish/mod.rs:662
+#Test("registry_publish_writes_and_rejects_tampered_oci_referrers") {
+    root :: env.temp_dir().join("jet_registry_referrers_{time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()}")
+    repo :: root.join("registry")
+    source :: root.join("source")
+    fs.create_dir_all(repo).unwrap()
+    fs.create_dir_all(source.join(".jet")).unwrap()
+    fs.write(source.join("package.jet"), "package bytes\n").unwrap()
+    lock :: make_lock([make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")])
+    fs.write(source.join(".jet").join("lock"), Lock.write(lock)).unwrap()
+    content_hash :: SHA256.tree_hash(source)
+    Registry.publish_artifact(repo, source, "ref-kit", "1.0.0", content_hash).unwrap()
+    entry :: IndexEntry{name: "ref-kit", version: "1.0.0", content_hash: content_hash.clone(), fingerprint: "sha256-fingerprint", yanked: false, tier: RegistryTier.Core, gate_status: GateStatus.core_reviewed(), public_key: String.new(), signature: String.new()}
+    Index.write_index_entry(repo, entry).unwrap()
+    Registry.verify_oci_referrers(repo, entry).unwrap()
+    blobs :: repo.join("referrers").join(content_hash).join("blobs")
+    blob :: fs.read_dir(blobs).unwrap().next().unwrap().unwrap().path()
+    bytes := fs.read(blob).unwrap()
+    &bytes.push(10 as U8)
+    fs.write(blob, bytes).unwrap()
+    error :: Registry.verify_oci_referrers(repo, entry).expect_err("a tampered OCI referrer must fail closed")
+    assert(error.to_string().contains("digest") || error.to_string().contains("size"), "tampering must fail on a bound OCI blob: {error}")
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: Source/Publish/mod.rs:714
+#Test("registry_publish_rejects_missing_sbom_before_index_exposure") {
+    root :: env.temp_dir().join("jet_registry_missing_sbom_{time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()}")
+    repo :: root.join("registry")
+    source :: root.join("source")
+    fs.create_dir_all(repo).unwrap()
+    fs.create_dir_all(source).unwrap()
+    fs.write(source.join("package.jet"), "package bytes\n").unwrap()
+    content_hash :: SHA256.tree_hash(source)
+    Registry.publish_artifact(repo, source, "ref-kit", "1.0.0", content_hash).unwrap()
+    pending :: repo.join("referrers").join(content_hash).join(".sbom.pending")
+    fs.remove_file(pending).unwrap()
+    entry :: IndexEntry{name: "ref-kit", version: "1.0.0", content_hash: content_hash, fingerprint: "sha256-fingerprint", yanked: false, tier: RegistryTier.Core, gate_status: GateStatus.core_reviewed(), public_key: String.new(), signature: String.new()}
+    error :: Index.write_index_entry(repo, entry).expect_err("a publication without its staged SBOM must fail closed")
+    assert(error.to_string().contains("SBOM evidence was not staged"))
+    assert(Index.find_entry(repo, "ref-kit", "1.0.0").unwrap().is_none())
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: Source/Publish/mod.rs:757
+#Test("cyclonedx_sbom_is_valid_json_structure") {
+    lock :: make_lock([make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")])
+    sbom :: emit_cyclonedx(lock, "myapp", "0.1.0")
+    assert(sbom.contains("\"bomFormat\": \"CycloneDX\""))
+    assert(sbom.contains("\"name\": \"helpers\""))
+    assert(sbom.contains("SHA-256"))
+}
+// Rust: Source/Publish/mod.rs:766
+#Test("api_diff_detects_removed_fn") {
+    old :: [ApiItem{kind: "fn", name: "parse", signature: "fn parse(raw: String) -> Int"}]
+    changes :: diff_public_api(old, [])
+    assert(!changes.is_empty())
+    assert(changes[0].description.contains("removed"))
+}
+// Rust: Source/Publish/mod.rs:779
+#Test("api_diff_detects_changed_signature") {
+    old :: [ApiItem{kind: "fn", name: "parse", signature: "fn parse(raw: String) -> Int"}]
+    new :: [ApiItem{kind: "fn", name: "parse", signature: "fn parse(raw: String) -> Float"}]
+    changes :: diff_public_api(old, new)
+    assert(!changes.is_empty())
+    assert(changes[0].description.contains("changed"))
+}
+// Rust: Source/Publish/mod.rs:796
+#Test("api_diff_no_change") {
+    api :: [ApiItem{kind: "fn", name: "greet", signature: "fn greet(name: String)"}]
+    assert(diff_public_api(api, api).is_empty())
+}
+// Rust: Source/Publish/mod.rs:807
+#Test("pre_publish_gate_blocked_on_minor_with_break") {
+    gate :: PrePublishGate{build_ok: true, tests_ok: true, breaking: [BreakingChange{description: "fn `foo` removed", item_name: "foo"}], version: "1.1.0", bump_kind: BumpKind.Minor, next_major: 2}
+    assert(gate.is_blocked())
+    errs :: gate.semver_errors()
+    assert(!errs.is_empty())
+    assert_eq(errs[0].code, "E2601")
+}
+// Rust: Source/Publish/mod.rs:826
+#Test("pre_publish_gate_passes_major_with_break") {
+    gate :: PrePublishGate{build_ok: true, tests_ok: true, breaking: [BreakingChange{description: "fn `foo` removed", item_name: "foo"}], version: "2.0.0", bump_kind: BumpKind.Major, next_major: 3}
+    assert(!gate.is_blocked())
+    assert(gate.semver_errors().is_empty())
+}
+// Rust: Source/Publish/mod.rs:843
+#Test("iso8601_format") {
+    assert_eq(iso8601(0), "1970-01-01T00:00:00Z")
+    assert_eq(iso8601(946684800), "2000-01-01T00:00:00Z")
+    ts :: iso8601(1704067200)
+    assert(ts.starts_with("2024-01-01"), "got {ts}")
+}
+// Rust: Source/Publish/mod.rs:854
+#Test("registries_from_env") {
+    environment :: ["JET_REGISTRY_PRIVATE_URL": "https://my.company/jet", "JET_REGISTRY_PRIVATE_MIRROR": "true"]
+    regs :: parse_registries_from_env(environment)
+    assert(!regs.is_empty())
+    r :: regs[0]
+    assert_eq(r.name, "private")
+    assert(r.mirror)
+}

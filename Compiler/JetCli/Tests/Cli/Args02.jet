@@ -1,0 +1,111 @@
+// Rust: Source/ProveReplay.rs:2615-2771
+// Original replay controls; compiled with the canonical ProveReplay owner.
+use jet.Debug.[RecordedRun, RecordedAct, ValueSnapshot]
+use std.fs
+use std.env
+use std.process
+use std.time.[SystemTime, UNIX_EPOCH]
+
+// Rust: Source/ProveReplay.rs:2619
+fn identity() -> ReplayIdentity {
+    ReplayIdentity{
+        entry: "examples/prove.jet",
+        source_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        execution_adapter: "mir-v1",
+        target_triple: "x86_64-unknown-linux-gnu",
+        abi: "gnu",
+        build_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        core_abi: "1",
+        lock_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        profile: "dev",
+        semantic_mir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        optimized_mir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mir_schema: "mir-v1",
+        mir_identity: "\{\"core_ids\":[],\"function_ids\":[],\"identity_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"optimized_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"schema\":\"mir-v1\",\"semantic_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_map\":[],\"target_facts\":[]\}",
+        time_site_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+}
+// Rust: Source/ProveReplay.rs:2640
+#Test("safe_time_artifact_round_trips_and_preserves_authority") {
+    bytes :: build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap()
+    header :: parse_and_verify(bytes).unwrap()
+    assert_eq(header.get("schema"), Val("jet.replay"))
+    assert_eq(header.get("run_outcome"), Val("exit"))
+    assert_eq(header.get("run_status"), Val("0"))
+    assert_eq(extract_time_ms(bytes).unwrap()[0], 1_234)
+}
+// Rust: Source/ProveReplay.rs:2651
+#Test("recorded_acts_stay_inside_the_replay_receipt") {
+    run :: RecordedRun{
+        acts: [RecordedAct{sequence: 1, function: "run", line: 4, locals: [ValueSnapshot{name: "total", type_name: "Int", value: "0"}]}],
+        decision_ledger: None
+    }
+    bytes :: build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, Val(&run)).unwrap()
+    header :: parse_and_verify(bytes).unwrap()
+    assert(header.get("schema").is_some())
+    assert(String.from_utf8_lossy(bytes).contains("recorded_run"))
+    assert_eq(extract_recorded_run(bytes).unwrap(), run)
+    assert_eq(extract_time_ms(bytes).unwrap(), [I64]{1_234})
+}
+// Rust: Source/ProveReplay.rs:2676
+#Test("time_integer_encoding_is_minimal_until_fixed_width_is_required") {
+    assert_eq(canonical_u64_string(0), "0")
+    assert_eq(canonical_u64_string(MAX_EXACT_JSON_INTEGER), "9007199254740991")
+    assert_eq(canonical_u64_string(MAX_EXACT_JSON_INTEGER + 1), "0020000000000000")
+    assert_eq(parse_canonical_u64("0").unwrap(), 0)
+    assert_eq(parse_canonical_u64("0020000000000000").unwrap(), MAX_EXACT_JSON_INTEGER + 1)
+    assert(parse_canonical_u64("0000000000000000").is_err())
+    assert(parse_canonical_u64("9007199254740992").is_err())
+}
+// Rust: Source/ProveReplay.rs:2696
+#Test("privacy_salt_requires_a_valid_thirty_two_byte_base64url_value") {
+    assert(is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+    assert(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!"))
+    assert(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-"))
+}
+// Rust: Source/ProveReplay.rs:2709
+#Test("safe_time_artifact_detects_payload_tampering") {
+    bytes := build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap()
+    hlen :: U32.from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as Int
+    payload :: 16 + hlen + 15
+    bytes[payload] = bytes[payload] ^ (U8{1})
+    assert(parse_and_verify(bytes).is_err())
+}
+// Rust: Source/ProveReplay.rs:2719
+#Test("replay_rejects_a_different_target_identity") {
+    // GATE #4494: use a real temporary filesystem artifact, process ID and clock.
+    nanos :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    path :: env.temp_dir().join("jet-replay-identity-{process.id()}-{nanos}.jetproof-replay")
+    bytes :: build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap()
+    fs.write(path, bytes).unwrap()
+    different := identity()
+    different.source_digest = "different-source"
+    result :: prepare_replay(&different, path.to_string_lossy())
+    fs.remove_file(path).unwrap()
+    assert(if result == { .Err(("E3621", _)) -> true else -> false })
+}
+// Rust: Source/ProveReplay.rs:2739
+#Test("replay_rejects_identity_changes_beyond_source_digest") {
+    bytes :: build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap()
+    header :: parse_and_verify(bytes).unwrap()
+    different := identity()
+    different.core_abi = "2"
+    assert_eq(header.get("core_abi"), Val("1"))
+    assert(identity_matches(&header, &different).is_err())
+}
+// Rust: Source/ProveReplay.rs:2750
+#Test("replay_rejects_time_site_identity_changes") {
+    original :: identity()
+    bytes :: build_safe_time_artifact_with_run(&original, 1_234_567_890, "exit", 0, None).unwrap()
+    header :: parse_and_verify(bytes).unwrap()
+    different := ~original
+    different.time_site_id = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    assert_eq(header.get("time_site_id"), Val(original.time_site_id))
+    assert(identity_matches(&header, &different).is_err())
+}
+// Rust: Source/ProveReplay.rs:2766
+#Test("capture_paths_reject_empty_or_hostile_components") {
+    assert(validate_capture_path("traces//run.jetproof-replay").is_err())
+    assert(validate_capture_path("traces\\run.jetproof-replay").is_err())
+    assert(validate_capture_path("traces/run.jetproof-replay").is_ok())
+}

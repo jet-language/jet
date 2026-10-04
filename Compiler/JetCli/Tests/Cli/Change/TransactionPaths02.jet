@@ -1,0 +1,29 @@
+use crate.[unhex, parse_journal, secure_replace, now_nanos]
+use std.[fs, process]
+
+// Rust: Source/CmdCodemod/Transaction.rs:3174-3185
+#Test("journal_hex_decodes_exact_bytes") {
+    assert_eq(unhex("00fF107f"), [0, 255, 16, 127])
+    assert_eq(unhex(""), [])
+}
+// Rust: Source/CmdCodemod/Transaction.rs:2745-2876
+#Test("secure_replace_refuses_drift_without_publishing_temp") {
+    // GATE #4483/#4494: exercise real selected Unix filesystem provider.
+    if core.sys.target.selected_family() == "unix" {
+        root :: OSPath.from("/tmp/jet-secure-replace-{process.id()}-{now_nanos()}")
+        fs.create_dir_all(root).unwrap()
+        destination :: root.join("main.jet")
+        temp :: root.join("main.tmp")
+        fs.write(destination, "current").unwrap()
+        fs.write(temp, "replacement").unwrap()
+        error :: secure_replace(root, temp, destination, "stale".as_bytes()).unwrap_err()
+        assert_eq(error.kind(), std.io.ErrorKind.Other)
+        assert_eq(error.to_string(), "destination drifted before handle-relative rename")
+        assert_eq(fs.read(destination).unwrap(), "current".as_bytes())
+        assert_eq(fs.read(temp).unwrap(), "replacement".as_bytes())
+        secure_replace(root, temp, destination, "current".as_bytes()).unwrap()
+        assert_eq(fs.read(destination).unwrap(), "replacement".as_bytes())
+        assert(!temp.exists())
+        fs.remove_dir_all(root).unwrap()
+    }
+}

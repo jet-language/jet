@@ -1,82 +1,38 @@
-// PORT-PENDING 0817 source-publish-apifreeze-module-group: Source/Publish/ApiFreeze.rs:1-78
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Driver-level API freeze — loads entry bundle and writes snapshot to disk.
-//RS //! Pure sema types and functions are re-exported from `Sema::ApiFreeze`.
-//RS 
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS pub use crate::Sema::ApiFreeze::{
-//RS     api_cache_dir, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature,
-//RS     load_all_snapshots, load_snapshot, normalized_public_effect_row, project_capability_digest,
-//RS     qualify_api_signature, save_snapshot, signature_without_effect_row, snapshot_from_items,
-//RS     snapshot_from_items_with_effects, snapshot_from_items_with_ledger, trait_method_signature,
-//RS     ApiSnapshot, FrozenFn, API_SNAPSHOT_VERSION,
-//RS };
-//RS 
-//RS /// Snapshot every publish's public-function surface to disk (pub-metadata
-//RS /// semver diffing, S2/D-MEM1 — the capability-tier freeze/elevation this used
-//RS /// to gate on is gone; signatures are decided at parse time and never drift).
-//RS /// Loads the entry bundle, snapshots the entry module's `pub fn`s, and writes
-//RS /// `<project_root>/.jet/cache/api/<package>.api`. Returns the count of
-//RS /// snapshotted public functions, or `None` if the entry couldn't be loaded.
-//RS pub fn write_api_snapshot_for_entry(
-//RS     project_root: &Path,
-//RS     entry_file: &str,
-//RS     package: &str,
-//RS     version: &str,
-//RS ) -> Option<usize> {
-//RS     let mut bundle = crate::Loader::load_entry_with_overlay(entry_file, None, true).ok()?;
-//RS     let (diagnostics, facts) =
-//RS         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
-//RS     if diagnostics
-//RS         .iter()
-//RS         .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let entry = &bundle.modules[bundle.entry];
-//RS     let snap = snapshot_from_items_with_ledger(
-//RS         &entry.items,
-//RS         package,
-//RS         version,
-//RS         Some(&facts.solved),
-//RS         facts.name_ledger.module_alias(bundle.entry),
-//RS         bundle.entry,
-//RS         &facts.name_ledger,
-//RS     );
-//RS     let count = snap.funcs.len();
-//RS     save_snapshot(project_root, &snap).ok()?;
-//RS     record_api_receipt(project_root, entry_file, package, version, &snap).ok()?;
-//RS     Some(count)
-//RS }
-//RS 
-//RS fn record_api_receipt(
-//RS     project_root: &Path,
-//RS     entry_file: &str,
-//RS     package: &str,
-//RS     version: &str,
-//RS     snapshot: &ApiSnapshot,
-//RS ) -> Result<(), String> {
-//RS     let root = std::env::var_os("JET_RECEIPT_DIR")
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|| project_root.join(".jet").join("receipts"));
-//RS     let entry = PathBuf::from(entry_file);
-//RS     let entry = if entry.is_absolute() {
-//RS         entry
-//RS     } else {
-//RS         project_root.join(entry)
-//RS     };
-//RS     let args = vec![package.to_string(), version.to_string()];
-//RS     let input_argv = vec!["api".to_string(), entry.display().to_string()];
-//RS     let mut inputs = crate::ReceiptStore::input_paths_for("api", &input_argv, project_root);
-//RS     let snapshot_path = api_cache_dir(project_root).join(format!("{package}.api"));
-//RS     if snapshot_path.is_file() {
-//RS         inputs.push(snapshot_path);
-//RS     }
-//RS     let store = crate::ReceiptStore::ReceiptStore::new(root);
-//RS     store
-//RS         .record("api", &args, &inputs, 0, snapshot.write().as_bytes(), b"")
-//RS         .map(|_| ())
-//RS }
-// END-PORT-PENDING 0817 Source/Publish/ApiFreeze.rs:1-78
+// Rust: Source/Publish/ApiFreeze.rs:1
+// Driver-level API freeze: the pure snapshot owner is jet.Sema.ApiFreeze.
+// Rust: Source/Publish/ApiFreeze.rs:6
+// Canonical pure API imports replace the Rust wrapper's public re-exports.
+use jet.Sema.ApiFreeze.[ApiSnapshot, snapshot_from_items_with_ledger, save_snapshot, api_cache_dir]
+use jet.Loader
+use jet.Sema
+use jet.Diagnostics.Severity
+use jet.ReceiptStore
+// GATE #4494: native environment path ingress preserves non-UTF8 paths.
+use core.sys.host.os_path_ingress.var_os
 
+// Rust: Source/Publish/ApiFreeze.rs:20
+pub fn write_api_snapshot_for_entry(project_root: OSPath, entry_file: String, package: String, version: String) -> Int? {
+    bundle := Loader.load_entry_with_overlay(entry_file, None, true).ok() ?? return None
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    if diagnostics.iter().any(diagnostic -> diagnostic.severity == Severity.Error) -> return None
+    entry :: bundle.modules[bundle.entry]
+    snap :: snapshot_from_items_with_ledger(entry.items, package, version, Val(facts.solved),
+        facts.name_ledger.module_alias(bundle.entry), bundle.entry, facts.name_ledger)
+    count :: snap.funcs.len()
+    _ :: save_snapshot(project_root, snap).ok() ?? return None
+    _ :: record_api_receipt(project_root, entry_file, package, version, snap).ok() ?? return None
+    Val(count)
+}
+// Rust: Source/Publish/ApiFreeze.rs:51
+fn record_api_receipt(project_root: OSPath, entry_file: String, package: String, version: String, snapshot: ApiSnapshot) -> Unit Err! {
+    root :: var_os("JET_RECEIPT_DIR").unwrap_or_else(() -> project_root.join(".jet").join("receipts"))
+    entry_path :: OSPath.from(entry_file)
+    entry :: if entry_path.is_absolute() { entry_path } else { project_root.join(entry_path) }
+    args :: [package.to_string(), version.to_string()]
+    input_argv :: ["api", entry.display().to_string()]
+    inputs := ReceiptStore.input_paths_for("api", input_argv, project_root)
+    snapshot_path :: api_cache_dir(project_root).join("{package}.api")
+    if snapshot_path.is_file() -> &inputs.push(snapshot_path)
+    store :: ReceiptStore.ReceiptStore.new(root)
+    store.record("api", args, inputs, 0, snapshot.write().as_bytes(), []).map(_ -> ())
+}

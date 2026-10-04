@@ -1,0 +1,143 @@
+use jetpack.CLI.StudioServer.[StudioContext, STUDIO_IO_TIMEOUT, STUDIO_WORKER_COUNT, STUDIO_CONNECTION_QUEUE, configure_studio_stream, read_http_request_until, with_studio_workers, queue_studio_connection]
+use std.[thread]
+use std.net.[TcpListener, TcpStream]
+use std.sync.[Arc, Mutex, mpsc]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.io.[ErrorKind]
+use std.time.[Duration, Instant]
+
+// Rust: crates/jetpack/src/CLI/studio_server.rs:556
+fn test_studio_context(session_secret: String) -> StudioContext {
+    StudioContext{
+        config: OSPath.from("missing/config.jet"), host: "test", offline: true,
+        session_secret: session_secret, source_write: Mutex.new(()),
+        sessions: Mutex.new([String: Bool]{}), changeset: Mutex.new(None),
+        last_applied: Mutex.new(None), live_projection: Mutex.new(None),
+        proved_source: Mutex.new(None)
+    }
+}
+
+// Rust: crates/jetpack/src/CLI/studio_server.rs:572
+// GATE #4494: real sockets, native thread ownership and monotonic clock.
+#Test("studio_slowloris_connections_have_io_deadlines") {
+    listener :: TcpListener.bind("127.0.0.1:0") ?? panic("bind listener")
+    client :: TcpStream.connect(listener.local_addr() ?? panic("listener address")) ?? panic("connect client")
+    (server, _) :: listener.accept() ?? panic("accept client")
+    configure_studio_stream(&server) ?? panic("set IO deadlines")
+    assert_eq(server.read_timeout() ?? panic("read timeout"), Val(STUDIO_IO_TIMEOUT))
+    assert_eq(server.write_timeout() ?? panic("write timeout"), Val(STUDIO_IO_TIMEOUT))
+    server.set_read_timeout(Val(Duration.from_millis(20))) ?? panic("short read timeout")
+    writer :: thread.spawn(() -> {
+        owned_client := ^client
+        loop _ in 0..<200 {
+            if owned_client.write_all("G".bytes()) == .Err(_) -> break
+            thread.sleep(Duration.from_millis(5))
+        }
+    })
+    started :: Instant.now()
+    if read_http_request_until(&server, started + Duration.from_millis(80)) == {
+        .Ok(_) -> panic("partial request must hit deadline")
+        .Err(error) -> assert(error.kind() == ErrorKind.TimedOut || error.kind() == ErrorKind.WouldBlock, "partial request should hit the read deadline: {error}")
+    }
+    assert(started.elapsed() < Duration.from_millis(500))
+    drop(^server)
+    writer.join() ?? panic("join writer")
+}
+
+// Rust: crates/jetpack/src/CLI/studio_server.rs:613
+#Test("studio_slowloris_does_not_starve_later_clients") {
+    listener :: TcpListener.bind("127.0.0.1:0") ?? panic("bind listener")
+    local_addr :: listener.local_addr() ?? panic("listener address")
+    context :: test_studio_context("slowloris-secret")
+    app :: OSPath.from("missing/studio/index.html")
+    meta :: OSPath.from("missing/studio/app.json")
+    data :: OSPath.from("missing/studio/data.json")
+    partial_secret :: context.session_secret
+    complete_secret :: context.session_secret
+    (partial_ready_tx, partial_ready_rx) :: mpsc.channel()
+    (release_partial_tx, release_partial_rx) :: mpsc.channel()
+    (accepted_partial_tx, accepted_partial_rx) :: mpsc.channel()
+    (complete_result_tx, complete_result_rx) :: mpsc.channel()
+    thread.scope(scope -> {
+        _ :: scope.spawn(() -> {
+            ready_tx :: ^partial_ready_tx
+            release_rx :: ^release_partial_rx
+            client :: TcpStream.connect(local_addr) ?? panic("connect partial client")
+            client.write_all("GET /studio/app.json?session={partial_secret} HTTP/1.1\r\nHost: {local_addr}\r\n".bytes()) ?? panic("write partial request")
+            ready_tx.send(()) ?? panic("signal partial ready")
+            release_rx.recv() ?? panic("wait for partial release")
+        })
+        partial_ready_rx.recv() ?? panic("wait for partial ready")
+        server :: scope.spawn(() -> {
+            with_studio_workers(app, meta, data, &context, local_addr, sender -> {
+                (stream, _) :: listener.accept() ?? panic("accept partial client")
+                accepted :: queue_studio_connection(sender, ^stream)
+                accepted_partial_tx.send(accepted) ?? panic("signal partial accepted")
+                (stream, _) :: listener.accept() ?? panic("accept complete client")
+                assert(queue_studio_connection(sender, ^stream))
+                0
+            })
+        })
+        assert(accepted_partial_rx.recv() ?? panic("wait partial accepted"))
+        complete :: scope.spawn(() -> {
+            release_tx :: ^release_partial_tx
+            result_tx :: ^complete_result_tx
+            result: Duration Err! :: (() -> {
+                started :: Instant.now()
+                client :: TcpStream.connect(local_addr) ?? return Err(err.to_string())
+                client.write_all("GET /studio/app.json?session={complete_secret} HTTP/1.1\r\nHost: {local_addr}\r\nConnection: close\r\n\r\n".bytes()) ?? return Err(err.to_string())
+                client.set_read_timeout(Val(Duration.from_secs(2))) ?? return Err(err.to_string())
+                response := [U8]{}
+                client.read_to_end(&response) ?? return Err(err.to_string())
+                if !response.starts_with("HTTP/1.1 200 OK\r\n".bytes()) -> return Err("complete Studio request failed: {String.from_utf8_lossy(response)}")
+                Ok(started.elapsed())
+            })()
+            _ :: release_tx.send(())
+            result_tx.send(^result) ?? panic("send complete result")
+        })
+        elapsed :: (complete_result_rx.recv() ?? panic("receive complete result")) ?? panic("complete request")
+        assert(elapsed < STUDIO_IO_TIMEOUT, "later request waited {elapsed} behind the partial request")
+        complete.join() ?? panic("join complete client")
+        assert_eq(server.join() ?? panic("join server"), 0)
+    })
+}
+
+// Rust: crates/jetpack/src/CLI/studio_server.rs:705
+#Test("studio_connection_cap_refuses_excess_without_leaking") {
+    total :: STUDIO_WORKER_COUNT + STUDIO_CONNECTION_QUEUE + 1
+    listener :: TcpListener.bind("127.0.0.1:0") ?? panic("bind listener")
+    local_addr :: listener.local_addr() ?? panic("listener address")
+    context :: test_studio_context("cap-secret")
+    app :: OSPath.from("missing/studio/index.html")
+    meta :: OSPath.from("missing/studio/app.json")
+    data :: OSPath.from("missing/studio/data.json")
+    release :: Arc.new(AtomicBool.new(false))
+    (connected_tx, connected_rx) :: mpsc.channel()
+    thread.scope(scope -> {
+        loop _ in 0..<total {
+            owned_tx :: connected_tx.clone()
+            owned_release :: Arc.clone(release)
+            _ :: scope.spawn(() -> {
+                connected_tx :: ^owned_tx
+                release :: ^owned_release
+                client :: TcpStream.connect(local_addr) ?? panic("connect client")
+                client.write_all("G".bytes()) ?? panic("write partial request")
+                connected_tx.send(()) ?? panic("signal connected")
+                loop !release.load(Ordering.Acquire) -> thread.yield_now()
+            })
+        }
+        loop _ in 0..<total -> connected_rx.recv() ?? panic("wait client connected")
+        server :: scope.spawn(() -> {
+            with_studio_workers(app, meta, data, &context, local_addr, sender -> {
+                rejected := 0
+                loop _ in 0..<total {
+                    (stream, _) :: listener.accept() ?? panic("accept client")
+                    if !queue_studio_connection(sender, ^stream) -> rejected += 1
+                }
+                release.store(true, Ordering.Release)
+                rejected
+            })
+        })
+        assert_eq(server.join() ?? panic("join server"), 1)
+    })
+}

@@ -1,0 +1,21 @@
+use crate.[parse_find_options, parse_type_shape, signature_shape, shape_matches, split_top_level, literal_type]
+
+// Rust: Source/CmdSemIndex.rs:251-300
+#Test("find_options_validate_values_and_preserve_last_effect") {
+    options :: parse_find_options(["--effect=IO", "--effect", "Time", "-p", "demo", "query"]).unwrap()
+    assert_eq(options.effect, Val("Time"))
+    assert_eq(options.member, Val("demo"))
+    assert_eq(options.positionals, ["query"])
+    assert_eq(parse_find_options(["--example="]).unwrap_err(), "`--example` needs a value")
+}
+// Rust: Source/CmdSemIndex.rs:551-612
+#Test("find_shape_reuses_generic_bindings_across_inputs_and_output") {
+    wanted :: parse_type_shape("T, [T] -> T").unwrap()
+    compatible :: parse_type_shape("Int, [Int] -> Int").unwrap()
+    incompatible :: parse_type_shape("Int, [String] -> Int").unwrap()
+    assert(shape_matches(wanted, compatible))
+    assert(!shape_matches(wanted, incompatible))
+    assert_eq(split_top_level("Map<A,B>, (Int, String), [T]", ','), ["Map<A,B>", "(Int, String)", "[T]"])
+    assert_eq(literal_type("[1, 2]"), Val("[Int]"))
+    assert_eq(literal_type("[1, true]"), Val("[T]"))
+}

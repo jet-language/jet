@@ -2,6 +2,7 @@
 // The checked producer (#4445) and Root provider cutover (#4262) are separate
 // composition gates; this module does not parse or reconstruct public APIs.
 // Diagnostics use the single registry constructor and its sentence casing.
+// Rust: Source/Publish/Diff.rs:13 — BreakingChange, canonical publication carrier.
 pub struct PublicationBreakingChange {
     pub description: String
     pub item_name: String
@@ -9,6 +10,7 @@ pub struct PublicationBreakingChange {
 
 // Match the first unused full triple before the first unused kind/name pair.
 // Duplicate legacy names therefore retain signature-multiset semantics.
+// Rust: Source/Publish/Diff.rs:21 — diff_public_api.
 pub fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
     changes := [PublicationBreakingChange]{}
     matched := (loop _ in new -> false)
@@ -50,6 +52,7 @@ pub fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -
     changes
 }
 
+// Rust: Source/Publish/Diff.rs:86 — e2601.
 pub fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
     bump :: if bump_kind == {
         .Minor -> "minor"
@@ -66,6 +69,7 @@ pub fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change
         "bump to {next_major}.0.0, or restore `{change.item_name}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
 }
 
+// Rust: Source/Publish/Diff.rs:125 — e1218.
 pub fn publication_e1218(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
     label :: if bump == {
         .Minor -> "minor"
@@ -79,6 +83,7 @@ pub fn publication_e1218(old_version: String, new_version: String, bump: Publica
         "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts).")
 }
 
+// Rust: Source/Publish/Diff.rs:162 — PrePublishGate.
 pub struct PublicationPrePublishGate {
     pub build_ok: Bool
     pub tests_ok: Bool
@@ -87,10 +92,12 @@ pub struct PublicationPrePublishGate {
     pub bump_kind: PublicationBumpKind
     pub next_major: Int
 
+    // Rust: Source/Publish/Diff.rs:175
     fn is_blocked(self) -> Bool Never! {
         !self.build_ok || !self.tests_ok || (self.breaking.len() != 0 && self.bump_kind != .Major)
     }
 
+    // Rust: Source/Publish/Diff.rs:186
     fn semver_errors(self) -> [Diagnostic] Never! {
         if self.bump_kind == .Major -> return [Diagnostic]{}
         loop change in self.breaking -> publication_e2601(self.version, self.bump_kind, change, self.next_major)

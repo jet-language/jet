@@ -1,1814 +1,846 @@
-// PORT-PENDING 0818 source-publish-foreignpackage-slice-1: Source/Publish/ForeignPackage.rs:1-1810
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Foreign package export and publication.
-//RS //!
-//RS //! The .jetlib file is the authority for this surface. It carries the
-//RS //! checked export table, ABI identity, target, and native payload digest.
-//RS //! This module projects that table into host package formats. It does not
-//RS //! parse Jet source or infer types from generated code.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::env;
-//RS use std::fmt::Write as FmtWrite;
-//RS use std::fs::{self, OpenOptions};
-//RS use std::io::{self, Write};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Stdio};
-//RS 
-//RS use crate::{JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp};
-//RS 
-//RS const FOREIGN_SCHEMA: u32 = 1;
-//RS const MAX_ARCHIVE_ENTRY: usize = 64 * 1024 * 1024;
-//RS 
-//RS /// A supported foreign package registry.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
-//RS pub enum ForeignRegistry {
-//RS     PyPi,
-//RS     Npm,
-//RS     Maven,
-//RS     NuGet,
-//RS }
-//RS 
-//RS impl ForeignRegistry {
-//RS     /// Parse the value accepted by jet publish --to.
-//RS     pub fn parse(value: &str) -> Result<Self, String> {
-//RS         match value.trim().to_ascii_lowercase().as_str() {
-//RS             "pypi" | "python" | "python-wheel" => Ok(Self::PyPi),
-//RS             "npm" | "node" => Ok(Self::Npm),
-//RS             "maven" | "maven-central" | "jvm" => Ok(Self::Maven),
-//RS             "nuget" | "dotnet" | ".net" => Ok(Self::NuGet),
-//RS             _ => Err(format!(
-//RS                 "unsupported foreign registry '{value}'; choose pypi, npm, maven, or nuget"
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::PyPi => "pypi",
-//RS             Self::Npm => "npm",
-//RS             Self::Maven => "maven",
-//RS             Self::NuGet => "nuget",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Options for a foreign package build and upload.
-//RS #[derive(Debug, Clone, Copy)]
-//RS pub struct ForeignPublishOptions {
-//RS     pub registry: ForeignRegistry,
-//RS     pub no_sign: bool,
-//RS }
-//RS 
-//RS /// Evidence returned after a package is built and, when configured, uploaded.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ForeignPublishReport {
-//RS     pub registry: ForeignRegistry,
-//RS     pub artifact: PathBuf,
-//RS     pub artifact_digest: String,
-//RS     pub release_identity: String,
-//RS     pub uploaded: bool,
-//RS }
-//RS 
-//RS struct LibraryInput {
-//RS     root: PathBuf,
-//RS     package_name: String,
-//RS     version: String,
-//RS     license: String,
-//RS     license_text: String,
-//RS     library_name: String,
-//RS     runtime_name: String,
-//RS     runtime: Vec<u8>,
-//RS     header: Vec<u8>,
-//RS     stamp: JetLibStamp,
-//RS     abi_json: String,
-//RS     abi_digest: String,
-//RS     source_identity: String,
-//RS     release_identity: String,
-//RS     common_json: String,
-//RS     provenance_json: String,
-//RS     sbom: String,
-//RS     signature_json: String,
-//RS }
-//RS 
-//RS struct ArchiveEntry {
-//RS     name: String,
-//RS     bytes: Vec<u8>,
-//RS }
-//RS 
-//RS /// Build a foreign archive in .jet/build/foreign without uploading it.
-//RS pub fn build_foreign_package(
-//RS     root: &Path,
-//RS     registry: ForeignRegistry,
-//RS     no_sign: bool,
-//RS ) -> Result<ForeignPublishReport, String> {
-//RS     let input = prepare_library(root, registry, no_sign)?;
-//RS     let archive = render_archive(registry, &input)?;
-//RS     let digest = format!("sha256-{}", crate::SHA256::sha256_hex(&archive));
-//RS     let output_dir = foreign_output_dir(root)?;
-//RS     let artifact = output_dir.join(artifact_file_name(registry, &input));
-//RS     write_atomic(&artifact, &archive)?;
-//RS     Ok(ForeignPublishReport {
-//RS         registry,
-//RS         artifact,
-//RS         artifact_digest: digest,
-//RS         release_identity: input.release_identity,
-//RS         uploaded: false,
-//RS     })
-//RS }
-//RS 
-//RS /// Build and publish one foreign archive. A local file:// endpoint is the
-//RS /// supported offline and air-gapped registry adapter. Network registries use
-//RS /// their native publisher and receive no archive before local validation ends.
-//RS pub fn publish_foreign_package(
-//RS     root: &Path,
-//RS     options: ForeignPublishOptions,
-//RS ) -> Result<ForeignPublishReport, String> {
-//RS     let report = build_foreign_package(root, options.registry, options.no_sign)?;
-//RS     let endpoint = registry_endpoint(options.registry)?;
-//RS     publish_archive(options.registry, &endpoint, &report)?;
-//RS     Ok(ForeignPublishReport {
-//RS         uploaded: true,
-//RS         ..report
-//RS     })
-//RS }
-//RS 
-//RS fn prepare_library(
-//RS     root: &Path,
-//RS     registry: ForeignRegistry,
-//RS     no_sign: bool,
-//RS ) -> Result<LibraryInput, String> {
-//RS     let facts = crate::Loader::package_facts_for_root(root)
-//RS         .map_err(|diagnostics| {
-//RS             diagnostics
-//RS                 .into_iter()
-//RS                 .map(|diagnostic| format!("{diagnostic:?}"))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("; ")
-//RS         })?
-//RS         .ok_or_else(|| "no package source found in the publish root".to_string())?;
-//RS     let package_name = facts.name.clone();
-//RS     let version = facts
-//RS         .version
-//RS         .clone()
-//RS         .ok_or_else(|| "package source has no package version".to_string())?;
-//RS     let license = facts
-//RS         .license
-//RS         .clone()
-//RS         .ok_or_else(|| "package source has no SPDX license".to_string())?;
-//RS     crate::Publish::validate_published_license(&package_name, &version, Some(&license))
-//RS         .map_err(|error| error.detail)?;
-//RS 
-//RS     let libraries = facts
-//RS         .outputs
-//RS         .iter()
-//RS         .filter(|(_, output)| output.kind == crate::Package::PackageOutputKind::Library)
-//RS         .collect::<Vec<_>>();
-//RS     let (output_key, output) = match libraries.as_slice() {
-//RS         [(name, output)] => (name.as_str(), *output),
-//RS         [] => return Err("foreign publication needs one Library output".to_string()),
-//RS         many => {
-//RS             let names = many
-//RS                 .iter()
-//RS                 .map(|(name, _)| name.as_str())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             return Err(format!(
-//RS                 "foreign publication needs one Library output; found {names}"
-//RS             ));
-//RS         }
-//RS     };
-//RS     if !output.is_native() || !output.is_loadable() {
-//RS         return Err(format!(
-//RS             "Library output '{output_key}' must set native: true and loadable: true for foreign publication"
-//RS         ));
-//RS     }
-//RS 
-//RS     let library_name = output.name.clone();
-//RS     let entry = output.entry.clone().ok_or_else(|| {
-//RS         format!(
-//RS             "Library output '{output_key}' has no source entry; foreign publication needs a checked entry"
-//RS         )
-//RS     })?;
-//RS     run_library_build(root, output_key, &entry)?;
-//RS 
-//RS     let stem = library_stem(&library_name);
-//RS     let target_dir = root.join(".jet").join("build");
-//RS     let runtime_name = format!("lib{stem}.{}", shared_extension());
-//RS     let runtime_path = target_dir.join(&runtime_name);
-//RS     let header_path = target_dir.join(format!("{stem}.h"));
-//RS     let jetlib_path = target_dir.join(format!("{stem}.jetlib"));
-//RS     let runtime = read_regular_file(&runtime_path, "native host runtime")?;
-//RS     if runtime.is_empty() {
-//RS         return Err(format!(
-//RS             "native host runtime '{}' is empty",
-//RS             runtime_path.display()
-//RS         ));
-//RS     }
-//RS     let header = read_regular_file(&header_path, "C ABI header")?;
-//RS     validate_header(&header, &library_name, &runtime_name)?;
-//RS     let jetlib = read_regular_file(&jetlib_path, ".jetlib ABI artifact")?;
-//RS     let artifact = JetLibArtifact::decode(&jetlib)
-//RS         .map_err(|error| format!("could not decode '{}': {error}", jetlib_path.display()))?;
-//RS     crate::JetLib::validate_load_metadata(&artifact.stamp)?;
-//RS     crate::JetLib::validate_payload_digest(&artifact.stamp, &artifact.payload)?;
-//RS     if artifact.payload != runtime {
-//RS         return Err(format!(
-//RS             "native host runtime '{runtime_name}' does not match the sealed .jetlib payload"
-//RS         ));
-//RS     }
-//RS     if artifact.stamp.library_name != library_name {
-//RS         return Err(format!(
-//RS             "ABI artifact names Library '{}', but the output is '{library_name}'",
-//RS             artifact.stamp.library_name
-//RS         ));
-//RS     }
-//RS 
-//RS     let source_identity = source_identity(root)?;
-//RS     let license_text = load_license_text(root, &license)?;
-//RS     let abi_json = render_abi_json(&artifact.stamp);
-//RS     let abi_digest = format!("sha256-{}", crate::SHA256::sha256_hex(abi_json.as_bytes()));
-//RS     let release_identity = release_identity(
-//RS         &package_name,
-//RS         &version,
-//RS         &library_name,
-//RS         &artifact.stamp,
-//RS         &abi_digest,
-//RS         &source_identity,
-//RS     );
-//RS     let signature_json = signature_metadata(registry, &release_identity, no_sign)?;
-//RS     let common_json = render_common_json(
-//RS         &package_name,
-//RS         &version,
-//RS         &license,
-//RS         &library_name,
-//RS         &artifact.stamp,
-//RS         &runtime_name,
-//RS         &runtime,
-//RS         &abi_digest,
-//RS         &source_identity,
-//RS         &release_identity,
-//RS         registry,
-//RS     );
-//RS     let provenance_json = render_provenance_json(
-//RS         &package_name,
-//RS         &version,
-//RS         &library_name,
-//RS         &artifact.stamp,
-//RS         &runtime_name,
-//RS         &runtime,
-//RS         &abi_digest,
-//RS         &source_identity,
-//RS         &release_identity,
-//RS         registry,
-//RS     );
-//RS     let sbom = render_sbom(
-//RS         &package_name,
-//RS         &version,
-//RS         &license,
-//RS         &runtime_name,
-//RS         &runtime,
-//RS         &artifact.stamp,
-//RS         &abi_digest,
-//RS         &source_identity,
-//RS     );
-//RS 
-//RS     Ok(LibraryInput {
-//RS         root: root.to_path_buf(),
-//RS         package_name,
-//RS         version,
-//RS         license,
-//RS         license_text,
-//RS         library_name,
-//RS         runtime_name,
-//RS         runtime,
-//RS         header,
-//RS         stamp: artifact.stamp,
-//RS         abi_json,
-//RS         abi_digest,
-//RS         source_identity,
-//RS         release_identity,
-//RS         common_json,
-//RS         provenance_json,
-//RS         sbom,
-//RS         signature_json,
-//RS     })
-//RS }
-//RS 
-//RS fn run_library_build(root: &Path, output: &str, entry: &str) -> Result<(), String> {
-//RS     let jet = env::current_exe()
-//RS         .map_err(|error| format!("could not locate the Jet compiler: {error}"))?;
-//RS     let result = Command::new(jet)
-//RS         .current_dir(root)
-//RS         .args(["build", "--lib", "--locked", "--output", output, entry])
-//RS         .stdin(Stdio::null())
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::null())
-//RS         .output()
-//RS         .map_err(|error| format!("could not start the Jet Library build: {error}"))?;
-//RS     if result.status.success() {
-//RS         return Ok(());
-//RS     }
-//RS     Err(format!(
-//RS         "Jet Library build failed with status {}",
-//RS         result
-//RS             .status
-//RS             .code()
-//RS             .map(|code| code.to_string())
-//RS             .unwrap_or_else(|| "signal".to_string())
-//RS     ))
-//RS }
-//RS 
-//RS fn shared_extension() -> &'static str {
-//RS     if cfg!(target_os = "macos") {
-//RS         "dylib"
-//RS     } else if cfg!(target_os = "windows") {
-//RS         "dll"
-//RS     } else {
-//RS         "so"
-//RS     }
-//RS }
-//RS 
-//RS fn shared_platform() -> String {
-//RS     format!("{}-{}", env::consts::OS, env::consts::ARCH)
-//RS }
-//RS 
-//RS fn node_platform() -> &'static str {
-//RS     if cfg!(target_os = "macos") {
-//RS         "darwin"
-//RS     } else if cfg!(target_os = "windows") {
-//RS         "win32"
-//RS     } else {
-//RS         env::consts::OS
-//RS     }
-//RS }
-//RS 
-//RS fn library_stem(name: &str) -> String {
-//RS     let mut stem = name
-//RS         .chars()
-//RS         .map(|ch| {
-//RS             if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
-//RS                 ch
-//RS             } else {
-//RS                 '_'
-//RS             }
-//RS         })
-//RS         .collect::<String>();
-//RS     if stem.is_empty() {
-//RS         stem.push_str("library");
-//RS     }
-//RS     if stem.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-//RS         stem.insert(0, '_');
-//RS     }
-//RS     stem
-//RS }
-//RS 
-//RS fn read_regular_file(path: &Path, what: &str) -> Result<Vec<u8>, String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("missing {what} '{}': {error}", path.display()))?;
-//RS     if !metadata.is_file() {
-//RS         return Err(format!("{what} '{}' is not a regular file", path.display()));
-//RS     }
-//RS     fs::read(path).map_err(|error| format!("could not read {what} '{}': {error}", path.display()))
-//RS }
-//RS 
-//RS fn validate_header(header: &[u8], library_name: &str, runtime_name: &str) -> Result<(), String> {
-//RS     let text = std::str::from_utf8(header).map_err(|_| "C ABI header is not UTF-8".to_string())?;
-//RS     if !text.contains("jet-library-set-v1") {
-//RS         return Err("C ABI header has no Jet Library set marker".to_string());
-//RS     }
-//RS     if !text.contains("jet_text_free") && text.contains("JetText") {
-//RS         return Err("C ABI header omits the JetText release function".to_string());
-//RS     }
-//RS     if !text.contains(library_name) || !text.contains(runtime_name.trim_start_matches("lib")) {
-//RS         return Err("C ABI header does not identify the selected Library output".to_string());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn source_identity(root: &Path) -> Result<String, String> {
-//RS     let mut files = Vec::new();
-//RS     collect_source_files(root, Path::new("."), &mut files)?;
-//RS     files.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     let mut bytes = Vec::new();
-//RS     for (relative, contents) in files {
-//RS         push_len_bytes(&mut bytes, relative.as_bytes());
-//RS         push_len_bytes(&mut bytes, &contents);
-//RS     }
-//RS     Ok(format!("sha256-{}", crate::SHA256::sha256_hex(&bytes)))
-//RS }
-//RS 
-//RS fn collect_source_files(
-//RS     root: &Path,
-//RS     relative: &Path,
-//RS     files: &mut Vec<(String, Vec<u8>)>,
-//RS ) -> Result<(), String> {
-//RS     let directory = root.join(relative);
-//RS     let mut entries = fs::read_dir(&directory)
-//RS         .map_err(|error| {
-//RS             format!(
-//RS                 "could not read source tree '{}': {error}",
-//RS                 directory.display()
-//RS             )
-//RS         })?
-//RS         .collect::<Result<Vec<_>, io::Error>>()
-//RS         .map_err(|error| {
-//RS             format!(
-//RS                 "could not enumerate source tree '{}': {error}",
-//RS                 directory.display()
-//RS             )
-//RS         })?;
-//RS     entries.sort_by_key(|entry| entry.file_name());
-//RS     for entry in entries {
-//RS         let name = entry.file_name();
-//RS         let name = name.to_string_lossy();
-//RS         let child_relative = if relative == Path::new(".") {
-//RS             PathBuf::from(name.as_ref())
-//RS         } else {
-//RS             relative.join(name.as_ref())
-//RS         };
-//RS         if child_relative.components().any(|component| {
-//RS             matches!(
-//RS                 component,
-//RS                 std::path::Component::Normal(value)
-//RS                     if value == "target" || value == "vendor" || value == "build"
-//RS             )
-//RS         }) {
-//RS             continue;
-//RS         }
-//RS         let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-//RS             format!(
-//RS                 "could not inspect source path '{}': {error}",
-//RS                 entry.path().display()
-//RS             )
-//RS         })?;
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!(
-//RS                 "source identity refuses symlink '{}'",
-//RS                 child_relative.display()
-//RS             ));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             collect_source_files(root, &child_relative, files)?;
-//RS         } else if metadata.is_file()
-//RS             && (child_relative == Path::new("package.jet")
-//RS                 || child_relative == Path::new(".jet/lock")
-//RS                 || child_relative
-//RS                     .extension()
-//RS                     .is_some_and(|extension| extension == "jet"))
-//RS         {
-//RS             let slash_path = child_relative.to_string_lossy().replace('\\', "/");
-//RS             files.push((
-//RS                 slash_path,
-//RS                 fs::read(entry.path()).map_err(|error| {
-//RS                     format!(
-//RS                         "could not read source path '{}': {error}",
-//RS                         entry.path().display()
-//RS                     )
-//RS                 })?,
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn release_identity(
-//RS     package_name: &str,
-//RS     version: &str,
-//RS     library_name: &str,
-//RS     stamp: &JetLibStamp,
-//RS     abi_digest: &str,
-//RS     source_identity: &str,
-//RS ) -> String {
-//RS     let mut bytes = Vec::new();
-//RS     let abi_version = stamp.abi_version.to_string();
-//RS     for value in [
-//RS         package_name,
-//RS         version,
-//RS         library_name,
-//RS         &stamp.compiler_version,
-//RS         &stamp.compiler_build,
-//RS         &stamp.target,
-//RS         &stamp.target_triple,
-//RS         &stamp.linker_identity,
-//RS         &stamp.abi_identity,
-//RS         &abi_version,
-//RS         abi_digest,
-//RS         source_identity,
-//RS         &stamp.payload_digest,
-//RS     ] {
-//RS         push_len_bytes(&mut bytes, value.as_bytes());
-//RS     }
-//RS     format!(
-//RS         "jet-release-v1:sha256-{}",
-//RS         crate::SHA256::sha256_hex(&bytes)
-//RS     )
-//RS }
-//RS 
-//RS fn render_abi_json(stamp: &JetLibStamp) -> String {
-//RS     let exports = stamp
-//RS         .exports
-//RS         .iter()
-//RS         .map(render_export_json)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"schema\":{FOREIGN_SCHEMA},\"abiVersion\":{},\"abiIdentity\":{},\"library\":{},\"exports\":[{}]}}",
-//RS         stamp.abi_version,
-//RS         json_string(&stamp.abi_identity),
-//RS         json_string(&stamp.library_name),
-//RS         exports
-//RS     )
-//RS }
-//RS 
-//RS fn render_export_json(export: &JetLibExport) -> String {
-//RS     let access = export
-//RS         .conventions
-//RS         .iter()
-//RS         .map(|value| json_string(access_name(*value)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"name\":{},\"symbol\":{},\"scalar\":{},\"params\":{},\"access\":[{}]}}",
-//RS         json_string(&export.name),
-//RS         json_string(&export.symbol),
-//RS         json_string(scalar_name(export.scalar)),
-//RS         export.params,
-//RS         access
-//RS     )
-//RS }
-//RS 
-//RS fn render_common_json(
-//RS     package_name: &str,
-//RS     version: &str,
-//RS     license: &str,
-//RS     library_name: &str,
-//RS     stamp: &JetLibStamp,
-//RS     runtime_name: &str,
-//RS     runtime: &[u8],
-//RS     abi_digest: &str,
-//RS     source_identity: &str,
-//RS     release_identity: &str,
-//RS     registry: ForeignRegistry,
-//RS ) -> String {
-//RS     format!(
-//RS         "{{\"schema\":{FOREIGN_SCHEMA},\"package\":{},\"version\":{},\"license\":{},\"library\":{},\"registry\":{},\"target\":{},\"targetTriple\":{},\"runtime\":{{\"name\":{},\"digest\":{}}},\"abi\":{{\"version\":{},\"identity\":{},\"digest\":{}}},\"sourceIdentity\":{},\"compiler\":{{\"version\":{},\"build\":{},\"linker\":{}}},\"dependencies\":[],\"releaseIdentity\":{}}}",
-//RS         json_string(package_name),
-//RS         json_string(version),
-//RS         json_string(license),
-//RS         json_string(library_name),
-//RS         json_string(registry.as_str()),
-//RS         json_string(&stamp.target),
-//RS         json_string(&stamp.target_triple),
-//RS         json_string(runtime_name),
-//RS         json_string(&format!("sha256-{}", crate::SHA256::sha256_hex(runtime))),
-//RS         stamp.abi_version,
-//RS         json_string(&stamp.abi_identity),
-//RS         json_string(abi_digest),
-//RS         json_string(source_identity),
-//RS         json_string(&stamp.compiler_version),
-//RS         json_string(&stamp.compiler_build),
-//RS         json_string(&stamp.linker_identity),
-//RS         json_string(release_identity),
-//RS     )
-//RS }
-//RS 
-//RS fn render_provenance_json(
-//RS     package_name: &str,
-//RS     version: &str,
-//RS     library_name: &str,
-//RS     stamp: &JetLibStamp,
-//RS     runtime_name: &str,
-//RS     runtime: &[u8],
-//RS     abi_digest: &str,
-//RS     source_identity: &str,
-//RS     release_identity: &str,
-//RS     registry: ForeignRegistry,
-//RS ) -> String {
-//RS     format!(
-//RS         "{{\"schema\":\"jet.provenance/v1\",\"subject\":{{\"package\":{},\"version\":{},\"library\":{},\"releaseIdentity\":{}}},\"source\":{{\"identity\":{},\"packageFile\":\"package.jet\"}},\"build\":{{\"compilerVersion\":{},\"compilerBuild\":{},\"target\":{},\"targetTriple\":{},\"linker\":{}}},\"abi\":{{\"identity\":{},\"digest\":{}}},\"runtime\":{{\"name\":{},\"digest\":{}}},\"registry\":{},\"parameters\":{{\"dependencies\":[],\"deterministic\":true}}}}",
-//RS         json_string(package_name),
-//RS         json_string(version),
-//RS         json_string(library_name),
-//RS         json_string(release_identity),
-//RS         json_string(source_identity),
-//RS         json_string(&stamp.compiler_version),
-//RS         json_string(&stamp.compiler_build),
-//RS         json_string(&stamp.target),
-//RS         json_string(&stamp.target_triple),
-//RS         json_string(&stamp.linker_identity),
-//RS         json_string(&stamp.abi_identity),
-//RS         json_string(abi_digest),
-//RS         json_string(runtime_name),
-//RS         json_string(&format!("sha256-{}", crate::SHA256::sha256_hex(runtime))),
-//RS         json_string(registry.as_str()),
-//RS     )
-//RS }
-//RS 
-//RS fn render_sbom(
-//RS     package_name: &str,
-//RS     version: &str,
-//RS     license: &str,
-//RS     runtime_name: &str,
-//RS     runtime: &[u8],
-//RS     stamp: &JetLibStamp,
-//RS     abi_digest: &str,
-//RS     source_identity: &str,
-//RS ) -> String {
-//RS     let runtime_digest = crate::SHA256::sha256_hex(runtime);
-//RS     format!(
-//RS         "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentName: jet-foreign-{package_name}-{version}\nDocumentNamespace: https://jet-lang.dev/sbom/{source_identity}\nCreator: Tool: jet\nPackageName: {package_name}\nSPDXID: SPDXRef-Package\nPackageVersion: {version}\nPackageLicenseDeclared: {license}\nPackageSupplier: Organization: Jet package publisher\nPackageDownloadLocation: NOASSERTION\nExternalRef: PACKAGE-MANAGER jet-release {source_identity}\nFileName: {runtime_name}\nFileChecksum: SHA256: {runtime_digest}\nPackageComment: ABI {abi_digest}\nCompilerTarget: {}\n",
-//RS         stamp.target
-//RS     )
-//RS }
-//RS 
-//RS fn signature_metadata(
-//RS     _registry: ForeignRegistry,
-//RS     release_identity: &str,
-//RS     no_sign: bool,
-//RS ) -> Result<String, String> {
-//RS     if no_sign {
-//RS         return Ok(format!(
-//RS             "{{\"schema\":\"jet.signature/v1\",\"identity\":{},\"algorithm\":\"none\",\"signature\":null,\"publicKey\":null}}",
-//RS             json_string(release_identity)
-//RS         ));
-//RS     }
-//RS     // One release identity has one signing identity. The registry name is
-//RS     // transport metadata, not a second trust domain.
-//RS     let key_name = "foreign-release";
-//RS     let (seed, public_key) = if crate::Publish::Sign::key_exists(&key_name) {
-//RS         let (seed, _) = crate::Publish::Sign::key_paths(&key_name);
-//RS         let public_key = crate::Publish::Sign::read_public_key(&key_name)
-//RS             .ok_or_else(|| "foreign registry signing key has no public key".to_string())?;
-//RS         (seed, public_key)
-//RS     } else {
-//RS         let (seed, _, public_key) =
-//RS             crate::Publish::Sign::keygen(&key_name, false).map_err(|error| {
-//RS                 format!("could not create the foreign registry signing key: {error:?}")
-//RS             })?;
-//RS         (seed, public_key)
-//RS     };
-//RS     let signature = crate::Publish::Sign::sign(&seed, release_identity)
-//RS         .map_err(|error| format!("could not sign the foreign release: {error:?}"))?;
-//RS     Ok(format!(
-//RS         "{{\"schema\":\"jet.signature/v1\",\"identity\":{},\"algorithm\":\"ed25519\",\"signature\":{},\"publicKey\":{}}}",
-//RS         json_string(release_identity),
-//RS         json_string(&signature),
-//RS         json_string(&public_key)
-//RS     ))
-//RS }
-//RS 
-//RS fn render_archive(registry: ForeignRegistry, input: &LibraryInput) -> Result<Vec<u8>, String> {
-//RS     let entries = match registry {
-//RS         ForeignRegistry::PyPi => python_entries(input)?,
-//RS         ForeignRegistry::Npm => npm_entries(input)?,
-//RS         ForeignRegistry::Maven => maven_entries(input)?,
-//RS         ForeignRegistry::NuGet => nuget_entries(input)?,
-//RS     };
-//RS     match registry {
-//RS         ForeignRegistry::Npm => tar_gz(&entries),
-//RS         ForeignRegistry::PyPi | ForeignRegistry::Maven | ForeignRegistry::NuGet => zip(&entries),
-//RS     }
-//RS }
-//RS 
-//RS fn python_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
-//RS     let distribution = python_distribution(&input.package_name);
-//RS     let module = python_module(&input.package_name);
-//RS     let dist_info = format!(
-//RS         "{distribution}-{}.dist-info",
-//RS         input.version.replace('-', "_")
-//RS     );
-//RS     let mut entries = vec![
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/__init__.py"),
-//RS             bytes: render_python(input).into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/py.typed"),
-//RS             bytes: Vec::new(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/lib/{}", input.runtime_name),
-//RS             bytes: input.runtime.clone(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/jet-abi.json"),
-//RS             bytes: input.abi_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/jet-release.json"),
-//RS             bytes: input.common_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/jet-provenance.json"),
-//RS             bytes: input.provenance_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/jet-sbom.spdx"),
-//RS             bytes: input.sbom.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/jet-signature.json"),
-//RS             bytes: input.signature_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{module}/{}", license_file_name(&input.license)),
-//RS             bytes: input.license_text.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{dist_info}/METADATA"),
-//RS             bytes: format!(
-//RS                 "Metadata-Version: 2.1\nName: {distribution}\nVersion: {}\nSummary: Jet foreign library\nLicense: {}\nRequires-Python: >=3.9\n\n{}",
-//RS                 input.version,
-//RS                 input.license,
-//RS                 first_minute_python(&module)
-//RS             )
-//RS             .into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{dist_info}/WHEEL"),
-//RS             bytes: format!(
-//RS                 "Wheel-Version: 1.0\nGenerator: jet\nRoot-Is-Purelib: false\nTag: py3-none-{}\n",
-//RS                 python_platform()
-//RS             )
-//RS             .into_bytes(),
-//RS         },
-//RS     ];
-//RS     let record = render_python_record(&entries, &dist_info);
-//RS     entries.push(ArchiveEntry {
-//RS         name: format!("{dist_info}/RECORD"),
-//RS         bytes: record.into_bytes(),
-//RS     });
-//RS     Ok(entries)
-//RS }
-//RS 
-//RS fn npm_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
-//RS     let package_name = npm_package_name(&input.package_name);
-//RS     let addon = format!("{}.node", library_stem(&input.library_name));
-//RS     let platform = format!("{}-{}", node_platform(), env::consts::ARCH);
-//RS     let addon_bytes = build_node_addon(input, &addon)?;
-//RS     let package_json = format!(
-//RS         "{{\n  \"name\": {},\n  \"version\": {},\n  \"description\": \"Jet native library\",\n  \"main\": \"index.js\",\n  \"license\": {},\n  \"os\": [{}],\n  \"cpu\": [{}],\n  \"engines\": {{\"node\": \">=18\"}},\n  \"jet\": {{\"releaseIdentity\": {}, \"abiDigest\": {}, \"sourceIdentity\": {}}}\n}}\n",
-//RS         json_string(&package_name),
-//RS         json_string(&input.version),
-//RS         json_string(&input.license),
-//RS         json_string(node_platform()),
-//RS         json_string(env::consts::ARCH),
-//RS         json_string(&input.release_identity),
-//RS         json_string(&input.abi_digest),
-//RS         json_string(&input.source_identity),
-//RS     );
-//RS     Ok(vec![
-//RS         ArchiveEntry {
-//RS             name: "package/package.json".to_string(),
-//RS             bytes: package_json.into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/index.js".to_string(),
-//RS             bytes: render_node_index(&addon).into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("package/native/{platform}/{addon}"),
-//RS             bytes: addon_bytes,
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("package/native/{platform}/{}", input.runtime_name),
-//RS             bytes: input.runtime.clone(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/jet-abi.json".to_string(),
-//RS             bytes: input.abi_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/jet-release.json".to_string(),
-//RS             bytes: input.common_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/jet-provenance.json".to_string(),
-//RS             bytes: input.provenance_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/jet-sbom.spdx".to_string(),
-//RS             bytes: input.sbom.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/jet-signature.json".to_string(),
-//RS             bytes: input.signature_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("package/{}", license_file_name(&input.license)),
-//RS             bytes: input.license_text.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "package/README.md".to_string(),
-//RS             bytes: first_minute_node(&package_name).into_bytes(),
-//RS         },
-//RS     ])
-//RS }
-//RS 
-//RS fn maven_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
-//RS     let package = java_package(&input.package_name);
-//RS     let class_name = java_class_name(&input.library_name);
-//RS     let class_dir = format!("{}/{}", package.replace('.', "/"), class_name);
-//RS     let jni_name = format!(
-//RS         "libjet_{}_jni.{}",
-//RS         library_stem(&input.library_name),
-//RS         shared_extension()
-//RS     );
-//RS     let class_bytes = build_java_classes(input, &package, &class_name, &jni_name)?;
-//RS     let jni_bytes = build_jni_bridge(input, &package, &class_name, &jni_name)?;
-//RS     let artifact = format!("{}-{}", java_artifact(&input.package_name), input.version);
-//RS     let pom = render_pom(input, &artifact);
-//RS     Ok(vec![
-//RS         ArchiveEntry {
-//RS             name: "META-INF/MANIFEST.MF".to_string(),
-//RS             bytes: b"Manifest-Version: 1.0\nCreated-By: jet\n\n".to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("{class_dir}.class"),
-//RS             bytes: class_bytes,
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("META-INF/native/{}/{}", shared_platform(), jni_name),
-//RS             bytes: jni_bytes,
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!(
-//RS                 "META-INF/native/{}/{}",
-//RS                 shared_platform(),
-//RS                 input.runtime_name
-//RS             ),
-//RS             bytes: input.runtime.clone(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("META-INF/maven/dev.jet/{artifact}/pom.xml"),
-//RS             bytes: pom.clone().into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("META-INF/maven/dev.jet/{artifact}/pom.properties"),
-//RS             bytes: format!(
-//RS                 "groupId=dev.jet\nartifactId={artifact}\nversion={}\n",
-//RS                 input.version
-//RS             )
-//RS             .into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "META-INF/jet-abi.json".to_string(),
-//RS             bytes: input.abi_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "META-INF/jet-release.json".to_string(),
-//RS             bytes: input.common_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "META-INF/jet-provenance.json".to_string(),
-//RS             bytes: input.provenance_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "META-INF/jet-sbom.spdx".to_string(),
-//RS             bytes: input.sbom.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "META-INF/jet-signature.json".to_string(),
-//RS             bytes: input.signature_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("META-INF/{}", license_file_name(&input.license)),
-//RS             bytes: input.license_text.as_bytes().to_vec(),
-//RS         },
-//RS     ])
-//RS }
-//RS 
-//RS fn nuget_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
-//RS     let package = nuget_package_name(&input.package_name);
-//RS     let assembly = format!("{package}.dll");
-//RS     let assembly_bytes = build_dotnet_assembly(input, &package)?;
-//RS     let nuspec = render_nuspec(input, &package);
-//RS     Ok(vec![
-//RS         ArchiveEntry {
-//RS             name: format!("{package}.nuspec"),
-//RS             bytes: nuspec.into_bytes(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("lib/net8.0/{assembly}"),
-//RS             bytes: assembly_bytes,
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: format!("runtimes/{}/native/{}", nuget_rid(), input.runtime_name),
-//RS             bytes: input.runtime.clone(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "jet-abi.json".to_string(),
-//RS             bytes: input.abi_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "jet-release.json".to_string(),
-//RS             bytes: input.common_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "jet-provenance.json".to_string(),
-//RS             bytes: input.provenance_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "jet-sbom.spdx".to_string(),
-//RS             bytes: input.sbom.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "jet-signature.json".to_string(),
-//RS             bytes: input.signature_json.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: license_file_name(&input.license).to_string(),
-//RS             bytes: input.license_text.as_bytes().to_vec(),
-//RS         },
-//RS         ArchiveEntry {
-//RS             name: "README.md".to_string(),
-//RS             bytes: first_minute_dotnet(&package).into_bytes(),
-//RS         },
-//RS     ])
-//RS }
-//RS 
-//RS fn render_python(input: &LibraryInput) -> String {
-//RS     let mut out = String::from(
-//RS         "\"\"\"Generated by Jet from the sealed .jetlib export table.\"\"\"\n\
-//RS          import ctypes\n\
-//RS          import pathlib\n\
-//RS          import sys\n\
-//RS          \n\
-//RS          class JetText(ctypes.Structure):\n\
-//RS              _fields_ = [(\"ptr\", ctypes.POINTER(ctypes.c_uint8)), (\"len\", ctypes.c_size_t)]\n\
-//RS          \n\
-//RS          class JetCallError(RuntimeError):\n\
-//RS              pass\n\
-//RS          \n\
-//RS          def _load():\n\
-//RS              try:\n\
-//RS                  library = ctypes.CDLL(str(pathlib.Path(__file__).with_name(\"lib\").joinpath(\"RUNTIME\")))\n\
-//RS              except OSError as error:\n\
-//RS                  raise JetCallError(\"Jet host runtime could not be loaded\") from error\n\
-//RS              if hasattr(library, \"jet_text_free\"):\n\
-//RS                  library.jet_text_free.argtypes = [JetText]\n\
-//RS                  library.jet_text_free.restype = None\n\
-//RS              return library\n\
-//RS          \n\
-//RS          _LIBRARY = _load()\n\
-//RS          \n\
-//RS          def _text_result(value):\n\
-//RS              if value.len == 0:\n\
-//RS                  _LIBRARY.jet_text_free(value)\n\
-//RS                  return \"\"\n\
-//RS              address = ctypes.cast(value.ptr, ctypes.c_void_p).value\n\
-//RS              if address is None or value.len > sys.maxsize or value.len > sys.maxsize - address:\n\
-//RS                  raise JetCallError(\"invalid JetText pointer-length pair\")\n\
-//RS              try:\n\
-//RS                  return ctypes.string_at(value.ptr, value.len).decode(\"utf-8\")\n\
-//RS              except UnicodeDecodeError as error:\n\
-//RS                  raise JetCallError(\"JetText contains invalid UTF-8\") from error\n\
-//RS              finally:\n\
-//RS                  _LIBRARY.jet_text_free(value)\n\
-//RS          \n"
-//RS             .replace("RUNTIME", &input.runtime_name),
-//RS     );
-//RS     for export in &input.stamp.exports {
-//RS         let ty = python_type(export.scalar);
-//RS         let args = (0..export.params)
-//RS             .map(|index| format!("p{index}"))
-//RS             .collect::<Vec<_>>();
-//RS         let signature = args
-//RS             .iter()
-//RS             .map(|arg| format!("{arg}: {ty}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let ctypes_args = (0..export.params)
-//RS             .map(|_| python_ctypes_type(export.scalar))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let call = if export.scalar == JetLibScalar::Text {
-//RS             format!(
-//RS                 "    encoded = [value.encode(\"utf-8\") for value in [{args}]]\n    buffers = [ctypes.create_string_buffer(value) for value in encoded]\n    values = [JetText(ctypes.cast(value, ctypes.POINTER(ctypes.c_uint8)), len(raw)) for value, raw in zip(buffers, encoded)]\n    result = _LIBRARY.{symbol}(*values)",
-//RS                 args = args.join(", "),
-//RS                 symbol = export.symbol
-//RS             )
-//RS         } else {
-//RS             format!(
-//RS                 "    result = _LIBRARY.{}({})",
-//RS                 export.symbol,
-//RS                 args.join(", ")
-//RS             )
-//RS         };
-//RS         let result = if export.scalar == JetLibScalar::Text {
-//RS             "    return _text_result(result)"
-//RS         } else {
-//RS             "    return result"
-//RS         };
-//RS         out.push_str(&format!(
-//RS             "def {name}({signature}) -> {ty}:\n    _LIBRARY.{symbol}.argtypes = [{ctypes_args}]\n    _LIBRARY.{symbol}.restype = {ctype}\n{call}\n{result}\n\n",
-//RS             name = export.name,
-//RS             signature = signature,
-//RS             ty = ty,
-//RS             symbol = export.symbol,
-//RS             ctypes_args = ctypes_args,
-//RS             ctype = python_ctypes_type(export.scalar),
-//RS             call = call,
-//RS             result = result,
-//RS         ));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn render_node_index(addon: &str) -> String {
-//RS     format!(
-//RS         "const path = require('node:path');\nconst platform = process.platform + '-' + process.arch;\nmodule.exports = require(path.join(__dirname, 'native', platform, '{}'));\n",
-//RS         addon
-//RS     )
-//RS }
-//RS 
-//RS fn access_name(value: JetLibAccess) -> &'static str {
-//RS     match value {
-//RS         JetLibAccess::Read => "read",
-//RS         JetLibAccess::Write => "write",
-//RS         JetLibAccess::Move => "move",
-//RS     }
-//RS }
-//RS 
-//RS fn scalar_name(value: JetLibScalar) -> &'static str {
-//RS     match value {
-//RS         JetLibScalar::Int => "int",
-//RS         JetLibScalar::Float => "float",
-//RS         JetLibScalar::Bool => "bool",
-//RS         JetLibScalar::Text => "text",
-//RS     }
-//RS }
-//RS 
-//RS fn python_type(value: JetLibScalar) -> &'static str {
-//RS     match value {
-//RS         JetLibScalar::Int => "int",
-//RS         JetLibScalar::Float => "float",
-//RS         JetLibScalar::Bool => "bool",
-//RS         JetLibScalar::Text => "str",
-//RS     }
-//RS }
-//RS 
-//RS fn python_ctypes_type(value: JetLibScalar) -> &'static str {
-//RS     match value {
-//RS         JetLibScalar::Int => "ctypes.c_int64",
-//RS         JetLibScalar::Float => "ctypes.c_double",
-//RS         JetLibScalar::Bool => "ctypes.c_bool",
-//RS         JetLibScalar::Text => "JetText",
-//RS     }
-//RS }
-//RS 
-//RS fn normalized_component(value: &str, lower: bool) -> String {
-//RS     let mut result = String::new();
-//RS     for ch in value.chars() {
-//RS         let ch = if lower { ch.to_ascii_lowercase() } else { ch };
-//RS         if ch.is_ascii_alphanumeric() || ch == '_' {
-//RS             result.push(ch);
-//RS         } else {
-//RS             result.push('_');
-//RS         }
-//RS     }
-//RS     if result.is_empty() {
-//RS         result.push_str("library");
-//RS     }
-//RS     if result.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-//RS         result.insert(0, '_');
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn python_distribution(value: &str) -> String {
-//RS     normalized_component(value, false)
-//RS }
-//RS 
-//RS fn python_module(value: &str) -> String {
-//RS     normalized_component(value, false)
-//RS }
-//RS 
-//RS fn python_platform() -> String {
-//RS     if cfg!(target_os = "macos") {
-//RS         format!("macosx_{}_{}", env::consts::ARCH, env::consts::ARCH)
-//RS     } else if cfg!(target_os = "windows") {
-//RS         if env::consts::ARCH == "x86_64" {
-//RS             "win_amd64".to_string()
-//RS         } else {
-//RS             format!("win_{}", env::consts::ARCH)
-//RS         }
-//RS     } else {
-//RS         format!("linux_{}", env::consts::ARCH)
-//RS     }
-//RS }
-//RS 
-//RS fn npm_package_name(value: &str) -> String {
-//RS     format!(
-//RS         "@jet/{}",
-//RS         normalized_component(value, true).replace('_', "-")
-//RS     )
-//RS }
-//RS 
-//RS fn java_package(value: &str) -> String {
-//RS     format!("dev.jet.{}", normalized_component(value, true))
-//RS }
-//RS 
-//RS fn java_class_name(value: &str) -> String {
-//RS     let component = normalized_component(value, false);
-//RS     let mut result = String::new();
-//RS     let mut upper = true;
-//RS     for ch in component.chars() {
-//RS         if upper {
-//RS             result.push(ch.to_ascii_uppercase());
-//RS             upper = false;
-//RS         } else {
-//RS             result.push(ch);
-//RS         }
-//RS         if ch == '_' {
-//RS             upper = true;
-//RS         }
-//RS     }
-//RS     if result == "Library" {
-//RS         result.push_str("Api");
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn java_artifact(value: &str) -> String {
-//RS     format!(
-//RS         "jet-{}",
-//RS         normalized_component(value, true).replace('_', "-")
-//RS     )
-//RS }
-//RS 
-//RS fn nuget_package_name(value: &str) -> String {
-//RS     format!("Jet.{}", normalized_component(value, false))
-//RS }
-//RS 
-//RS fn nuget_rid() -> String {
-//RS     let os = if cfg!(target_os = "macos") {
-//RS         "osx"
-//RS     } else if cfg!(target_os = "windows") {
-//RS         "win"
-//RS     } else {
-//RS         "linux"
-//RS     };
-//RS     let arch = match env::consts::ARCH {
-//RS         "x86_64" => "x64",
-//RS         "aarch64" => "arm64",
-//RS         "x86" => "x86",
-//RS         other => other,
-//RS     };
-//RS     format!("{os}-{arch}")
-//RS }
-//RS 
-//RS fn artifact_file_name(registry: ForeignRegistry, input: &LibraryInput) -> String {
-//RS     match registry {
-//RS         ForeignRegistry::PyPi => format!(
-//RS             "{}-{}-py3-none-{}.whl",
-//RS             python_distribution(&input.package_name),
-//RS             input.version,
-//RS             python_platform()
-//RS         ),
-//RS         ForeignRegistry::Npm => format!(
-//RS             "{}-{}.tgz",
-//RS             npm_package_name(&input.package_name)
-//RS                 .trim_start_matches('@')
-//RS                 .replace('/', "-"),
-//RS             input.version
-//RS         ),
-//RS         ForeignRegistry::Maven => format!(
-//RS             "{}-{}.jar",
-//RS             java_artifact(&input.package_name),
-//RS             input.version
-//RS         ),
-//RS         ForeignRegistry::NuGet => format!(
-//RS             "{}.{}.nupkg",
-//RS             nuget_package_name(&input.package_name),
-//RS             input.version
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn license_file_name(_license: &str) -> &'static str {
-//RS     "LICENSE"
-//RS }
-//RS 
-//RS fn load_license_text(root: &Path, license: &str) -> Result<String, String> {
-//RS     for name in ["LICENSE", "LICENSE.txt", "COPYING", "COPYING.txt"] {
-//RS         let path = root.join(name);
-//RS         if let Ok(metadata) = fs::symlink_metadata(&path) {
-//RS             if metadata.file_type().is_symlink() {
-//RS                 return Err(format!(
-//RS                     "license file '{}' must not be a symlink",
-//RS                     path.display()
-//RS                 ));
-//RS             }
-//RS             if metadata.is_file() {
-//RS                 let bytes = read_regular_file(&path, "license file")?;
-//RS                 return String::from_utf8(bytes)
-//RS                     .map_err(|_| format!("license file '{}' is not UTF-8", path.display()));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(format!(
-//RS         "SPDX-License-Identifier: {license}\n\nThis package carries the source package's declared SPDX license.\n"
-//RS     ))
-//RS }
-//RS 
-//RS fn first_minute_python(module: &str) -> String {
-//RS     format!(
-//RS         "Install and call this package without Jet:\n\n  python -m pip install {module}\n  python -c \"from {module} import *; print(next(iter(locals())))\"\n"
-//RS     )
-//RS }
-//RS 
-//RS fn first_minute_node(package: &str) -> String {
-//RS     format!(
-//RS         "# Jet native package\n\nInstall with npm install {package}. Then:\n\nconst jet = require('{package}');\nconsole.log(Object.keys(jet));\n\nThe package contains its native runtime; Jet is not required.\n"
-//RS     )
-//RS }
-//RS 
-//RS fn first_minute_dotnet(package: &str) -> String {
-//RS     format!(
-//RS         "# Jet native package\n\nRun: dotnet add package {package}\n\nUse the typed {package}.Library methods from C#. The package contains its native runtime; Jet is not required.\n"
-//RS     )
-//RS }
-//RS 
-//RS fn render_python_record(entries: &[ArchiveEntry], dist_info: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for entry in entries {
-//RS         let digest = crate::SHA256::sha256(&entry.bytes);
-//RS         let encoded = base64url(&digest);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "{},sha256={},{}",
-//RS             entry.name,
-//RS             encoded,
-//RS             entry.bytes.len()
-//RS         );
-//RS     }
-//RS     let _ = writeln!(out, "{dist_info}/RECORD,,");
-//RS     out
-//RS }
-//RS 
-//RS fn base64url(bytes: &[u8]) -> String {
-//RS     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-//RS     let mut out = String::new();
-//RS     for chunk in bytes.chunks(3) {
-//RS         let a = chunk[0] as u32;
-//RS         let b = chunk.get(1).copied().unwrap_or(0) as u32;
-//RS         let c = chunk.get(2).copied().unwrap_or(0) as u32;
-//RS         let n = (a << 16) | (b << 8) | c;
-//RS         out.push(TABLE[((n >> 18) & 63) as usize] as char);
-//RS         out.push(TABLE[((n >> 12) & 63) as usize] as char);
-//RS         if chunk.len() > 1 {
-//RS             out.push(TABLE[((n >> 6) & 63) as usize] as char);
-//RS         }
-//RS         if chunk.len() > 2 {
-//RS             out.push(TABLE[(n & 63) as usize] as char);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn push_len_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-//RS     out.extend_from_slice(
-//RS         &u64::try_from(bytes.len())
-//RS             .expect("foreign identity field cannot exceed u64")
-//RS             .to_be_bytes(),
-//RS     );
-//RS     out.extend_from_slice(bytes);
-//RS }
-//RS 
-//RS fn json_string(value: &str) -> String {
-//RS     let mut out = String::with_capacity(value.len() + 2);
-//RS     out.push('"');
-//RS     for ch in value.chars() {
-//RS         match ch {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\u{08}' => out.push_str("\\b"),
-//RS             '\u{0c}' => out.push_str("\\f"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             ch if ch.is_control() => {
-//RS                 let _ = write!(out, "\\u{:04x}", ch as u32);
-//RS             }
-//RS             ch => out.push(ch),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS fn xml_string(value: &str) -> String {
-//RS     value
-//RS         .replace('&', "&amp;")
-//RS         .replace('<', "&lt;")
-//RS         .replace('>', "&gt;")
-//RS         .replace('"', "&quot;")
-//RS         .replace('\'', "&apos;")
-//RS }
-//RS 
-//RS fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-//RS     let parent = path
-//RS         .parent()
-//RS         .ok_or_else(|| format!("artifact '{}' has no parent directory", path.display()))?;
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create artifact directory: {error}"))?;
-//RS     let temp = parent.join(format!(
-//RS         ".{}.partial-{}",
-//RS         path.file_name().unwrap_or_default().to_string_lossy(),
-//RS         std::process::id()
-//RS     ));
-//RS     let result = (|| {
-//RS         let mut file = OpenOptions::new()
-//RS             .write(true)
-//RS             .create_new(true)
-//RS             .open(&temp)
-//RS             .map_err(|error| format!("could not stage artifact '{}': {error}", temp.display()))?;
-//RS         file.write_all(bytes)
-//RS             .and_then(|_| file.sync_all())
-//RS             .map_err(|error| format!("could not finish artifact '{}': {error}", temp.display()))?;
-//RS         fs::rename(&temp, path)
-//RS             .map_err(|error| format!("could not install artifact '{}': {error}", path.display()))
-//RS     })();
-//RS     if result.is_err() {
-//RS         let _ = fs::remove_file(&temp);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn foreign_output_dir(root: &Path) -> Result<PathBuf, String> {
-//RS     let target = root.join(".jet").join("build");
-//RS     if let Ok(metadata) = fs::symlink_metadata(&target) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS             return Err(format!(
-//RS                 "foreign artifact directory '{}' is not a real build directory",
-//RS                 target.display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     let directory = target.join("foreign");
-//RS     if let Ok(metadata) = fs::symlink_metadata(&directory) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS             return Err(format!(
-//RS                 "foreign artifact directory '{}' is not a real directory",
-//RS                 directory.display()
-//RS             ));
-//RS         }
-//RS     } else {
-//RS         fs::create_dir_all(&directory)
-//RS             .map_err(|error| format!("could not create '{}': {error}", directory.display()))?;
-//RS     }
-//RS     Ok(directory)
-//RS }
-//RS 
-//RS fn zip(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
-//RS     let mut files = BTreeMap::new();
-//RS     for entry in entries {
-//RS         validate_archive_entry(&entry.name, entry.bytes.len())?;
-//RS         if files
-//RS             .insert(entry.name.clone(), entry.bytes.clone())
-//RS             .is_some()
-//RS         {
-//RS             return Err(format!("foreign archive repeats entry '{}'", entry.name));
-//RS         }
-//RS     }
-//RS     let mut output = Vec::new();
-//RS     let mut central = Vec::new();
-//RS     let mut entry_count = 0usize;
-//RS     for (name, bytes) in files {
-//RS         let name_bytes = name.as_bytes();
-//RS         let name_len = u16::try_from(name_bytes.len())
-//RS             .map_err(|_| format!("foreign archive entry name '{name}' is too long"))?;
-//RS         let size = u32::try_from(bytes.len())
-//RS             .map_err(|_| format!("foreign archive entry '{name}' is too large for ZIP"))?;
-//RS         let offset =
-//RS             u32::try_from(output.len()).map_err(|_| "foreign ZIP is too large".to_string())?;
-//RS         let crc = crc32(&bytes);
-//RS         output.extend_from_slice(&0x04034b50u32.to_le_bytes());
-//RS         output.extend_from_slice(&20u16.to_le_bytes());
-//RS         output.extend_from_slice(&0u16.to_le_bytes());
-//RS         output.extend_from_slice(&0u16.to_le_bytes());
-//RS         output.extend_from_slice(&0u16.to_le_bytes());
-//RS         output.extend_from_slice(&0u16.to_le_bytes());
-//RS         output.extend_from_slice(&crc.to_le_bytes());
-//RS         output.extend_from_slice(&size.to_le_bytes());
-//RS         output.extend_from_slice(&size.to_le_bytes());
-//RS         output.extend_from_slice(&name_len.to_le_bytes());
-//RS         output.extend_from_slice(&0u16.to_le_bytes());
-//RS         output.extend_from_slice(name_bytes);
-//RS         output.extend_from_slice(&bytes);
-//RS 
-//RS         central.extend_from_slice(&0x02014b50u32.to_le_bytes());
-//RS         central.extend_from_slice(&20u16.to_le_bytes());
-//RS         central.extend_from_slice(&20u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&crc.to_le_bytes());
-//RS         central.extend_from_slice(&size.to_le_bytes());
-//RS         central.extend_from_slice(&size.to_le_bytes());
-//RS         central.extend_from_slice(&name_len.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u16.to_le_bytes());
-//RS         central.extend_from_slice(&0u32.to_le_bytes());
-//RS         central.extend_from_slice(&offset.to_le_bytes());
-//RS         central.extend_from_slice(name_bytes);
-//RS         entry_count += 1;
-//RS     }
-//RS     let central_offset =
-//RS         u32::try_from(output.len()).map_err(|_| "foreign ZIP is too large".to_string())?;
-//RS     let central_size =
-//RS         u32::try_from(central.len()).map_err(|_| "foreign ZIP is too large".to_string())?;
-//RS     output.extend_from_slice(&central);
-//RS     let entry_count =
-//RS         u16::try_from(entry_count).map_err(|_| "foreign ZIP has too many entries".to_string())?;
-//RS     output.extend_from_slice(&0x06054b50u32.to_le_bytes());
-//RS     output.extend_from_slice(&0u16.to_le_bytes());
-//RS     output.extend_from_slice(&0u16.to_le_bytes());
-//RS     output.extend_from_slice(&entry_count.to_le_bytes());
-//RS     output.extend_from_slice(&entry_count.to_le_bytes());
-//RS     output.extend_from_slice(&central_size.to_le_bytes());
-//RS     output.extend_from_slice(&central_offset.to_le_bytes());
-//RS     output.extend_from_slice(&0u16.to_le_bytes());
-//RS     Ok(output)
-//RS }
-//RS 
-//RS fn validate_archive_entry(name: &str, size: usize) -> Result<(), String> {
-//RS     if name.is_empty()
-//RS         || name.starts_with('/')
-//RS         || name.contains('\\')
-//RS         || name
-//RS             .split('/')
-//RS             .any(|part| part.is_empty() || part == "." || part == "..")
-//RS     {
-//RS         return Err(format!("foreign archive has unsafe entry name '{name}'"));
-//RS     }
-//RS     if name.as_bytes().len() > u16::MAX as usize {
-//RS         return Err(format!("foreign archive entry name '{name}' is too long"));
-//RS     }
-//RS     if size > MAX_ARCHIVE_ENTRY {
-//RS         return Err(format!(
-//RS             "foreign archive entry '{name}' exceeds the {} MiB limit",
-//RS             MAX_ARCHIVE_ENTRY / (1024 * 1024)
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn crc32(bytes: &[u8]) -> u32 {
-//RS     let mut crc = 0xffff_ffffu32;
-//RS     for byte in bytes {
-//RS         crc ^= *byte as u32;
-//RS         for _ in 0..8 {
-//RS             let mask = 0u32.wrapping_sub(crc & 1);
-//RS             crc = (crc >> 1) ^ (0xedb8_8320 & mask);
-//RS         }
-//RS     }
-//RS     !crc
-//RS }
-//RS 
-//RS fn tar_gz(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
-//RS     let mut files = BTreeMap::new();
-//RS     for entry in entries {
-//RS         validate_archive_entry(&entry.name, entry.bytes.len())?;
-//RS         if files
-//RS             .insert(entry.name.clone(), entry.bytes.clone())
-//RS             .is_some()
-//RS         {
-//RS             return Err(format!("foreign archive repeats entry '{}'", entry.name));
-//RS         }
-//RS     }
-//RS     let mut tar = Vec::new();
-//RS     for (name, bytes) in files {
-//RS         if name.as_bytes().len() > 100 {
-//RS             return Err(format!("NPM archive entry '{name}' is too long"));
-//RS         }
-//RS         let mut header = [0u8; 512];
-//RS         header[..name.len()].copy_from_slice(name.as_bytes());
-//RS         write_octal(
-//RS             &mut header[100..108],
-//RS             if is_native_name(&name) { 0o755 } else { 0o644 },
-//RS         );
-//RS         write_octal(&mut header[108..116], 0);
-//RS         write_octal(&mut header[116..124], 0);
-//RS         write_octal(&mut header[124..136], bytes.len() as u64);
-//RS         write_octal(&mut header[136..148], 0);
-//RS         header[148..156].fill(b' ');
-//RS         header[156] = b'0';
-//RS         header[257..263].copy_from_slice(b"ustar\0");
-//RS         header[263..265].copy_from_slice(b"00");
-//RS         let checksum = header.iter().map(|byte| *byte as u32).sum::<u32>();
-//RS         let checksum_text = format!("{checksum:06o}");
-//RS         header[148..154].copy_from_slice(checksum_text.as_bytes());
-//RS         header[154] = 0;
-//RS         header[155] = b' ';
-//RS         tar.extend_from_slice(&header);
-//RS         tar.extend_from_slice(&bytes);
-//RS         let padding = (512 - (bytes.len() % 512)) % 512;
-//RS         tar.resize(tar.len() + padding, 0);
-//RS     }
-//RS     tar.resize(tar.len() + 1024, 0);
-//RS     gzip_store(&tar)
-//RS }
-//RS 
-//RS fn is_native_name(name: &str) -> bool {
-//RS     name.ends_with(".so")
-//RS         || name.ends_with(".dylib")
-//RS         || name.ends_with(".dll")
-//RS         || name.ends_with(".node")
-//RS }
-//RS 
-//RS fn write_octal(field: &mut [u8], value: u64) {
-//RS     let width = field.len();
-//RS     let text = format!("{value:0width$o}", width = width.saturating_sub(1));
-//RS     let start = width.saturating_sub(1).saturating_sub(text.len());
-//RS     field.fill(0);
-//RS     field[start..start + text.len()].copy_from_slice(text.as_bytes());
-//RS }
-//RS 
-//RS fn gzip_store(bytes: &[u8]) -> Result<Vec<u8>, String> {
-//RS     let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
-//RS     if bytes.is_empty() {
-//RS         output.extend_from_slice(&[1, 0, 0, 255, 255]);
-//RS     } else {
-//RS         let chunks = bytes.chunks(65_535).collect::<Vec<_>>();
-//RS         for (index, chunk) in chunks.iter().enumerate() {
-//RS             let final_block = index + 1 == chunks.len();
-//RS             output.push(if final_block { 1 } else { 0 });
-//RS             let length = u16::try_from(chunk.len())
-//RS                 .map_err(|_| "internal gzip block is too large".to_string())?;
-//RS             output.extend_from_slice(&length.to_le_bytes());
-//RS             output.extend_from_slice(&(!length).to_le_bytes());
-//RS             output.extend_from_slice(chunk);
-//RS         }
-//RS     }
-//RS     output.extend_from_slice(&crc32(bytes).to_le_bytes());
-//RS     output.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-//RS     Ok(output)
-//RS }
-//RS 
-//RS fn run_host_tool(command: &mut Command, tool: &str) -> Result<(), String> {
-//RS     command
-//RS         .stdin(Stdio::null())
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::null());
-//RS     let status = command.status().map_err(|error| {
-//RS         if error.kind() == io::ErrorKind::NotFound {
-//RS             format!("required host tool '{tool}' was not found")
-//RS         } else {
-//RS             format!("could not start host tool '{tool}': {error}")
-//RS         }
-//RS     })?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!(
-//RS             "host tool '{tool}' failed with status {}",
-//RS             status
-//RS                 .code()
-//RS                 .map(|code| code.to_string())
-//RS                 .unwrap_or_else(|| "signal".to_string())
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS fn find_tool_path(tool: &str) -> Result<PathBuf, String> {
-//RS     let path = env::var_os("PATH").ok_or_else(|| {
-//RS         format!("required host tool '{tool}' was not found because PATH is empty")
-//RS     })?;
-//RS     for directory in env::split_paths(&path) {
-//RS         let candidate = directory.join(tool);
-//RS         if candidate.is_file() {
-//RS             return fs::canonicalize(&candidate)
-//RS                 .map_err(|error| format!("could not resolve host tool '{tool}': {error}"));
-//RS         }
-//RS     }
-//RS     Err(format!("required host tool '{tool}' was not found"))
-//RS }
-//RS 
-//RS fn java_home() -> Result<PathBuf, String> {
-//RS     if let Some(value) = env::var_os("JAVA_HOME").filter(|value| !value.is_empty()) {
-//RS         let home = PathBuf::from(value);
-//RS         if home.join("include").join("jni.h").is_file() {
-//RS             return Ok(home);
-//RS         }
-//RS         return Err(format!(
-//RS             "JAVA_HOME '{}' has no include/jni.h",
-//RS             home.display()
-//RS         ));
-//RS     }
-//RS     let javac = find_tool_path("javac")?;
-//RS     let home = javac
-//RS         .parent()
-//RS         .and_then(Path::parent)
-//RS         .ok_or_else(|| "could not determine JAVA_HOME from javac".to_string())?
-//RS         .to_path_buf();
-//RS     if !home.join("include").join("jni.h").is_file() {
-//RS         return Err(format!(
-//RS             "the javac installation '{}' has no include/jni.h",
-//RS             home.display()
-//RS         ));
-//RS     }
-//RS     Ok(home)
-//RS }
-//RS 
-//RS fn work_dir(input: &LibraryInput, name: &str) -> Result<PathBuf, String> {
-//RS     let directory =
-//RS         foreign_output_dir(&input.root)?.join(format!(".{}-{}", name, std::process::id()));
-//RS     fs::create_dir(&directory)
-//RS         .map_err(|error| format!("could not create foreign build directory: {error}"))?;
-//RS     Ok(directory)
-//RS }
-//RS 
-//RS fn cleanup_work(directory: &Path) {
-//RS     let _ = fs::remove_dir_all(directory);
-//RS }
-//RS 
-//RS fn link_runtime_args(command: &mut Command, work: &Path, runtime_name: &str) {
-//RS     command
-//RS         .arg("-L")
-//RS         .arg(work)
-//RS         .arg(format!("-Wl,-rpath,{}", runtime_rpath()))
-//RS         .arg(format!("-l:{runtime_name}"));
-//RS }
-//RS 
-//RS fn runtime_rpath() -> &'static str {
-//RS     if cfg!(target_os = "macos") {
-//RS         "@loader_path"
-//RS     } else {
-//RS         "$ORIGIN"
-//RS     }
-//RS }
-//RS 
-//RS fn build_node_addon(input: &LibraryInput, addon: &str) -> Result<Vec<u8>, String> {
-//RS     if cfg!(target_os = "windows") {
-//RS         return Err("N-API packaging is not supported for the Windows target yet".to_string());
-//RS     }
-//RS     let work = work_dir(input, "node")?;
-//RS     let result = (|| {
-//RS         fs::write(work.join(&input.runtime_name), &input.runtime)
-//RS             .map_err(|error| format!("could not stage the Node runtime: {error}"))?;
-//RS         fs::write(work.join("api.h"), &input.header)
-//RS             .map_err(|error| format!("could not stage the C ABI header: {error}"))?;
-//RS         let source = render_node_addon(input);
-//RS         let source_path = work.join("addon.c");
-//RS         fs::write(&source_path, source.as_bytes())
-//RS             .map_err(|error| format!("could not write the N-API bridge: {error}"))?;
-//RS         let output = work.join(addon);
-//RS         let mut command = Command::new("cc");
-//RS         command
-//RS             .args(["-std=c11", "-shared", "-fPIC"])
-//RS             .arg(&source_path)
-//RS             .arg("-I")
-//RS             .arg(&work);
-//RS         if cfg!(target_os = "macos") {
-//RS             command.arg("-Wl,-undefined,dynamic_lookup");
-//RS         }
-//RS         link_runtime_args(&mut command, &work, &input.runtime_name);
-//RS         command.arg("-o").arg(&output);
-//RS         run_host_tool(&mut command, "cc")?;
-//RS         read_regular_file(&output, "N-API addon")
-//RS     })();
-//RS     cleanup_work(&work);
-//RS     result
-//RS }
-//RS 
-//RS fn render_node_addon(input: &LibraryInput) -> String {
-//RS     let mut output = String::from(
-//RS         "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include \"api.h\"\n\
-//RS          typedef struct napi_env__ *napi_env;\n\
-//RS          typedef struct napi_value__ *napi_value;\n\
-//RS          typedef struct napi_callback_info__ *napi_callback_info;\n\
-//RS          typedef int32_t napi_status;\n\
-//RS          typedef napi_value (*napi_callback)(napi_env, napi_callback_info);\n\
-//RS          enum { napi_ok = 0 };\n\
-//RS          extern napi_status napi_get_cb_info(napi_env, napi_callback_info, size_t *, napi_value *, napi_value *, void **);\n\
-//RS          extern napi_status napi_get_value_int64(napi_env, napi_value, int64_t *);\n\
-//RS          extern napi_status napi_get_value_double(napi_env, napi_value, double *);\n\
-//RS          extern napi_status napi_get_value_bool(napi_env, napi_value, bool *);\n\
-//RS          extern napi_status napi_get_value_string_utf8(napi_env, napi_value, char *, size_t, size_t *);\n\
-//RS          extern napi_status napi_create_int64(napi_env, int64_t, napi_value *);\n\
-//RS          extern napi_status napi_create_double(napi_env, double, napi_value *);\n\
-//RS          extern napi_status napi_get_boolean(napi_env, bool, napi_value *);\n\
-//RS          extern napi_status napi_create_string_utf8(napi_env, const char *, size_t, napi_value *);\n\
-//RS          extern napi_status napi_create_function(napi_env, const char *, size_t, napi_callback, void *, napi_value *);\n\
-//RS          extern napi_status napi_set_named_property(napi_env, napi_value, const char *, napi_value);\n\
-//RS          extern napi_status napi_throw_error(napi_env, const char *, const char *);\n\
-//RS          static napi_value jet_napi_error(napi_env env, const char *message) {\n\
-//RS              napi_throw_error(env, NULL, message);\n\
-//RS              return NULL;\n\
-//RS          }\n\n",
-//RS     );
-//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
-//RS         let params = usize::try_from(export.params).unwrap_or(0);
-//RS         let _ = writeln!(
-//RS             output,
-//RS             "static napi_value jet_napi_{index}(napi_env env, napi_callback_info info) {{"
-//RS         );
-//RS         let _ = writeln!(
-//RS             output,
-//RS             "    napi_value argv[{}]; size_t argc = {params};",
-//RS             params.max(1)
-//RS         );
-//RS         output.push_str(
-//RS             "    if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != ",
-//RS         );
-//RS         let _ = writeln!(
-//RS             output,
-//RS             "{params}) return jet_napi_error(env, \"invalid argument count\");"
-//RS         );
-//RS         for param in 0..params {
-//RS             match export.scalar {
-//RS                 JetLibScalar::Int => {
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    int64_t arg{param}; if (napi_get_value_int64(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected an integer\");"
-//RS                     );
-//RS                 }
-//RS                 JetLibScalar::Float => {
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    double arg{param}; if (napi_get_value_double(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected a number\");"
-//RS                     );
-//RS                 }
-//RS                 JetLibScalar::Bool => {
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    bool arg{param}; if (napi_get_value_bool(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected a boolean\");"
-//RS                     );
-//RS                 }
-//RS                 JetLibScalar::Text => {
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    size_t len{param} = 0; char *raw{param} = NULL; if (napi_get_value_string_utf8(env, argv[{param}], NULL, 0, &len{param}) != napi_ok || len{param} > (size_t)-1 - 1) return jet_napi_error(env, \"expected UTF-8 text\");"
-//RS                     );
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    raw{param} = (char *)malloc(len{param} + 1); if (raw{param} == NULL) return jet_napi_error(env, \"could not allocate text argument\");"
-//RS                     );
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    if (napi_get_value_string_utf8(env, argv[{param}], raw{param}, len{param} + 1, &len{param}) != napi_ok) {{ free(raw{param}); return jet_napi_error(env, \"expected UTF-8 text\"); }}"
-//RS                     );
-//RS                     let _ = writeln!(
-//RS                         output,
-//RS                         "    JetText arg{param} = {{ (const uint8_t *)raw{param}, len{param} }};"
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         let args = (0..params)
-//RS             .map(|param| format!("arg{param}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         match export.scalar {
-//RS             JetLibScalar::Int => {
-//RS                 let _ = writeln!(output, "    int64_t result = {}({args});", export.symbol);
-//RS                 for param in 0..params {
-//RS                     if export.scalar == JetLibScalar::Text {
-//RS                         let _ = writeln!(output, "    free(raw{param});");
-//RS                     }
-//RS                 }
-//RS                 output.push_str("    napi_value value; if (napi_create_int64(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
-//RS             }
-//RS             JetLibScalar::Float => {
-//RS                 let _ = writeln!(output, "    double result = {}({args});", export.symbol);
-//RS                 output.push_str("    napi_value value; if (napi_create_double(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
-//RS             }
-//RS             JetLibScalar::Bool => {
-//RS                 let _ = writeln!(output, "    bool result = {}({args});", export.symbol);
-//RS                 output.push_str("    napi_value value; if (napi_get_boolean(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
-//RS             }
-//RS             JetLibScalar::Text => {
-//RS                 let _ = writeln!(output, "    JetText result = {}({args});", export.symbol);
-//RS                 for param in 0..params {
-//RS                     let _ = writeln!(output, "    free(raw{param});");
-//RS                 }
-//RS                 output.push_str("    if (result.len != 0 && result.ptr == NULL) { jet_text_free(result); return jet_napi_error(env, \"JetText result has an invalid pointer\"); }\n");
-//RS                 output.push_str("    napi_value value; if (napi_create_string_utf8(env, (const char *)result.ptr, result.len, &value) != napi_ok) { jet_text_free(result); return jet_napi_error(env, \"could not create text result\"); } jet_text_free(result); return value;\n");
-//RS             }
-//RS         }
-//RS         output.push_str("}\n\n");
-//RS     }
-//RS     output.push_str(
-//RS         "__attribute__((visibility(\"default\"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {\n",
-//RS     );
-//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
-//RS         let _ = writeln!(
-//RS             output,
-//RS             "    napi_value fn{index}; if (napi_create_function(env, {}, {}, jet_napi_{index}, NULL, &fn{index}) != napi_ok || napi_set_named_property(env, exports, {}, fn{index}) != napi_ok) return NULL;",
-//RS             json_string(&export.name),
-//RS             export.name.len(),
-//RS             json_string(&export.name)
-//RS         );
-//RS     }
-//RS     output.push_str("    return exports;\n}\n");
-//RS     output
-//RS }
-//RS 
-// END-PORT-PENDING 0818 Source/Publish/ForeignPackage.rs:1-1810
+// Rust: Source/Publish/ForeignPackage.rs:1
+// .jetlib is the checked export/ABI/target/payload authority; no source inference.
+use jet.[JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp]
+use jet.[Loader, Package, Publish, JetLib, SHA256]
+// GATE #4494: native filesystem, environment and child processes.
+use std.fs
+use std.fs.OpenOptions
+use std.env
+use std.io
+use std.process.[Command, Stdio]
+use core.sys.target
+// Rust: Source/Publish/ForeignPackage.rs:18
+const FOREIGN_SCHEMA: U32 = 1
+// Rust: Source/Publish/ForeignPackage.rs:19
+const MAX_ARCHIVE_ENTRY: Int = 64 * 1024 * 1024
+// Rust: Source/Publish/ForeignPackage.rs:23
+#Derive(Debug, Clone, Eq, Ord)
+pub enum ForeignRegistry { PyPi, Npm, Maven, NuGet }
+impl ForeignRegistry {
+    // Rust: Source/Publish/ForeignPackage.rs:32
+    pub fn parse(value: String) -> ForeignRegistry Err! {
+        trimmed := value.trim() // #4303
+        if trimmed.to_ascii_lowercase() == {
+            "pypi" | "python" | "python-wheel" -> Ok(.PyPi)
+            "npm" | "node" -> Ok(.Npm)
+            "maven" | "maven-central" | "jvm" -> Ok(.Maven)
+            "nuget" | "dotnet" | ".net" -> Ok(.NuGet)
+            else -> Err("unsupported foreign registry '{value}'; choose pypi, npm, maven, or nuget")
+        }
+    }
+    // Rust: Source/Publish/ForeignPackage.rs:44
+    pub fn as_str(self: ForeignRegistry) -> String {
+        if self == { .PyPi -> "pypi", .Npm -> "npm", .Maven -> "maven", .NuGet -> "nuget" }
+    }
+}
+// Rust: Source/Publish/ForeignPackage.rs:56
+#Derive(Debug, Clone)
+pub struct ForeignPublishOptions { pub registry: ForeignRegistry, pub no_sign: Bool }
+// Rust: Source/Publish/ForeignPackage.rs:63
+#Derive(Debug, Clone, Eq)
+pub struct ForeignPublishReport {
+    pub registry: ForeignRegistry
+    pub artifact: OSPath
+    pub artifact_digest: String
+    pub release_identity: String
+    pub uploaded: Bool
+}
+// Rust: Source/Publish/ForeignPackage.rs:71
+struct LibraryInput {
+    root: OSPath
+    package_name: String
+    version: String
+    license: String
+    license_text: String
+    library_name: String
+    runtime_name: String
+    runtime: [U8]
+    header: [U8]
+    stamp: JetLibStamp
+    abi_json: String
+    abi_digest: String
+    source_identity: String
+    release_identity: String
+    common_json: String
+    provenance_json: String
+    sbom: String
+    signature_json: String
+}
+// Rust: Source/Publish/ForeignPackage.rs:92
+struct ArchiveEntry { name: String, bytes: [U8] }
+// Rust: Source/Publish/ForeignPackage.rs:98
+pub fn build_foreign_package(root: OSPath, registry: ForeignRegistry, no_sign: Bool) -> ForeignPublishReport Err! {
+    input :: prepare_library(root, registry, no_sign)?
+    archive :: render_archive(registry, input)?
+    digest :: "sha256-{SHA256.sha256_hex(archive)}"
+    output_dir :: foreign_output_dir(root)?
+    artifact :: output_dir.join(artifact_file_name(registry, input))
+    write_atomic(artifact, archive)?
+    Ok(ForeignPublishReport{registry: registry, artifact: artifact, artifact_digest: digest,
+        release_identity: input.release_identity, uploaded: false})
+}
+// Rust: Source/Publish/ForeignPackage.rs:121
+pub fn publish_foreign_package(root: OSPath, options: ForeignPublishOptions) -> ForeignPublishReport Err! {
+    report := build_foreign_package(root, options.registry, options.no_sign)?
+    endpoint :: registry_endpoint(options.registry)?
+    publish_archive(options.registry, endpoint, report)?
+    report.uploaded = true
+    Ok(report)
+}
+// Rust: Source/Publish/ForeignPackage.rs:134
+fn prepare_library(root: OSPath, registry: ForeignRegistry, no_sign: Bool) -> LibraryInput Err! {
+    facts :: Loader.package_facts_for_root(root).map_err(diagnostics ->
+        diagnostics.into_iter().map(diagnostic -> "{diagnostic:?}").collect().join("; "))?
+        .ok_or_else(() -> "no package source found in the publish root")?
+    package_name :: facts.name.clone()
+    version :: facts.version.clone().ok_or_else(() -> "package source has no package version")?
+    license :: facts.license.clone().ok_or_else(() -> "package source has no SPDX license")?
+    Publish.validate_published_license(package_name, version, Val(license)).map_err(error -> error.detail)?
+    libraries :: facts.outputs.iter().filter(pair -> pair.1.kind == Package.PackageOutputKind.Library).collect()
+    if libraries.is_empty() -> return Err("foreign publication needs one Library output")
+    if libraries.len() != 1 {
+        names :: libraries.iter().map(pair -> pair.0).collect().join(", ")
+        return Err("foreign publication needs one Library output; found {names}")
+    }
+    (output_key, output) :: libraries[0]
+    if !output.is_native() || !output.is_loadable() -> return Err("Library output '{output_key}' must set native: true and loadable: true for foreign publication")
+    library_name :: output.name.clone()
+    entry :: output.entry.clone().ok_or_else(() -> "Library output '{output_key}' has no source entry; foreign publication needs a checked entry")?
+    run_library_build(root, output_key, entry)?
+    stem :: library_stem(library_name)
+    target_dir :: root.join(".jet").join("build")
+    runtime_name :: "lib{stem}.{shared_extension()}"
+    runtime_path :: target_dir.join(runtime_name)
+    header_path :: target_dir.join("{stem}.h")
+    jetlib_path :: target_dir.join("{stem}.jetlib")
+    runtime :: read_regular_file(runtime_path, "native host runtime")?
+    if runtime.is_empty() -> return Err("native host runtime '{runtime_path.display()}' is empty")
+    header :: read_regular_file(header_path, "C ABI header")?
+    validate_header(header, library_name, runtime_name)?
+    jetlib :: read_regular_file(jetlib_path, ".jetlib ABI artifact")?
+    artifact :: JetLibArtifact.decode(jetlib).map_err(error -> "could not decode '{jetlib_path.display()}': {error}")?
+    JetLib.validate_load_metadata(artifact.stamp)?
+    JetLib.validate_payload_digest(artifact.stamp, artifact.payload)?
+    if artifact.payload != runtime -> return Err("native host runtime '{runtime_name}' does not match the sealed .jetlib payload")
+    if artifact.stamp.library_name != library_name -> return Err("ABI artifact names Library '{artifact.stamp.library_name}', but the output is '{library_name}'")
+    source_identity :: source_identity(root)?
+    license_text :: load_license_text(root, license)?
+    abi_json :: render_abi_json(artifact.stamp)
+    abi_digest :: "sha256-{SHA256.sha256_hex(abi_json.as_bytes())}"
+    release_identity :: release_identity(package_name, version, library_name, artifact.stamp, abi_digest, source_identity)
+    signature_json :: signature_metadata(registry, release_identity, no_sign)?
+    common_json :: render_common_json(package_name, version, license, library_name, artifact.stamp,
+        runtime_name, runtime, abi_digest, source_identity, release_identity, registry)
+    provenance_json :: render_provenance_json(package_name, version, library_name, artifact.stamp,
+        runtime_name, runtime, abi_digest, source_identity, release_identity, registry)
+    sbom :: render_sbom(package_name, version, license, runtime_name, runtime, artifact.stamp, abi_digest, source_identity)
+    Ok(LibraryInput{root: root, package_name: package_name, version: version, license: license,
+        license_text: license_text, library_name: library_name, runtime_name: runtime_name, runtime: runtime,
+        header: header, stamp: artifact.stamp, abi_json: abi_json, abi_digest: abi_digest, source_identity: source_identity,
+        release_identity: release_identity, common_json: common_json, provenance_json: provenance_json,
+        sbom: sbom, signature_json: signature_json})
+}
+// Rust: Source/Publish/ForeignPackage.rs:296
+fn run_library_build(root: OSPath, output: String, entry: String) -> Unit Err! {
+    jet :: env.current_exe().map_err(error -> "could not locate the Jet compiler: {error}")?
+    result :: Command.new(jet).current_dir(root).args(["build", "--lib", "--locked", "--output", output, entry])
+        .stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null()).output()
+        .map_err(error -> "could not start the Jet Library build: {error}")?
+    if result.status.success() -> return Ok(())
+    status :: result.status.code().map(code -> code.to_string()).unwrap_or_else(() -> "signal")
+    Err("Jet Library build failed with status {status}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:320
+fn shared_extension() -> String {
+    // GATE #4483: selected target, not the compiler host.
+    if target.selected_os() == { "macos" -> "dylib", "windows" -> "dll", else -> "so" }
+}
+// Rust: Source/Publish/ForeignPackage.rs:330
+fn shared_platform() -> String { "{target.selected_os()}-{target.selected_arch()}" }
+// Rust: Source/Publish/ForeignPackage.rs:334
+fn node_platform() -> String {
+    if target.selected_os() == { "macos" -> "darwin", "windows" -> "win32", else -> target.selected_os() }
+}
+// Rust: Source/Publish/ForeignPackage.rs:344
+fn library_stem(name: String) -> String {
+    stem := name.chars().map(ch -> if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' { ch } else { '_' }).collect()
+    if stem.is_empty() -> &stem.push_str("library")
+    if stem.as_bytes().first().is_some_and(byte -> byte.is_ascii_digit()) -> &stem.insert(0, '_')
+    stem
+}
+// Rust: Source/Publish/ForeignPackage.rs:364
+fn read_regular_file(path: OSPath, what: String) -> [U8] Err! {
+    metadata :: fs.symlink_metadata(path).map_err(error -> "missing {what} '{path.display()}': {error}")?
+    if !metadata.is_file() -> return Err("{what} '{path.display()}' is not a regular file")
+    fs.read(path).map_err(error -> "could not read {what} '{path.display()}': {error}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:373
+fn validate_header(header: [U8], library_name: String, runtime_name: String) -> Unit Err! {
+    text :: String.from_utf8(header).map_err(_ -> "C ABI header is not UTF-8")?
+    if !text.contains("jet-library-set-v1") -> return Err("C ABI header has no Jet Library set marker")
+    if !text.contains("jet_text_free") && text.contains("JetText") -> return Err("C ABI header omits the JetText release function")
+    runtime_stem := runtime_name.trim_start_matches("lib") // #4303
+    if !text.contains(library_name) || !text.contains(runtime_stem) -> return Err("C ABI header does not identify the selected Library output")
+    Ok(())
+}
+// Rust: Source/Publish/ForeignPackage.rs:387
+fn source_identity(root: OSPath) -> String Err! {
+    files := [(String, [U8])]{}
+    collect_source_files(root, OSPath.from("."), &files)?
+    &files.sort_by((left, right) -> left.0 <=> right.0)
+    bytes := [U8]{}
+    loop (relative, contents) in files {
+        push_len_bytes(&bytes, relative.as_bytes())
+        push_len_bytes(&bytes, contents)
+    }
+    Ok("sha256-{SHA256.sha256_hex(bytes)}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:399
+fn collect_source_files(root: OSPath, relative: OSPath, files: &[(String, [U8])]) -> Unit Err! {
+    directory :: root.join(relative)
+    entries := fs.read_dir(directory).map_err(error -> "could not read source tree '{directory.display()}': {error}")?
+        .collect_result().map_err(error -> "could not enumerate source tree '{directory.display()}': {error}")?
+    &entries.sort_by_key(entry -> entry.file_name())
+    loop entry in entries {
+        name :: entry.file_name().to_string_lossy()
+        child_relative :: if relative == OSPath.from(".") { OSPath.from(name) } else { relative.join(name) }
+        if child_relative.components().any(component -> if component == {
+            .Normal(value) -> value == "target" || value == "vendor" || value == "build"
+            else -> false
+        }) -> continue
+        metadata :: fs.symlink_metadata(entry.path()).map_err(error -> "could not inspect source path '{entry.path().display()}': {error}")?
+        if metadata.file_type().is_symlink() -> return Err("source identity refuses symlink '{child_relative.display()}'")
+        if metadata.is_dir() {
+            collect_source_files(root, child_relative, &files)?
+        } else if metadata.is_file() && (child_relative == OSPath.from("package.jet")
+            || child_relative == OSPath.from(".jet/lock") || child_relative.extension().is_some_and(extension -> extension == "jet")) {
+            slash_path :: child_relative.to_string_lossy().replace('\\', "/")
+            contents :: fs.read(entry.path()).map_err(error -> "could not read source path '{entry.path().display()}': {error}")?
+            &files.push((slash_path, contents))
+        }
+    }
+    Ok(())
+}
+// Rust: Source/Publish/ForeignPackage.rs:473
+fn release_identity(package_name: String, version: String, library_name: String, stamp: JetLibStamp, abi_digest: String, source_identity: String) -> String {
+    bytes := [U8]{}
+    abi_version :: stamp.abi_version.to_string()
+    loop value in [package_name, version, library_name, stamp.compiler_version, stamp.compiler_build,
+        stamp.target, stamp.target_triple, stamp.linker_identity, stamp.abi_identity, abi_version, abi_digest, source_identity, stamp.payload_digest] {
+        push_len_bytes(&bytes, value.as_bytes())
+    }
+    "jet-release-v1:sha256-{SHA256.sha256_hex(bytes)}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:506
+fn render_abi_json(stamp: JetLibStamp) -> String {
+    exports :: stamp.exports.iter().map(export -> render_export_json(export)).collect().join(",")
+    "{{\"schema\":{FOREIGN_SCHEMA},\"abiVersion\":{stamp.abi_version},\"abiIdentity\":{json_string(stamp.abi_identity)},\"library\":{json_string(stamp.library_name)},\"exports\":[{exports}]}}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:522
+fn render_export_json(export: JetLibExport) -> String {
+    access :: export.conventions.iter().map(value -> json_string(access_name(value))).collect().join(",")
+    "{{\"name\":{json_string(export.name)},\"symbol\":{json_string(export.symbol)},\"scalar\":{json_string(scalar_name(export.scalar))},\"params\":{export.params},\"access\":[{access}]}}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:539
+fn render_common_json(package_name: String, version: String, license: String, library_name: String, stamp: JetLibStamp,
+    runtime_name: String, runtime: [U8], abi_digest: String, source_identity: String, release_identity: String, registry: ForeignRegistry) -> String {
+    runtime_digest :: "sha256-{SHA256.sha256_hex(runtime)}"
+    "{{\"schema\":{FOREIGN_SCHEMA},\"package\":{json_string(package_name)},\"version\":{json_string(version)},\"license\":{json_string(license)},\"library\":{json_string(library_name)},\"registry\":{json_string(registry.as_str())},\"target\":{json_string(stamp.target)},\"targetTriple\":{json_string(stamp.target_triple)},\"runtime\":{{\"name\":{json_string(runtime_name)},\"digest\":{json_string(runtime_digest)}}},\"abi\":{{\"version\":{stamp.abi_version},\"identity\":{json_string(stamp.abi_identity)},\"digest\":{json_string(abi_digest)}}},\"sourceIdentity\":{json_string(source_identity)},\"compiler\":{{\"version\":{json_string(stamp.compiler_version)},\"build\":{json_string(stamp.compiler_build)},\"linker\":{json_string(stamp.linker_identity)}}},\"dependencies\":[],\"releaseIdentity\":{json_string(release_identity)}}}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:574
+fn render_provenance_json(package_name: String, version: String, library_name: String, stamp: JetLibStamp,
+    runtime_name: String, runtime: [U8], abi_digest: String, source_identity: String, release_identity: String, registry: ForeignRegistry) -> String {
+    runtime_digest :: "sha256-{SHA256.sha256_hex(runtime)}"
+    "{{\"schema\":\"jet.provenance/v1\",\"subject\":{{\"package\":{json_string(package_name)},\"version\":{json_string(version)},\"library\":{json_string(library_name)},\"releaseIdentity\":{json_string(release_identity)}}},\"source\":{{\"identity\":{json_string(source_identity)},\"packageFile\":\"package.jet\"}},\"build\":{{\"compilerVersion\":{json_string(stamp.compiler_version)},\"compilerBuild\":{json_string(stamp.compiler_build)},\"target\":{json_string(stamp.target)},\"targetTriple\":{json_string(stamp.target_triple)},\"linker\":{json_string(stamp.linker_identity)}}},\"abi\":{{\"identity\":{json_string(stamp.abi_identity)},\"digest\":{json_string(abi_digest)}}},\"runtime\":{{\"name\":{json_string(runtime_name)},\"digest\":{json_string(runtime_digest)}}},\"registry\":{json_string(registry.as_str())},\"parameters\":{{\"dependencies\":[],\"deterministic\":true}}}}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:606
+fn render_sbom(package_name: String, version: String, license: String, runtime_name: String, runtime: [U8],
+    stamp: JetLibStamp, abi_digest: String, source_identity: String) -> String {
+    runtime_digest :: SHA256.sha256_hex(runtime)
+    "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentName: jet-foreign-{package_name}-{version}\nDocumentNamespace: https://jet-lang.dev/sbom/{source_identity}\nCreator: Tool: jet\nPackageName: {package_name}\nSPDXID: SPDXRef-Package\nPackageVersion: {version}\nPackageLicenseDeclared: {license}\nPackageSupplier: Organization: Jet package publisher\nPackageDownloadLocation: NOASSERTION\nExternalRef: PACKAGE-MANAGER jet-release {source_identity}\nFileName: {runtime_name}\nFileChecksum: SHA256: {runtime_digest}\nPackageComment: ABI {abi_digest}\nCompilerTarget: {stamp.target}\n"
+}
+// Rust: Source/Publish/ForeignPackage.rs:623
+fn signature_metadata(registry: ForeignRegistry, release_identity: String, no_sign: Bool) -> String Err! {
+    if no_sign -> return Ok("{{\"schema\":\"jet.signature/v1\",\"identity\":{json_string(release_identity)},\"algorithm\":\"none\",\"signature\":null,\"publicKey\":null}}")
+    key_name :: "foreign-release"
+    (seed, public_key) :: if Publish.Sign.key_exists(key_name) {
+        (seed, _) :: Publish.Sign.key_paths(key_name)
+        public_key :: Publish.Sign.read_public_key(key_name).ok_or_else(() -> "foreign registry signing key has no public key")?
+        (seed, public_key)
+    } else {
+        (seed, _, public_key) :: Publish.Sign.keygen(key_name, false).map_err(error -> "could not create the foreign registry signing key: {error:?}")?
+        (seed, public_key)
+    }
+    signature :: Publish.Sign.sign(seed, release_identity).map_err(error -> "could not sign the foreign release: {error:?}")?
+    Ok("{{\"schema\":\"jet.signature/v1\",\"identity\":{json_string(release_identity)},\"algorithm\":\"ed25519\",\"signature\":{json_string(signature)},\"publicKey\":{json_string(public_key)}}}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:659
+fn render_archive(registry: ForeignRegistry, input: LibraryInput) -> [U8] Err! {
+    entries :: if registry == { .PyPi -> python_entries(input)?, .Npm -> npm_entries(input)?,
+        .Maven -> maven_entries(input)?, .NuGet -> nuget_entries(input)? }
+    if registry == .Npm { tar_gz(entries) } else { zip(entries) }
+}
+// Rust: Source/Publish/ForeignPackage.rs:672
+fn python_entries(input: LibraryInput) -> [ArchiveEntry] Err! {
+    distribution :: python_distribution(input.package_name)
+    module :: python_module(input.package_name)
+    version :: input.version.replace('-', "_")
+    dist_info :: "{distribution}-{version}.dist-info"
+    entries := [
+        ArchiveEntry{name: "{module}/__init__.py", bytes: render_python(input).into_bytes()},
+        ArchiveEntry{name: "{module}/py.typed", bytes: []},
+        ArchiveEntry{name: "{module}/lib/{input.runtime_name}", bytes: input.runtime.clone()},
+        ArchiveEntry{name: "{module}/jet-abi.json", bytes: input.abi_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "{module}/jet-release.json", bytes: input.common_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "{module}/jet-provenance.json", bytes: input.provenance_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "{module}/jet-sbom.spdx", bytes: input.sbom.as_bytes().to_vec()},
+        ArchiveEntry{name: "{module}/jet-signature.json", bytes: input.signature_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "{module}/{license_file_name(input.license)}", bytes: input.license_text.as_bytes().to_vec()},
+        ArchiveEntry{name: "{dist_info}/METADATA", bytes: "Metadata-Version: 2.1\nName: {distribution}\nVersion: {input.version}\nSummary: Jet foreign library\nLicense: {input.license}\nRequires-Python: >=3.9\n\n{first_minute_python(module)}".into_bytes()},
+        ArchiveEntry{name: "{dist_info}/WHEEL", bytes: "Wheel-Version: 1.0\nGenerator: jet\nRoot-Is-Purelib: false\nTag: py3-none-{python_platform()}\n".into_bytes()}
+    ]
+    record :: render_python_record(entries, dist_info)
+    &entries.push(ArchiveEntry{name: "{dist_info}/RECORD", bytes: record.into_bytes()})
+    Ok(entries)
+}
+// Rust: Source/Publish/ForeignPackage.rs:743
+fn npm_entries(input: LibraryInput) -> [ArchiveEntry] Err! {
+    package_name :: npm_package_name(input.package_name)
+    addon :: "{library_stem(input.library_name)}.node"
+    platform :: "{node_platform()}-{target.selected_arch()}"
+    addon_bytes :: build_node_addon(input, addon)?
+    package_json :: "{{\n  \"name\": {json_string(package_name)},\n  \"version\": {json_string(input.version)},\n  \"description\": \"Jet native library\",\n  \"main\": \"index.js\",\n  \"license\": {json_string(input.license)},\n  \"os\": [{json_string(node_platform())}],\n  \"cpu\": [{json_string(target.selected_arch())}],\n  \"engines\": {{\"node\": \">=18\"}},\n  \"jet\": {{\"releaseIdentity\": {json_string(input.release_identity)}, \"abiDigest\": {json_string(input.abi_digest)}, \"sourceIdentity\": {json_string(input.source_identity)}}}\n}}\n"
+    Ok([
+        ArchiveEntry{name: "package/package.json", bytes: package_json.into_bytes()},
+        ArchiveEntry{name: "package/index.js", bytes: render_node_index(addon).into_bytes()},
+        ArchiveEntry{name: "package/native/{platform}/{addon}", bytes: addon_bytes},
+        ArchiveEntry{name: "package/native/{platform}/{input.runtime_name}", bytes: input.runtime.clone()},
+        ArchiveEntry{name: "package/jet-abi.json", bytes: input.abi_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/jet-release.json", bytes: input.common_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/jet-provenance.json", bytes: input.provenance_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/jet-sbom.spdx", bytes: input.sbom.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/jet-signature.json", bytes: input.signature_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/{license_file_name(input.license)}", bytes: input.license_text.as_bytes().to_vec()},
+        ArchiveEntry{name: "package/README.md", bytes: first_minute_node(package_name).into_bytes()}
+    ])
+}
+// Rust: Source/Publish/ForeignPackage.rs:807
+fn maven_entries(input: LibraryInput) -> [ArchiveEntry] Err! {
+    package :: java_package(input.package_name)
+    class_name :: java_class_name(input.library_name)
+    package_dir :: package.replace('.', "/")
+    class_dir :: "{package_dir}/{class_name}"
+    jni_name :: "libjet_{library_stem(input.library_name)}_jni.{shared_extension()}"
+    class_bytes :: build_java_classes(input, package, class_name, jni_name)?
+    jni_bytes :: build_jni_bridge(input, package, class_name, jni_name)?
+    artifact :: "{java_artifact(input.package_name)}-{input.version}"
+    pom :: render_pom(input, artifact)
+    Ok([
+        ArchiveEntry{name: "META-INF/MANIFEST.MF", bytes: "Manifest-Version: 1.0\nCreated-By: jet\n\n".bytes()},
+        ArchiveEntry{name: "{class_dir}.class", bytes: class_bytes},
+        ArchiveEntry{name: "META-INF/native/{shared_platform()}/{jni_name}", bytes: jni_bytes},
+        ArchiveEntry{name: "META-INF/native/{shared_platform()}/{input.runtime_name}", bytes: input.runtime.clone()},
+        ArchiveEntry{name: "META-INF/maven/dev.jet/{artifact}/pom.xml", bytes: pom.clone().into_bytes()},
+        ArchiveEntry{name: "META-INF/maven/dev.jet/{artifact}/pom.properties", bytes: "groupId=dev.jet\nartifactId={artifact}\nversion={input.version}\n".into_bytes()},
+        ArchiveEntry{name: "META-INF/jet-abi.json", bytes: input.abi_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "META-INF/jet-release.json", bytes: input.common_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "META-INF/jet-provenance.json", bytes: input.provenance_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "META-INF/jet-sbom.spdx", bytes: input.sbom.as_bytes().to_vec()},
+        ArchiveEntry{name: "META-INF/jet-signature.json", bytes: input.signature_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "META-INF/{license_file_name(input.license)}", bytes: input.license_text.as_bytes().to_vec()}
+    ])
+}
+// Rust: Source/Publish/ForeignPackage.rs:880
+fn nuget_entries(input: LibraryInput) -> [ArchiveEntry] Err! {
+    package :: nuget_package_name(input.package_name)
+    assembly :: "{package}.dll"
+    assembly_bytes :: build_dotnet_assembly(input, package)?
+    nuspec :: render_nuspec(input, package)
+    Ok([
+        ArchiveEntry{name: "{package}.nuspec", bytes: nuspec.into_bytes()},
+        ArchiveEntry{name: "lib/net8.0/{assembly}", bytes: assembly_bytes},
+        ArchiveEntry{name: "runtimes/{nuget_rid()}/native/{input.runtime_name}", bytes: input.runtime.clone()},
+        ArchiveEntry{name: "jet-abi.json", bytes: input.abi_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "jet-release.json", bytes: input.common_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "jet-provenance.json", bytes: input.provenance_json.as_bytes().to_vec()},
+        ArchiveEntry{name: "jet-sbom.spdx", bytes: input.sbom.as_bytes().to_vec()},
+        ArchiveEntry{name: "jet-signature.json", bytes: input.signature_json.as_bytes().to_vec()},
+        ArchiveEntry{name: license_file_name(input.license), bytes: input.license_text.as_bytes().to_vec()},
+        ArchiveEntry{name: "README.md", bytes: first_minute_dotnet(package).into_bytes()}
+    ])
+}
+// Rust: Source/Publish/ForeignPackage.rs:929
+fn render_python(input: LibraryInput) -> String {
+    out := "\"\"\"Generated by Jet from the sealed .jetlib export table.\"\"\"\nimport ctypes\nimport pathlib\nimport sys\n\nclass JetText(ctypes.Structure):\n    _fields_ = [(\"ptr\", ctypes.POINTER(ctypes.c_uint8)), (\"len\", ctypes.c_size_t)]\n\nclass JetCallError(RuntimeError):\n    pass\n\ndef _load():\n    try:\n        library = ctypes.CDLL(str(pathlib.Path(__file__).with_name(\"lib\").joinpath(\"RUNTIME\")))\n    except OSError as error:\n        raise JetCallError(\"Jet host runtime could not be loaded\") from error\n    if hasattr(library, \"jet_text_free\"):\n        library.jet_text_free.argtypes = [JetText]\n        library.jet_text_free.restype = None\n    return library\n\n_LIBRARY = _load()\n\ndef _text_result(value):\n    if value.len == 0:\n        _LIBRARY.jet_text_free(value)\n        return \"\"\n    address = ctypes.cast(value.ptr, ctypes.c_void_p).value\n    if address is None or value.len > sys.maxsize or value.len > sys.maxsize - address:\n        raise JetCallError(\"invalid JetText pointer-length pair\")\n    try:\n        return ctypes.string_at(value.ptr, value.len).decode(\"utf-8\")\n    except UnicodeDecodeError as error:\n        raise JetCallError(\"JetText contains invalid UTF-8\") from error\n    finally:\n        _LIBRARY.jet_text_free(value)\n\n".replace("RUNTIME", input.runtime_name)
+    loop export in input.stamp.exports {
+        ty :: python_type(export.scalar)
+        args :: (0..<export.params).map(index -> "p{index}").collect()
+        signature :: args.iter().map(arg -> "{arg}: {ty}").collect().join(", ")
+        ctypes_args :: (0..<export.params).map(_ -> python_ctypes_type(export.scalar)).collect().join(", ")
+        joined_args :: args.join(", ")
+        call :: if export.scalar == .Text {
+            "    encoded = [value.encode(\"utf-8\") for value in [{joined_args}]]\n    buffers = [ctypes.create_string_buffer(value) for value in encoded]\n    values = [JetText(ctypes.cast(value, ctypes.POINTER(ctypes.c_uint8)), len(raw)) for value, raw in zip(buffers, encoded)]\n    result = _LIBRARY.{export.symbol}(*values)"
+        } else { "    result = _LIBRARY.{export.symbol}({joined_args})" }
+        result :: if export.scalar == .Text { "    return _text_result(result)" } else { "    return result" }
+        ctype :: python_ctypes_type(export.scalar)
+        &out.push_str("def {export.name}({signature}) -> {ty}:\n    _LIBRARY.{export.symbol}.argtypes = [{ctypes_args}]\n    _LIBRARY.{export.symbol}.restype = {ctype}\n{call}\n{result}\n\n")
+    }
+    out
+}
+// Rust: Source/Publish/ForeignPackage.rs:1017
+fn render_node_index(addon: String) -> String {
+    "const path = require('node:path');\nconst platform = process.platform + '-' + process.arch;\nmodule.exports = require(path.join(__dirname, 'native', platform, '{addon}'));\n"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1024
+fn access_name(value: JetLibAccess) -> String { if value == { .Read -> "read", .Write -> "write", .Move -> "move" } }
+// Rust: Source/Publish/ForeignPackage.rs:1032
+fn scalar_name(value: JetLibScalar) -> String { if value == { .Int -> "int", .Float -> "float", .Bool -> "bool", .Text -> "text" } }
+// Rust: Source/Publish/ForeignPackage.rs:1041
+fn python_type(value: JetLibScalar) -> String { if value == { .Int -> "int", .Float -> "float", .Bool -> "bool", .Text -> "str" } }
+// Rust: Source/Publish/ForeignPackage.rs:1050
+fn python_ctypes_type(value: JetLibScalar) -> String {
+    if value == { .Int -> "ctypes.c_int64", .Float -> "ctypes.c_double", .Bool -> "ctypes.c_bool", .Text -> "JetText" }
+}
+// Rust: Source/Publish/ForeignPackage.rs:1059
+fn normalized_component(value: String, lower: Bool) -> String {
+    result := ""
+    loop original in value.chars() {
+        ch :: if lower { original.to_ascii_lowercase() } else { original }
+        &result.push(if ch.is_ascii_alphanumeric() || ch == '_' { ch } else { '_' })
+    }
+    if result.is_empty() -> &result.push_str("library")
+    if result.as_bytes().first().is_some_and(byte -> byte.is_ascii_digit()) -> &result.insert(0, '_')
+    result
+}
+// Rust: Source/Publish/ForeignPackage.rs:1078
+fn python_distribution(value: String) -> String { normalized_component(value, false) }
+// Rust: Source/Publish/ForeignPackage.rs:1082
+fn python_module(value: String) -> String { normalized_component(value, false) }
+// Rust: Source/Publish/ForeignPackage.rs:1086
+fn python_platform() -> String {
+    arch :: target.selected_arch() // GATE #4483
+    if target.selected_os() == {
+        "macos" -> "macosx_{arch}_{arch}"
+        "windows" -> if arch == "x86_64" { "win_amd64" } else { "win_{arch}" }
+        else -> "linux_{arch}"
+    }
+}
+// Rust: Source/Publish/ForeignPackage.rs:1100
+fn npm_package_name(value: String) -> String {
+    component :: normalized_component(value, true).replace('_', "-")
+    "@jet/{component}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1107
+fn java_package(value: String) -> String { "dev.jet.{normalized_component(value, true)}" }
+// Rust: Source/Publish/ForeignPackage.rs:1111
+fn java_class_name(value: String) -> String {
+    component :: normalized_component(value, false)
+    result := ""
+    upper := true
+    loop ch in component.chars() {
+        if upper { &result.push(ch.to_ascii_uppercase()); upper = false } else { &result.push(ch) }
+        if ch == '_' -> upper = true
+    }
+    if result == "Library" -> &result.push_str("Api")
+    result
+}
+// Rust: Source/Publish/ForeignPackage.rs:1132
+fn java_artifact(value: String) -> String {
+    component :: normalized_component(value, true).replace('_', "-")
+    "jet-{component}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1139
+fn nuget_package_name(value: String) -> String { "Jet.{normalized_component(value, false)}" }
+// Rust: Source/Publish/ForeignPackage.rs:1143
+fn nuget_rid() -> String {
+    os :: if target.selected_os() == { "macos" -> "osx", "windows" -> "win", else -> "linux" }
+    arch :: if target.selected_arch() == { "x86_64" -> "x64", "aarch64" -> "arm64", "x86" -> "x86", else -> target.selected_arch() }
+    "{os}-{arch}"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1160
+fn artifact_file_name(registry: ForeignRegistry, input: LibraryInput) -> String {
+    if registry == {
+        .PyPi -> "{python_distribution(input.package_name)}-{input.version}-py3-none-{python_platform()}.whl"
+        .Npm -> {
+            package := npm_package_name(input.package_name).trim_start_matches('@') // #4303
+            stem :: package.replace('/', "-")
+            "{stem}-{input.version}.tgz"
+        }
+        .Maven -> "{java_artifact(input.package_name)}-{input.version}.jar"
+        .NuGet -> "{nuget_package_name(input.package_name)}.{input.version}.nupkg"
+    }
+}
+// Rust: Source/Publish/ForeignPackage.rs:1188
+fn license_file_name(license: String) -> String { "LICENSE" }
+// Rust: Source/Publish/ForeignPackage.rs:1192
+fn load_license_text(root: OSPath, license: String) -> String Err! {
+    loop name in ["LICENSE", "LICENSE.txt", "COPYING", "COPYING.txt"] {
+        path :: root.join(name)
+        if fs.symlink_metadata(path) == .Ok(metadata) {
+            if metadata.file_type().is_symlink() -> return Err("license file '{path.display()}' must not be a symlink")
+            if metadata.is_file() {
+                bytes :: read_regular_file(path, "license file")?
+                return String.from_utf8(bytes).map_err(_ -> "license file '{path.display()}' is not UTF-8")
+            }
+        }
+    }
+    Ok("SPDX-License-Identifier: {license}\n\nThis package carries the source package's declared SPDX license.\n")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1214
+fn first_minute_python(module: String) -> String {
+    "Install and call this package without Jet:\n\n  python -m pip install {module}\n  python -c \"from {module} import *; print(next(iter(locals())))\"\n"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1220
+fn first_minute_node(package: String) -> String {
+    "# Jet native package\n\nInstall with npm install {package}. Then:\n\nconst jet = require('{package}');\nconsole.log(Object.keys(jet));\n\nThe package contains its native runtime; Jet is not required.\n"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1226
+fn first_minute_dotnet(package: String) -> String {
+    "# Jet native package\n\nRun: dotnet add package {package}\n\nUse the typed {package}.Library methods from C#. The package contains its native runtime; Jet is not required.\n"
+}
+// Rust: Source/Publish/ForeignPackage.rs:1232
+fn render_python_record(entries: [ArchiveEntry], dist_info: String) -> String {
+    out := ""
+    loop entry in entries {
+        digest :: SHA256.sha256(entry.bytes)
+        encoded :: base64url(digest)
+        &out.push_str("{entry.name},sha256={encoded},{entry.bytes.len()}\n")
+    }
+    &out.push_str("{dist_info}/RECORD,,\n")
+    out
+}
+// Rust: Source/Publish/ForeignPackage.rs:1249
+fn base64url(bytes: [U8]) -> String {
+    TABLE :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".bytes()
+    out := ""
+    loop chunk in bytes.chunks(3) {
+        a :: U32.from(chunk[0])
+        b :: U32.from(chunk.get(1).copied().unwrap_or(U8{0}))
+        c :: U32.from(chunk.get(2).copied().unwrap_or(U8{0}))
+        n :: (a << 16) | (b << 8) | c
+        &out.push(Char.from(TABLE[Int.from((n >> 18) & 63)]))
+        &out.push(Char.from(TABLE[Int.from((n >> 12) & 63)]))
+        if chunk.len() > 1 -> &out.push(Char.from(TABLE[Int.from((n >> 6) & 63)]))
+        if chunk.len() > 2 -> &out.push(Char.from(TABLE[Int.from(n & 63)]))
+    }
+    out
+}
+// Rust: Source/Publish/ForeignPackage.rs:1269
+fn push_len_bytes(out: &[U8], bytes: [U8]) -> {
+    length :: U64.try_from(bytes.len()).expect("foreign identity field cannot exceed u64")
+    &out.extend_from_slice(length.to_be_bytes())
+    &out.extend_from_slice(bytes)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1278
+fn json_string(value: String) -> String {
+    out := String.with_capacity(value.len() + 2)
+    &out.push('"')
+    loop ch in value.chars() {
+        if ch == {
+            '"' -> &out.push_str("\\\"")
+            '\\' -> &out.push_str("\\\\")
+            '\u{08}' -> &out.push_str("\\b")
+            '\u{0c}' -> &out.push_str("\\f")
+            '\n' -> &out.push_str("\\n")
+            '\r' -> &out.push_str("\\r")
+            '\t' -> &out.push_str("\\t")
+            else -> {
+                if ch.is_control() { scalar :: U32.from(ch); &out.push_str("\\u{scalar:04x}") }
+                else { &out.push(ch) }
+            }
+        }
+    }
+    &out.push('"')
+    out
+}
+// Rust: Source/Publish/ForeignPackage.rs:1300
+fn xml_string(value: String) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1309
+fn write_atomic(path: OSPath, bytes: [U8]) -> Unit Err! {
+    parent :: path.parent().ok_or_else(() -> "artifact '{path.display()}' has no parent directory")?
+    fs.create_dir_all(parent).map_err(error -> "could not create artifact directory: {error}")?
+    name :: path.file_name().unwrap_or_default().to_string_lossy()
+    temp :: parent.join(".{name}.partial-{std.process.id()}")
+    result :: (() -> {
+        file := OpenOptions.new().write(true).create_new(true).open(temp).map_err(error -> "could not stage artifact '{temp.display()}': {error}")?
+        &file.write_all(bytes).and_then(_ -> file.sync_all()).map_err(error -> "could not finish artifact '{temp.display()}': {error}")?
+        fs.rename(temp, path).map_err(error -> "could not install artifact '{path.display()}': {error}")
+    })()
+    if result.is_err() -> _ :: fs.remove_file(temp)
+    result
+}
+// Rust: Source/Publish/ForeignPackage.rs:1338
+fn foreign_output_dir(root: OSPath) -> OSPath Err! {
+    target_dir :: root.join(".jet").join("build")
+    if fs.symlink_metadata(target_dir) == .Ok(metadata) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("foreign artifact directory '{target_dir.display()}' is not a real build directory")
+    }
+    directory :: target_dir.join("foreign")
+    if fs.symlink_metadata(directory) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("foreign artifact directory '{directory.display()}' is not a real directory")
+        }
+        .Err(_) -> fs.create_dir_all(directory).map_err(error -> "could not create '{directory.display()}': {error}")?
+    }
+    Ok(directory)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1363
+fn zip(entries: [ArchiveEntry]) -> [U8] Err! {
+    files := [String:[U8]]{}
+    loop entry in entries {
+        validate_archive_entry(entry.name, entry.bytes.len())?
+        if &files.insert(entry.name.clone(), entry.bytes).is_some() -> return Err("foreign archive repeats entry '{entry.name}'")
+    }
+    output := [U8]{}
+    central := [U8]{}
+    entry_count := 0
+    loop name in files.keys().sorted() {
+        bytes :: files[name]
+        name_bytes :: name.as_bytes()
+        name_len :: U16.try_from(name_bytes.len()).map_err(_ -> "foreign archive entry name '{name}' is too long")?
+        size :: U32.try_from(bytes.len()).map_err(_ -> "foreign archive entry '{name}' is too large for ZIP")?
+        offset :: U32.try_from(output.len()).map_err(_ -> "foreign ZIP is too large")?
+        crc :: crc32(bytes)
+        &output.extend_from_slice(U32{0x04034b50}.to_le_bytes())
+        loop value in [U16{20}, U16{0}, U16{0}, U16{0}, U16{0}] -> &output.extend_from_slice(value.to_le_bytes())
+        loop value in [crc, size, size] -> &output.extend_from_slice(value.to_le_bytes())
+        &output.extend_from_slice(name_len.to_le_bytes())
+        &output.extend_from_slice(U16{0}.to_le_bytes())
+        &output.extend_from_slice(name_bytes)
+        &output.extend_from_slice(bytes)
+        &central.extend_from_slice(U32{0x02014b50}.to_le_bytes())
+        loop value in [U16{20}, U16{20}, U16{0}, U16{0}, U16{0}, U16{0}] -> &central.extend_from_slice(value.to_le_bytes())
+        loop value in [crc, size, size] -> &central.extend_from_slice(value.to_le_bytes())
+        &central.extend_from_slice(name_len.to_le_bytes())
+        loop _ in 0..<4 -> &central.extend_from_slice(U16{0}.to_le_bytes())
+        &central.extend_from_slice(U32{0}.to_le_bytes())
+        &central.extend_from_slice(offset.to_le_bytes())
+        &central.extend_from_slice(name_bytes)
+        entry_count += 1
+    }
+    central_offset :: U32.try_from(output.len()).map_err(_ -> "foreign ZIP is too large")?
+    central_size :: U32.try_from(central.len()).map_err(_ -> "foreign ZIP is too large")?
+    &output.extend_from_slice(central)
+    count :: U16.try_from(entry_count).map_err(_ -> "foreign ZIP has too many entries")?
+    &output.extend_from_slice(U32{0x06054b50}.to_le_bytes())
+    loop value in [U16{0}, U16{0}, count, count] -> &output.extend_from_slice(value.to_le_bytes())
+    &output.extend_from_slice(central_size.to_le_bytes())
+    &output.extend_from_slice(central_offset.to_le_bytes())
+    &output.extend_from_slice(U16{0}.to_le_bytes())
+    Ok(output)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1438
+fn validate_archive_entry(name: String, size: Int) -> Unit Err! {
+    if name.is_empty() || name.starts_with('/') || name.contains('\\') || name.split('/').any(part -> part.is_empty() || part == "." || part == "..") {
+        return Err("foreign archive has unsafe entry name '{name}'")
+    }
+    if name.as_bytes().len() > Int.from(U16.MAX) -> return Err("foreign archive entry name '{name}' is too long")
+    if size > MAX_ARCHIVE_ENTRY -> return Err("foreign archive entry '{name}' exceeds the {MAX_ARCHIVE_ENTRY / (1024 * 1024)} MiB limit")
+    Ok(())
+}
+// Rust: Source/Publish/ForeignPackage.rs:1460
+fn crc32(bytes: [U8]) -> U32 {
+    crc := U32{0xffffffff}
+    loop byte in bytes {
+        crc ^= U32.from(byte)
+        loop _ in 0..<8 {
+            mask :: U32{0}.wrapping_sub(crc & U32{1})
+            crc = (crc >> 1) ^ (U32{0xedb88320} & mask)
+        }
+    }
+    !crc
+}
+// Rust: Source/Publish/ForeignPackage.rs:1472
+fn tar_gz(entries: [ArchiveEntry]) -> [U8] Err! {
+    files := [String:[U8]]{}
+    loop entry in entries {
+        validate_archive_entry(entry.name, entry.bytes.len())?
+        if &files.insert(entry.name.clone(), entry.bytes).is_some() -> return Err("foreign archive repeats entry '{entry.name}'")
+    }
+    tar := [U8]{}
+    loop name in files.keys().sorted() {
+        bytes :: files[name]
+        if name.as_bytes().len() > 100 -> return Err("NPM archive entry '{name}' is too long")
+        header := [U8{0}; 512]
+        &header[0..name.len()].copy_from_slice(name.as_bytes())
+        write_octal(&header[100..108], if is_native_name(name) { U64{0o755} } else { U64{0o644} })
+        write_octal(&header[108..116], U64{0})
+        write_octal(&header[116..124], U64{0})
+        write_octal(&header[124..136], U64.from(bytes.len()))
+        write_octal(&header[136..148], U64{0})
+        &header[148..156].fill(b' ')
+        header[156] = b'0'
+        &header[257..263].copy_from_slice([b'u', b's', b't', b'a', b'r', U8{0}])
+        &header[263..265].copy_from_slice("00".bytes())
+        checksum :: header.iter().map(byte -> U32.from(byte)).sum()
+        checksum_text :: "{checksum:06o}"
+        &header[148..154].copy_from_slice(checksum_text.as_bytes())
+        header[154] = 0
+        header[155] = b' '
+        &tar.extend_from_slice(header)
+        &tar.extend_from_slice(bytes)
+        padding :: (512 - (bytes.len() % 512)) % 512
+        &tar.resize(tar.len() + padding, U8{0})
+    }
+    &tar.resize(tar.len() + 1024, U8{0})
+    gzip_store(tar)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1516
+fn is_native_name(name: String) -> Bool {
+    name.ends_with(".so") || name.ends_with(".dylib") || name.ends_with(".dll") || name.ends_with(".node")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1523
+fn write_octal(field: &[U8], value: U64) -> {
+    width :: field.len()
+    digits :: width.saturating_sub(1)
+    text :: "{value:0digits$o}"
+    start :: width.saturating_sub(1).saturating_sub(text.len())
+    &field.fill(U8{0})
+    &field[start..start + text.len()].copy_from_slice(text.as_bytes())
+}
+// Rust: Source/Publish/ForeignPackage.rs:1531
+fn gzip_store(bytes: [U8]) -> [U8] Err! {
+    output := [U8]{0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3}
+    if bytes.is_empty() { &output.extend_from_slice([U8{1}, 0, 0, 255, 255]) }
+    else {
+        // Stream chunks without allocating a second chunk index.
+        offset := 0
+        loop offset < bytes.len() {
+            end :: (offset + 65535).min(bytes.len())
+            chunk :: bytes[offset..end]
+            &output.push(if end == bytes.len() { U8{1} } else { U8{0} })
+            length :: U16.try_from(chunk.len()).map_err(_ -> "internal gzip block is too large")?
+            &output.extend_from_slice(length.to_le_bytes())
+            &output.extend_from_slice((!length).to_le_bytes())
+            &output.extend_from_slice(chunk)
+            offset = end
+        }
+    }
+    &output.extend_from_slice(crc32(bytes).to_le_bytes())
+    &output.extend_from_slice(U32.truncating_from(bytes.len()).to_le_bytes())
+    Ok(output)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1552
+fn run_host_tool(command: &Command, tool: String) -> Unit Err! {
+    &command.stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null())
+    // GATE #4409: distinguish a missing executable from other spawn failures.
+    status :: &command.status().map_err(error -> if error.kind() == IOErrorKind.NotFound {
+        "required host tool '{tool}' was not found"
+    } else { "could not start host tool '{tool}': {error}" })?
+    if status.success() -> return Ok(())
+    code :: status.code().map(code -> code.to_string()).unwrap_or_else(() -> "signal")
+    Err("host tool '{tool}' failed with status {code}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1577
+fn find_tool_path(tool: String) -> OSPath Err! {
+    path :: env.var_os("PATH").ok_or_else(() -> "required host tool '{tool}' was not found because PATH is empty")?
+    loop directory in env.split_paths(path) {
+        candidate :: directory.join(tool)
+        if candidate.is_file() -> return fs.canonicalize(candidate).map_err(error -> "could not resolve host tool '{tool}': {error}")
+    }
+    Err("required host tool '{tool}' was not found")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1591
+fn java_home() -> OSPath Err! {
+    if env.var_os("JAVA_HOME").filter(value -> !value.is_empty()) == .Val(value) {
+        home :: OSPath.from(value)
+        if home.join("include").join("jni.h").is_file() -> return Ok(home)
+        return Err("JAVA_HOME '{home.display()}' has no include/jni.h")
+    }
+    javac :: find_tool_path("javac")?
+    home :: javac.parent().and_then(path -> path.parent()).ok_or_else(() -> "could not determine JAVA_HOME from javac")?
+    if !home.join("include").join("jni.h").is_file() -> return Err("the javac installation '{home.display()}' has no include/jni.h")
+    Ok(home)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1617
+fn work_dir(input: LibraryInput, name: String) -> OSPath Err! {
+    directory :: foreign_output_dir(input.root)?.join(".{name}-{std.process.id()}")
+    fs.create_dir(directory).map_err(error -> "could not create foreign build directory: {error}")?
+    Ok(directory)
+}
+// Rust: Source/Publish/ForeignPackage.rs:1625
+fn cleanup_work(directory: OSPath) -> { _ :: fs.remove_dir_all(directory) }
+// Rust: Source/Publish/ForeignPackage.rs:1629
+fn link_runtime_args(command: &Command, work: OSPath, runtime_name: String) -> {
+    &command.arg("-L").arg(work).arg("-Wl,-rpath,{runtime_rpath()}").arg("-l:{runtime_name}")
+}
+// Rust: Source/Publish/ForeignPackage.rs:1637
+fn runtime_rpath() -> String { if target.selected_os() == "macos" { "@loader_path" } else { "$ORIGIN" } }
+// Rust: Source/Publish/ForeignPackage.rs:1645
+fn build_node_addon(input: LibraryInput, addon: String) -> [U8] Err! {
+    if target.selected_os() == "windows" -> return Err("N-API packaging is not supported for the Windows target yet")
+    work :: work_dir(input, "node")?
+    result :: (() -> {
+        fs.write(work.join(input.runtime_name), input.runtime).map_err(error -> "could not stage the Node runtime: {error}")?
+        fs.write(work.join("api.h"), input.header).map_err(error -> "could not stage the C ABI header: {error}")?
+        source :: render_node_addon(input)
+        source_path :: work.join("addon.c")
+        fs.write(source_path, source.as_bytes()).map_err(error -> "could not write the N-API bridge: {error}")?
+        output :: work.join(addon)
+        command := Command.new("cc")
+        &command.args(["-std=c11", "-shared", "-fPIC"]).arg(source_path).arg("-I").arg(work)
+        if target.selected_os() == "macos" -> &command.arg("-Wl,-undefined,dynamic_lookup")
+        link_runtime_args(&command, work, input.runtime_name)
+        &command.arg("-o").arg(output)
+        run_host_tool(&command, "cc")?
+        read_regular_file(output, "N-API addon")
+    })()
+    cleanup_work(work)
+    result
+}
+// Rust: Source/Publish/ForeignPackage.rs:1678
+fn render_node_addon(input: LibraryInput) -> String {
+    output := "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include \"api.h\"\ntypedef struct napi_env__ *napi_env;\ntypedef struct napi_value__ *napi_value;\ntypedef struct napi_callback_info__ *napi_callback_info;\ntypedef int32_t napi_status;\ntypedef napi_value (*napi_callback)(napi_env, napi_callback_info);\nenum {{ napi_ok = 0 }};\nextern napi_status napi_get_cb_info(napi_env, napi_callback_info, size_t *, napi_value *, napi_value *, void **);\nextern napi_status napi_get_value_int64(napi_env, napi_value, int64_t *);\nextern napi_status napi_get_value_double(napi_env, napi_value, double *);\nextern napi_status napi_get_value_bool(napi_env, napi_value, bool *);\nextern napi_status napi_get_value_string_utf8(napi_env, napi_value, char *, size_t, size_t *);\nextern napi_status napi_create_int64(napi_env, int64_t, napi_value *);\nextern napi_status napi_create_double(napi_env, double, napi_value *);\nextern napi_status napi_get_boolean(napi_env, bool, napi_value *);\nextern napi_status napi_create_string_utf8(napi_env, const char *, size_t, napi_value *);\nextern napi_status napi_create_function(napi_env, const char *, size_t, napi_callback, void *, napi_value *);\nextern napi_status napi_set_named_property(napi_env, napi_value, const char *, napi_value);\nextern napi_status napi_throw_error(napi_env, const char *, const char *);\nstatic napi_value jet_napi_error(napi_env env, const char *message) {{\n    napi_throw_error(env, NULL, message);\n    return NULL;\n}}\n\n"
+    loop (index, export) in input.stamp.exports.iter().enumerate() {
+        params :: Int.try_from(export.params).unwrap_or(0)
+        &output.push_str("static napi_value jet_napi_{index}(napi_env env, napi_callback_info info) {{\n")
+        &output.push_str("    napi_value argv[{params.max(1)}]; size_t argc = {params};\n")
+        &output.push_str("    if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != {params}) return jet_napi_error(env, \"invalid argument count\");\n")
+        loop param in 0..<params {
+            if export.scalar == {
+                .Int -> &output.push_str("    int64_t arg{param}; if (napi_get_value_int64(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected an integer\");\n")
+                .Float -> &output.push_str("    double arg{param}; if (napi_get_value_double(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected a number\");\n")
+                .Bool -> &output.push_str("    bool arg{param}; if (napi_get_value_bool(env, argv[{param}], &arg{param}) != napi_ok) return jet_napi_error(env, \"expected a boolean\");\n")
+                .Text -> {
+                    &output.push_str("    size_t len{param} = 0; char *raw{param} = NULL; if (napi_get_value_string_utf8(env, argv[{param}], NULL, 0, &len{param}) != napi_ok || len{param} > (size_t)-1 - 1) return jet_napi_error(env, \"expected UTF-8 text\");\n")
+                    &output.push_str("    raw{param} = (char *)malloc(len{param} + 1); if (raw{param} == NULL) return jet_napi_error(env, \"could not allocate text argument\");\n")
+                    &output.push_str("    if (napi_get_value_string_utf8(env, argv[{param}], raw{param}, len{param} + 1, &len{param}) != napi_ok) {{ free(raw{param}); return jet_napi_error(env, \"expected UTF-8 text\"); }}\n")
+                    &output.push_str("    JetText arg{param} = {{ (const uint8_t *)raw{param}, len{param} }};\n")
+                }
+            }
+        }
+        args :: (0..<params).map(param -> "arg{param}").collect().join(", ")
+        if export.scalar == {
+            .Int -> {
+                &output.push_str("    int64_t result = {export.symbol}({args});\n")
+                // The original homogeneous scalar arm has no text arguments to release.
+                &output.push_str("    napi_value value; if (napi_create_int64(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n")
+            }
+            .Float -> {
+                &output.push_str("    double result = {export.symbol}({args});\n")
+                &output.push_str("    napi_value value; if (napi_create_double(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n")
+            }
+            .Bool -> {
+                &output.push_str("    bool result = {export.symbol}({args});\n")
+                &output.push_str("    napi_value value; if (napi_get_boolean(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n")
+            }
+            .Text -> {
+                &output.push_str("    JetText result = {export.symbol}({args});\n")
+                loop param in 0..<params -> &output.push_str("    free(raw{param});\n")
+                &output.push_str("    if (result.len != 0 && result.ptr == NULL) {{ jet_text_free(result); return jet_napi_error(env, \"JetText result has an invalid pointer\"); }}\n")
+                &output.push_str("    napi_value value; if (napi_create_string_utf8(env, (const char *)result.ptr, result.len, &value) != napi_ok) {{ jet_text_free(result); return jet_napi_error(env, \"could not create text result\"); }} jet_text_free(result); return value;\n")
+            }
+        }
+        &output.push_str("}}\n\n")
+    }
+    &output.push_str("__attribute__((visibility(\"default\"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {{\n")
+    loop (index, export) in input.stamp.exports.iter().enumerate() {
+        name :: json_string(export.name)
+        &output.push_str("    napi_value fn{index}; if (napi_create_function(env, {name}, {export.name.len()}, jet_napi_{index}, NULL, &fn{index}) != napi_ok || napi_set_named_property(env, exports, {name}, fn{index}) != napi_ok) return NULL;\n")
+    }
+    &output.push_str("    return exports;\n}}\n")
+    output
+}
 

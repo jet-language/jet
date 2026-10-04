@@ -1,657 +1,277 @@
-// PORT-PENDING 0711 source-productionreceipt-module-group: Source/Doctor.rs:1-653
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! E2-M3 (D-DX2 + D-BUILD1) — `jet self doctor`: environment self-diagnosis.
-//RS //!
-//RS //! Jet hides a rustc dependency and a machine-wide artifact store; when those drift the
-//RS //! errors land far from the cause. `doctor` checks them up front, offline by
-//RS //! default, and offers an actionable fix for each problem. Auto-fixable
-//RS //! problems can be applied with `--fix`. Network checks (the registry) run only
-//RS //! under `--online`.
-//RS //!
-//RS //! The advisory diagnostic for rustc / native linker / cache / PATH problems is **L2101**.
-//RS //! The C-FFI section (D-BUILD1) reports pkg-config presence and hangar link
-//RS //! dirs honestly.
-//RS 
-//RS use std::fmt;
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS 
-//RS /// Exact rustc release owned by the current Jet build.
-//RS pub const RUSTC_VERSION_PIN: &str = "1.97.1";
-//RS 
-//RS /// Health of one checked thing.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum Health {
-//RS     /// Everything is fine.
-//RS     Ok,
-//RS     /// Something is wrong; `fix` says what to do.
-//RS     Problem,
-//RS     /// Not a failure, but worth noting (e.g. an optional tool is absent).
-//RS     Note,
-//RS }
-//RS 
-//RS /// One line of the doctor report.
-//RS #[derive(Debug, Clone)]
-//RS pub struct Check {
-//RS     /// Section heading this check belongs to (e.g. "toolchain").
-//RS     pub section: &'static str,
-//RS     /// Short label, e.g. "rustc".
-//RS     pub label: String,
-//RS     /// Result.
-//RS     pub health: Health,
-//RS     /// Human detail (version string, path, reason).
-//RS     pub detail: String,
-//RS     /// When `health == Problem`: the imperative fix.
-//RS     pub fix: Option<String>,
-//RS     /// Whether `doctor --fix` can apply this automatically.
-//RS     pub auto_fixable: bool,
-//RS }
-//RS 
-//RS impl Check {
-//RS     fn ok(section: &'static str, label: impl Into<String>, detail: impl Into<String>) -> Self {
-//RS         Check {
-//RS             section,
-//RS             label: label.into(),
-//RS             health: Health::Ok,
-//RS             detail: detail.into(),
-//RS             fix: None,
-//RS             auto_fixable: false,
-//RS         }
-//RS     }
-//RS     fn note(section: &'static str, label: impl Into<String>, detail: impl Into<String>) -> Self {
-//RS         Check {
-//RS             section,
-//RS             label: label.into(),
-//RS             health: Health::Note,
-//RS             detail: detail.into(),
-//RS             fix: None,
-//RS             auto_fixable: false,
-//RS         }
-//RS     }
-//RS     fn problem(
-//RS         section: &'static str,
-//RS         label: impl Into<String>,
-//RS         detail: impl Into<String>,
-//RS         fix: impl Into<String>,
-//RS         auto_fixable: bool,
-//RS     ) -> Self {
-//RS         Check {
-//RS             section,
-//RS             label: label.into(),
-//RS             health: Health::Problem,
-//RS             detail: detail.into(),
-//RS             fix: Some(fix.into()),
-//RS             auto_fixable,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// What to check.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct Options {
-//RS     /// Allow network checks (registry reachability).
-//RS     pub online: bool,
-//RS     /// E2-M15: check that a specific cross-compilation target is installed.
-//RS     pub cross_target: Option<String>,
-//RS }
-//RS 
-//RS /// Run every check and return them in report order.
-//RS pub fn run(opts: Options) -> Vec<Check> {
-//RS     let mut out = Vec::new();
-//RS     out.push(check_rustc());
-//RS     out.push(check_native_linker());
-//RS     out.extend(check_caches());
-//RS     out.push(check_path());
-//RS     out.push(check_lsp());
-//RS     if opts.online {
-//RS         out.push(check_registry());
-//RS     } else {
-//RS         out.push(Check::note(
-//RS             "registry",
-//RS             "registry",
-//RS             "skipped (offline; pass --online to check)",
-//RS         ));
-//RS     }
-//RS     out.extend(check_ffi());
-//RS     if let Some(triple) = &opts.cross_target {
-//RS         out.push(check_cross_target(triple));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Does any check report a real problem?
-//RS pub fn has_problem(checks: &[Check]) -> bool {
-//RS     checks.iter().any(|c| c.health == Health::Problem)
-//RS }
-//RS 
-//RS fn check_rustc() -> Check {
-//RS     match Command::new("rustc").arg("--version").output() {
-//RS         Ok(o) if o.status.success() => {
-//RS             let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
-//RS             let actual = v
-//RS                 .strip_prefix("rustc ")
-//RS                 .and_then(|version| version.split_whitespace().next());
-//RS             if actual == Some(RUSTC_VERSION_PIN) {
-//RS                 Check::ok(
-//RS                     "toolchain",
-//RS                     "rustc",
-//RS                     format!("{v} (Jet pin: rustc {RUSTC_VERSION_PIN})"),
-//RS                 )
-//RS             } else {
-//RS                 Check::problem(
-//RS                     "toolchain",
-//RS                     "rustc",
-//RS                     format!("{v} (Jet requires rustc {RUSTC_VERSION_PIN})"),
-//RS                     format!(
-//RS                         "use rustc {RUSTC_VERSION_PIN} from the project toolchain, then re-run `jet self doctor`"
-//RS                     ),
-//RS                     false,
-//RS                 )
-//RS             }
-//RS         }
-//RS         _ => Check::problem(
-//RS             "toolchain",
-//RS             "rustc",
-//RS             format!("not found on PATH (Jet pin: rustc {RUSTC_VERSION_PIN})"),
-//RS             format!(
-//RS                 "install Rust {RUSTC_VERSION_PIN} from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend"
-//RS             ),
-//RS             false,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn check_native_linker() -> Check {
-//RS     if command_ok("cc", &["--version"]) {
-//RS         let detail = which("cc")
-//RS             .map(|p| p.display().to_string())
-//RS             .unwrap_or_else(|| "found".to_string());
-//RS         Check::ok("toolchain", "native linker (cc)", detail)
-//RS     } else {
-//RS         Check::problem(
-//RS             "toolchain",
-//RS             "native linker (cc)",
-//RS             "not found on PATH",
-//RS             "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)",
-//RS             false,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn check_caches() -> Vec<Check> {
-//RS     let mut out = Vec::new();
-//RS     out.push(artifact_store_check());
-//RS     let ffi = ffi_cache_dir();
-//RS     out.push(cache_check("ffi cache", ffi));
-//RS     let store = crate::Store::store_dir();
-//RS     out.push(cache_check("package store", store));
-//RS     out
-//RS }
-//RS 
-//RS fn artifact_store_check() -> Check {
-//RS     let store = match jet_store::Store::from_env() {
-//RS         Ok(store) => store,
-//RS         Err(error) => {
-//RS             return Check::problem(
-//RS                 "cache",
-//RS                 "artifact store",
-//RS                 format!("could not open the machine-wide store: {error}"),
-//RS                 "check JET_STORE_DIR and its permissions, then run `jet cache status`",
-//RS                 false,
-//RS             );
-//RS         }
-//RS     };
-//RS     match store.status() {
-//RS         Ok(status) => Check::ok(
-//RS             "cache",
-//RS             "artifact store",
-//RS             format!(
-//RS                 "{} (footprint {}; cap {}; reserve {}; {} entries; {} live leases)",
-//RS                 status.root.display(),
-//RS                 format_bytes(status.footprint_bytes),
-//RS                 format_bytes(status.limit_bytes),
-//RS                 format_bytes(status.reserve_bytes),
-//RS                 status.entries.len(),
-//RS                 status.live_leases
-//RS             ),
-//RS         ),
-//RS         Err(error) => Check::problem(
-//RS             "cache",
-//RS             "artifact store",
-//RS             format!("could not read the machine-wide store: {error}"),
-//RS             "check JET_STORE_DIR and its permissions, then run `jet cache status`",
-//RS             false,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS /// A cache dir is healthy if it exists and is writable, or doesn't exist yet
-//RS /// (it is created on demand). A path that exists but isn't a directory is a
-//RS /// problem with an auto-fix (remove it).
-//RS fn cache_check(label: &'static str, dir: PathBuf) -> Check {
-//RS     if !dir.exists() {
-//RS         return Check::ok(
-//RS             "cache",
-//RS             label,
-//RS             format!("{} (created on demand)", dir.display()),
-//RS         );
-//RS     }
-//RS     if !dir.is_dir() {
-//RS         return Check::problem(
-//RS             "cache",
-//RS             label,
-//RS             format!("{} exists but is not a directory", dir.display()),
-//RS             format!("remove `{}` so Jet can recreate it", dir.display()),
-//RS             true,
-//RS         );
-//RS     }
-//RS     Check::ok("cache", label, dir.display().to_string())
-//RS }
-//RS fn format_bytes(bytes: u64) -> String {
-//RS     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-//RS     if bytes < 1024 {
-//RS         return format!("{bytes} B");
-//RS     }
-//RS     let mut value = bytes as f64;
-//RS     let mut unit = 0;
-//RS     while value >= 1024.0 && unit < UNITS.len() - 1 {
-//RS         value /= 1024.0;
-//RS         unit += 1;
-//RS     }
-//RS     if value.fract() == 0.0 || value >= 10.0 {
-//RS         format!("{value:.0} {}", UNITS[unit])
-//RS     } else {
-//RS         format!("{value:.1} {}", UNITS[unit])
-//RS     }
-//RS }
-//RS 
-//RS /// PATH sanity: is the running `jet` binary reachable as `jet` on PATH?
-//RS fn check_path() -> Check {
-//RS     let bin = crate::Syntax::BINARY_NAME;
-//RS     let on_path = which(bin).is_some();
-//RS     if on_path {
-//RS         Check::ok("path", bin, "on PATH")
-//RS     } else {
-//RS         Check::problem(
-//RS             "path",
-//RS             bin,
-//RS             format!("`{}` is not on your PATH", bin),
-//RS             format!("add the directory containing `{}` to PATH so commands and `{}-<plugin>` discovery work", bin, bin),
-//RS             false,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn check_lsp() -> Check {
-//RS     // The LSP ships inside this same binary (`jet self lsp`); there is no external
-//RS     // server to find. Report it as wired.
-//RS     Check::ok(
-//RS         "lsp",
-//RS         "language server",
-//RS         format!("built in (`{} lsp`)", crate::Syntax::BINARY_NAME),
-//RS     )
-//RS }
-//RS 
-//RS fn check_registry() -> Check {
-//RS     let registry = crate::Publish::resolve_publish_registry();
-//RS     let safe_url = crate::Publish::redact_registry_url(&registry.url);
-//RS     if safe_url != registry.url {
-//RS         return Check::problem(
-//RS             "registry",
-//RS             registry.name,
-//RS             format!("{safe_url} (embedded credentials or URL parameters are not allowed)"),
-//RS             "remove credentials and query parameters from JET_REGISTRY_URL; configure the host Git credential provider instead",
-//RS             false,
-//RS         );
-//RS     }
-//RS     if registry.url.starts_with("file://") {
-//RS         let path = registry.url.trim_start_matches("file://");
-//RS         return if PathBuf::from(path).exists() {
-//RS             Check::ok(
-//RS                 "registry",
-//RS                 registry.name,
-//RS                 format!("{safe_url} (local index reachable)"),
-//RS             )
-//RS         } else {
-//RS             Check::problem(
-//RS                 "registry",
-//RS                 registry.name,
-//RS                 format!("{safe_url} (local index is missing)"),
-//RS                 "create the configured local registry or set JET_REGISTRY_URL to a reachable index",
-//RS                 false,
-//RS             )
-//RS         };
-//RS     }
-//RS     let mut git = Command::new("git");
-//RS     git.args([
-//RS         "-c",
-//RS         "credential.useHttpPath=true",
-//RS         "ls-remote",
-//RS         "--",
-//RS         &registry.url,
-//RS     ])
-//RS     .env("GIT_TERMINAL_PROMPT", "0");
-//RS     for (key, _) in std::env::vars_os() {
-//RS         let key = key.to_string_lossy();
-//RS         if key.starts_with("JET_REGISTRY_") {
-//RS             git.env_remove(&*key);
-//RS         }
-//RS     }
-//RS     match git.output() {
-//RS         Ok(output) if output.status.success() => {
-//RS             Check::ok("registry", registry.name, format!("{safe_url} (reachable)"))
-//RS         }
-//RS         Ok(_) => Check::problem(
-//RS             "registry",
-//RS             registry.name,
-//RS             format!("{safe_url} (unreachable; transport details omitted)"),
-//RS             "check JET_REGISTRY_URL, credentials, and network access, then retry",
-//RS             false,
-//RS         ),
-//RS         Err(_) => Check::problem(
-//RS             "registry",
-//RS             registry.name,
-//RS             format!("{safe_url} (git unavailable; transport details omitted)"),
-//RS             "install git or configure a local registry index",
-//RS             false,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn check_ffi() -> Vec<Check> {
-//RS     let mut out = Vec::new();
-//RS     // D-BUILD1: pkg-config presence (used to discover C libs not in the hangar).
-//RS     if command_ok("pkg-config", &["--version"]) {
-//RS         out.push(Check::ok("c-ffi", "pkg-config", "found"));
-//RS     } else {
-//RS         out.push(Check::problem(
-//RS             "c-ffi",
-//RS             "pkg-config",
-//RS             "not found",
-//RS             "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries",
-//RS             false,
-//RS         ));
-//RS     }
-//RS     // cargo: needed to build the hidden FFI bridge crate.
-//RS     if command_ok("cargo", &["--version"]) {
-//RS         out.push(Check::ok(
-//RS             "c-ffi",
-//RS             "cargo",
-//RS             "found (builds the FFI bridge crate)",
-//RS         ));
-//RS     } else {
-//RS         out.push(Check::note(
-//RS             "c-ffi",
-//RS             "cargo",
-//RS             "not found (only needed for C FFI builds)",
-//RS         ));
-//RS     }
-//RS     // Hangar link dirs: the user-owned C-lib store.
-//RS     let hangar = jetpack::Store::resolve().hangar_dir();
-//RS     match fs::symlink_metadata(&hangar) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => out.push(Check::problem(
-//RS             "c-ffi",
-//RS             "hangar",
-//RS             format!("{} is a symlink", hangar.display()),
-//RS             "move the symlink aside without following it, then retry `jetpack hangar path`",
-//RS             false,
-//RS         )),
-//RS         Ok(metadata) if metadata.is_dir() => {
-//RS             out.push(Check::ok("c-ffi", "hangar", hangar.display().to_string()));
-//RS         }
-//RS         Ok(_) => out.push(Check::problem(
-//RS             "c-ffi",
-//RS             "hangar",
-//RS             format!("{} is not a directory", hangar.display()),
-//RS             "move the path aside without deleting it, then retry `jetpack hangar path`",
-//RS             false,
-//RS         )),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             let legacy = jetpack::Store::legacy_user_hangar_dir();
-//RS             let retired = PathBuf::from(crate::Syntax::HANGAR_DIR);
-//RS             let source = [legacy, retired]
-//RS                 .into_iter()
-//RS                 .find(|path| fs::symlink_metadata(path).is_ok());
-//RS             let detail = if let Some(source) = source {
-//RS                 format!(
-//RS                     "{} not present; legacy Hangar at {} awaits atomic migration",
-//RS                     hangar.display(),
-//RS                     source.display()
-//RS                 )
-//RS             } else {
-//RS                 format!(
-//RS                     "{} not present (created when you realize a C library)",
-//RS                     hangar.display()
-//RS                 )
-//RS             };
-//RS             out.push(Check::note("c-ffi", "hangar", detail));
-//RS         }
-//RS         Err(error) => out.push(Check::problem(
-//RS             "c-ffi",
-//RS             "hangar",
-//RS             format!(
-//RS                 "{} cannot be inspected ({})",
-//RS                 hangar.display(),
-//RS                 error.kind()
-//RS             ),
-//RS             "restore access to the resolved user Hangar path",
-//RS             false,
-//RS         )),
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Apply the auto-fixable problems. Returns the labels that were fixed.
-//RS pub fn apply_fixes(checks: &[Check]) -> Vec<String> {
-//RS     let mut fixed = Vec::new();
-//RS     for c in checks {
-//RS         if c.health == Health::Problem && c.auto_fixable {
-//RS             // The only auto-fix today: a cache path that is a stray file.
-//RS             if c.section == "cache" {
-//RS                 // detail is "<path> exists but is not a directory"
-//RS                 if let Some(path) = c.detail.split(" exists").next() {
-//RS                     if std::fs::remove_file(path).is_ok() || std::fs::remove_dir_all(path).is_ok() {
-//RS                         fixed.push(c.label.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     fixed
-//RS }
-//RS 
-//RS // ── helpers ──────────────────────────────────────────────
-//RS 
-//RS fn ffi_cache_dir() -> PathBuf {
-//RS     dirs_home().join(".cache").join("jet").join("ffi")
-//RS }
-//RS 
-//RS /// The Rust target used by Jet's backend aliases.
-//RS pub const WASM_TARGET: &str = "wasm32-unknown-unknown";
-//RS 
-//RS /// Resolve a Jet backend target to the Rust target whose installed component
-//RS /// the compiler will actually invoke.
-//RS pub fn target_rustc_triple(triple: &str) -> &str {
-//RS     match triple {
-//RS         crate::Syntax::BUILD_TARGET_WEB | crate::Syntax::TARGET_SANDBOX => WASM_TARGET,
-//RS         _ => triple,
-//RS     }
-//RS }
-//RS 
-//RS /// Why the target-component probe could not prove readiness.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum TargetComponentProbeError {
-//RS     /// The target-list command could not provide usable output.
-//RS     TargetListUnavailable,
-//RS     /// Rustc ran, but did not report the requested target.
-//RS     TargetNotKnown,
-//RS     /// The sysroot command could not provide a usable path.
-//RS     SysrootUnavailable,
-//RS     /// The target lib directory is absent, inaccessible, or empty.
-//RS     LibraryUnavailable(PathBuf),
-//RS }
-//RS 
-//RS impl fmt::Display for TargetComponentProbeError {
-//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::TargetListUnavailable => {
-//RS                 write!(f, "could not run the rustc target metadata probe")
-//RS             }
-//RS             Self::TargetNotKnown => write!(f, "not a recognised rustc target triple"),
-//RS             Self::SysrootUnavailable => write!(f, "could not determine the rustc sysroot"),
-//RS             Self::LibraryUnavailable(path) => write!(
-//RS                 f,
-//RS                 "target-specific standard-library component is missing or empty ({})",
-//RS                 path.display()
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl TargetComponentProbeError {
-//RS     /// Actionable remediation in Jet terms (I2): the hidden backend's
-//RS     /// commands and tool names never reach the user.
-//RS     pub fn fix(&self, requested: &str) -> String {
-//RS         match self {
-//RS             Self::TargetNotKnown => format!(
-//RS                 "`{requested}` is not a target this Jet toolchain can build; choose a supported target such as `web`, `sandbox`, or the host target"
-//RS             ),
-//RS             Self::TargetListUnavailable | Self::SysrootUnavailable => {
-//RS                 "the Jet toolchain's code generator is unavailable; run `jet doctor` to see the missing component, then re-run the build".to_string()
-//RS             }
-//RS             Self::LibraryUnavailable(_) => format!(
-//RS                 "this Jet toolchain has no standard library for `{requested}`; install a Jet toolchain that includes this target (`jet doctor` reports it), or build for the host target"
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Prove that the Rust component needed by a Jet target is installed.
-//RS ///
-//RS /// A successful target-list query alone is not enough: rustup can leave a
-//RS /// target directory behind after an interrupted installation. The target's
-//RS /// actual `lib` directory must contain non-empty regular-file content.
-//RS pub fn probe_target_component(
-//RS     triple: &str,
-//RS ) -> Result<PathBuf, TargetComponentProbeError> {
-//RS     let rust_triple = target_rustc_triple(triple);
-//RS 
-//RS     let target_list = Command::new("rustc")
-//RS         .args(["--print", "target-list"])
-//RS         .output()
-//RS         .map_err(|_| TargetComponentProbeError::TargetListUnavailable)?;
-//RS     if !target_list.status.success() {
-//RS         return Err(TargetComponentProbeError::TargetListUnavailable);
-//RS     }
-//RS     let known = String::from_utf8_lossy(&target_list.stdout)
-//RS         .lines()
-//RS         .any(|line| line.trim() == rust_triple);
-//RS     if !known {
-//RS         return Err(TargetComponentProbeError::TargetNotKnown);
-//RS     }
-//RS 
-//RS     let sysroot = Command::new("rustc")
-//RS         .args(["--print", "sysroot"])
-//RS         .output()
-//RS         .map_err(|_| TargetComponentProbeError::SysrootUnavailable)?;
-//RS     if !sysroot.status.success() {
-//RS         return Err(TargetComponentProbeError::SysrootUnavailable);
-//RS     }
-//RS     let root = String::from_utf8_lossy(&sysroot.stdout).trim().to_string();
-//RS     if root.is_empty() {
-//RS         return Err(TargetComponentProbeError::SysrootUnavailable);
-//RS     }
-//RS 
-//RS     let target_lib = PathBuf::from(root)
-//RS         .join("lib")
-//RS         .join("rustlib")
-//RS         .join(rust_triple)
-//RS         .join("lib");
-//RS     let has_component = fs::read_dir(&target_lib)
-//RS         .map(|entries| {
-//RS             entries.flatten().any(|entry| {
-//RS                 entry
-//RS                     .metadata()
-//RS                     .map(|metadata| metadata.is_file() && metadata.len() > 0)
-//RS                     .unwrap_or(false)
-//RS             })
-//RS         })
-//RS         .unwrap_or(false);
-//RS     if !has_component {
-//RS         return Err(TargetComponentProbeError::LibraryUnavailable(target_lib));
-//RS     }
-//RS     Ok(target_lib)
-//RS }
-//RS 
-//RS /// E2-M15: check that a cross-compilation target triple is installed.
-//RS /// Backend aliases are checked against the Rust target they invoke.
-//RS fn check_cross_target(triple: &str) -> Check {
-//RS     // D-DEP-WASM1=A (c81): `--target=sandbox` needs `wasm-tools` on PATH (to
-//RS     // lift the rustc-built core wasm module into a Component Model binary).
-//RS     // Keep this prerequisite separate from the Rust std-component probe below.
-//RS     if triple == crate::Syntax::TARGET_SANDBOX && !command_ok("wasm-tools", &["--version"]) {
-//RS         return Check::problem(
-//RS             "cross",
-//RS             triple,
-//RS             "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)",
-//RS             "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH",
-//RS             false,
-//RS         );
-//RS     }
-//RS 
-//RS     match probe_target_component(triple) {
-//RS         Ok(target_lib) => {
-//RS             let description = if triple == crate::Syntax::BUILD_TARGET_WEB {
-//RS                 format!(
-//RS                     "Jet web backend target (WASM + JS; installed ({}))",
-//RS                     target_lib.display()
-//RS                 )
-//RS             } else if triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
-//RS                 format!(
-//RS                     "Jet WASI Preview 2 server Component target ({})",
-//RS                     target_lib.display()
-//RS                 )
-//RS             } else {
-//RS                 format!("installed ({})", target_lib.display())
-//RS             };
-//RS             Check::ok("cross", triple, description)
-//RS         }
-//RS         Err(error) => Check::problem(
-//RS             "cross",
-//RS             triple,
-//RS             error.to_string(),
-//RS             error.fix(triple),
-//RS             false,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn dirs_home() -> PathBuf {
-//RS     std::env::var("HOME")
-//RS         .or_else(|_| std::env::var("USERPROFILE"))
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|_| PathBuf::from("/tmp"))
-//RS }
-//RS 
-//RS fn command_ok(cmd: &str, args: &[&str]) -> bool {
-//RS     Command::new(cmd)
-//RS         .args(args)
-//RS         .output()
-//RS         .map(|o| o.status.success())
-//RS         .unwrap_or(false)
-//RS }
-//RS 
-//RS /// Find `name` on PATH (std-only, no `which` crate — I6).
-//RS fn which(name: &str) -> Option<PathBuf> {
-//RS     let path = std::env::var_os("PATH")?;
-//RS     for dir in std::env::split_paths(&path) {
-//RS         let candidate = dir.join(name);
-//RS         if candidate.is_file() {
-//RS             return Some(candidate);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-// END-PORT-PENDING 0711 Source/Doctor.rs:1-653
+// Rust: Source/Doctor.rs:1
+// E2-M3 (D-DX2 + D-BUILD1): offline environment diagnosis, with opt-in registry checks.
+use std.fs
+use std.env
+// GATE #4494: real child execution, captured output and process environment.
+use std.process.Command
+use jet_store.Store as ArtifactStore
+use jetpack.Store as PackageStore
+use jet.Syntax
+use jet.Store
+use jet.Publish
 
+// Rust: Source/Doctor.rs:18
+pub const RUSTC_VERSION_PIN: String = "1.97.1"
+// Rust: Source/Doctor.rs:21
+#Derive(Clone, Eq)
+pub enum Health { Ok, Problem, Note }
+// Rust: Source/Doctor.rs:32
+pub struct Check {
+    pub section: String
+    pub label: String
+    pub health: Health
+    pub detail: String
+    pub fix: String?
+    pub auto_fixable: Bool
+}
+impl Check {
+    // Rust: Source/Doctor.rs:50
+    fn ok(section: String, label: String, detail: String) -> Check {
+        Check{section: section, label: label, health: .Ok, detail: detail, fix: None, auto_fixable: false}
+    }
+    // Rust: Source/Doctor.rs:60
+    fn note(section: String, label: String, detail: String) -> Check {
+        Check{section: section, label: label, health: .Note, detail: detail, fix: None, auto_fixable: false}
+    }
+    // Rust: Source/Doctor.rs:70
+    fn problem(section: String, label: String, detail: String, fix: String, auto_fixable: Bool) -> Check {
+        Check{section: section, label: label, health: .Problem, detail: detail, fix: Val(fix), auto_fixable: auto_fixable}
+    }
+}
+// Rust: Source/Doctor.rs:88
+#Derive(Default)
+pub struct Options { pub online: Bool, pub cross_target: String? }
+// Rust: Source/Doctor.rs:98
+pub fn run(opts: Options) -> [Check] {
+    out := [Check]{}
+    &out.push(check_rustc())
+    &out.push(check_native_linker())
+    &out.extend(check_caches())
+    &out.push(check_path())
+    &out.push(check_lsp())
+    if opts.online { &out.push(check_registry()) }
+    else { &out.push(Check.note("registry", "registry", "skipped (offline; pass --online to check)")) }
+    &out.extend(check_ffi())
+    if opts.cross_target == .Val(triple) -> &out.push(check_cross_target(triple))
+    ^out
+}
+// Rust: Source/Doctor.rs:122
+pub fn has_problem(checks: [Check]) -> Bool { checks.iter().any(c -> c.health == Health.Problem) }
+// Rust: Source/Doctor.rs:126
+fn check_rustc() -> Check {
+    output :: Command.new("rustc").arg("--version").output() ?? return Check.problem("toolchain", "rustc", "not found on PATH (Jet pin: rustc {RUSTC_VERSION_PIN})", "install Rust {RUSTC_VERSION_PIN} from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend", false)
+    if !output.status.success() -> return Check.problem("toolchain", "rustc", "not found on PATH (Jet pin: rustc {RUSTC_VERSION_PIN})", "install Rust {RUSTC_VERSION_PIN} from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend", false)
+    text :: String.from_utf8_lossy(output.stdout)
+    trimmed := text.trim() // #4303
+    v :: trimmed.to_string()
+    actual :: v.strip_prefix("rustc ").and_then(version -> version.split_whitespace().next())
+    if actual == Val(RUSTC_VERSION_PIN) -> Check.ok("toolchain", "rustc", "{v} (Jet pin: rustc {RUSTC_VERSION_PIN})")
+    else -> Check.problem("toolchain", "rustc", "{v} (Jet requires rustc {RUSTC_VERSION_PIN})", "use rustc {RUSTC_VERSION_PIN} from the project toolchain, then re-run `jet self doctor`", false)
+}
+// Rust: Source/Doctor.rs:163
+fn check_native_linker() -> Check {
+    if command_ok("cc", ["--version"]) {
+        detail :: which("cc").map(path -> path.display()) ?? "found"
+        Check.ok("toolchain", "native linker (cc)", detail)
+    } else {
+        Check.problem("toolchain", "native linker (cc)", "not found on PATH", "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)", false)
+    }
+}
+// Rust: Source/Doctor.rs:180
+fn check_caches() -> [Check] {
+    [artifact_store_check(), cache_check("ffi cache", ffi_cache_dir()), cache_check("package store", Store.store_dir())]
+}
+// Rust: Source/Doctor.rs:190
+fn artifact_store_check() -> Check {
+    store :: ArtifactStore.from_env() ?? return Check.problem("cache", "artifact store", "could not open the machine-wide store: {err}", "check JET_STORE_DIR and its permissions, then run `jet cache status`", false)
+    status :: store.status() ?? return Check.problem("cache", "artifact store", "could not read the machine-wide store: {err}", "check JET_STORE_DIR and its permissions, then run `jet cache status`", false)
+    Check.ok("cache", "artifact store", "{status.root.display()} (footprint {format_bytes(status.footprint_bytes)}; cap {format_bytes(status.limit_bytes)}; reserve {format_bytes(status.reserve_bytes)}; {status.entries.len()} entries; {status.live_leases} live leases)")
+}
+// Rust: Source/Doctor.rs:230
+fn cache_check(label: String, dir: OSPath) -> Check {
+    if !dir.exists() -> return Check.ok("cache", label, "{dir.display()} (created on demand)")
+    if !dir.is_dir() -> return Check.problem("cache", label, "{dir.display()} exists but is not a directory", "remove `{dir.display()}` so Jet can recreate it", true)
+    Check.ok("cache", label, dir.display())
+}
+// Rust: Source/Doctor.rs:249
+fn format_bytes(bytes: U64) -> String {
+    const UNITS: [String] = ["B", "KiB", "MiB", "GiB", "TiB"]
+    if bytes < 1024 -> return "{bytes} B"
+    value := bytes as F64
+    unit := 0
+    loop value >= 1024.0 && unit < UNITS.len() - 1 { value = value / 1024.0; unit = unit + 1 }
+    if value.fract() == 0.0 || value >= 10.0 -> "{value:.0} {UNITS[unit]}"
+    else -> "{value:.1} {UNITS[unit]}"
+}
+// Rust: Source/Doctor.rs:268
+fn check_path() -> Check {
+    bin :: Syntax.BINARY_NAME
+    if which(bin).is_some() -> Check.ok("path", bin, "on PATH")
+    else -> Check.problem("path", bin, "`{bin}` is not on your PATH", "add the directory containing `{bin}` to PATH so commands and `{bin}-<plugin>` discovery work", false)
+}
+// Rust: Source/Doctor.rs:284
+fn check_lsp() -> Check {
+    // The server is built into the same binary; no external server is probed.
+    Check.ok("lsp", "language server", "built in (`{Syntax.BINARY_NAME} lsp`)")
+}
+// Rust: Source/Doctor.rs:294
+fn check_registry() -> Check {
+    registry :: Publish.resolve_publish_registry()
+    safe_url :: Publish.redact_registry_url(registry.url)
+    if safe_url != registry.url {
+        return Check.problem("registry", registry.name, "{safe_url} (embedded credentials or URL parameters are not allowed)", "remove credentials and query parameters from JET_REGISTRY_URL; configure the host Git credential provider instead", false)
+    }
+    if registry.url.starts_with("file://") {
+        path := registry.url.trim_start_matches("file://") // #4303
+        if OSPath.from(path).exists() -> return Check.ok("registry", registry.name, "{safe_url} (local index reachable)")
+        return Check.problem("registry", registry.name, "{safe_url} (local index is missing)", "create the configured local registry or set JET_REGISTRY_URL to a reachable index", false)
+    }
+    git := Command.new("git")
+    &git.args(["-c", "credential.useHttpPath=true", "ls-remote", "--", registry.url]).env("GIT_TERMINAL_PROMPT", "0")
+    loop (key, _) in env.vars_os() {
+        text :: key.to_string_lossy()
+        if text.starts_with("JET_REGISTRY_") -> &git.env_remove(key)
+    }
+    output :: git.output() ?? return Check.problem("registry", registry.name, "{safe_url} (git unavailable; transport details omitted)", "install git or configure a local registry index", false)
+    if output.status.success() -> Check.ok("registry", registry.name, "{safe_url} (reachable)")
+    else -> Check.problem("registry", registry.name, "{safe_url} (unreachable; transport details omitted)", "check JET_REGISTRY_URL, credentials, and network access, then retry", false)
+}
+// Rust: Source/Doctor.rs:360
+fn check_ffi() -> [Check] {
+    out := [Check]{}
+    if command_ok("pkg-config", ["--version"]) { &out.push(Check.ok("c-ffi", "pkg-config", "found")) }
+    else { &out.push(Check.problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false)) }
+    if command_ok("cargo", ["--version"]) { &out.push(Check.ok("c-ffi", "cargo", "found (builds the FFI bridge crate)")) }
+    else { &out.push(Check.note("c-ffi", "cargo", "not found (only needed for C FFI builds)")) }
+    hangar :: PackageStore.resolve().hangar_dir()
+    // GATE #4409: preserve NotFound versus other inspection errors.
+    if fs.symlink_metadata(hangar) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() {
+                &out.push(Check.problem("c-ffi", "hangar", "{hangar.display()} is a symlink", "move the symlink aside without following it, then retry `jetpack hangar path`", false))
+            } else if metadata.is_dir() {
+                &out.push(Check.ok("c-ffi", "hangar", hangar.display()))
+            } else {
+                &out.push(Check.problem("c-ffi", "hangar", "{hangar.display()} is not a directory", "move the path aside without deleting it, then retry `jetpack hangar path`", false))
+            }
+        }
+        .Err(error) -> {
+            if error.kind() == IOErrorKind.NotFound {
+                legacy :: PackageStore.legacy_user_hangar_dir()
+                retired :: OSPath.from(Syntax.HANGAR_DIR)
+                source :: [legacy, retired].iter().find(path -> fs.symlink_metadata(path).is_ok())
+                detail :: if source == {
+                    .Val(path) -> "{hangar.display()} not present; legacy Hangar at {path.display()} awaits atomic migration"
+                    None -> "{hangar.display()} not present (created when you realize a C library)"
+                }
+                &out.push(Check.note("c-ffi", "hangar", detail))
+            } else {
+                &out.push(Check.problem("c-ffi", "hangar", "{hangar.display()} cannot be inspected ({error.kind()})", "restore access to the resolved user Hangar path", false))
+            }
+        }
+    }
+    ^out
+}
+// Rust: Source/Doctor.rs:444
+pub fn apply_fixes(checks: [Check]) -> [String] {
+    fixed := [String]{}
+    loop c in checks {
+        if c.health == Health.Problem && c.auto_fixable && c.section == "cache" {
+            if c.detail.split(" exists").next() == .Val(path) {
+                if fs.remove_file(OSPath.from(path)).is_ok() || fs.remove_dir_all(OSPath.from(path)).is_ok() -> &fixed.push(~c.label)
+            }
+        }
+    }
+    ^fixed
+}
+// Rust: Source/Doctor.rs:464
+fn ffi_cache_dir() -> OSPath { dirs_home().join(".cache").join("jet").join("ffi") }
+// Rust: Source/Doctor.rs:469
+pub const WASM_TARGET: String = "wasm32-unknown-unknown"
+// Rust: Source/Doctor.rs:473
+pub fn target_rustc_triple(triple: String) -> String {
+    if triple == Syntax.BUILD_TARGET_WEB || triple == Syntax.TARGET_SANDBOX -> WASM_TARGET else -> triple
+}
+// Rust: Source/Doctor.rs:481
+#Error
+#Derive(Clone, Eq)
+pub enum TargetComponentProbeError {
+    TargetListUnavailable
+    TargetNotKnown
+    SysrootUnavailable
+    LibraryUnavailable(path: OSPath)
+}
+impl TargetComponentProbeError {
+    // Rust: Source/Doctor.rs:494
+    fn fmt(&self, f: &Formatter) -> Err! {
+        if self == {
+            .TargetListUnavailable -> f.write_str("could not run the rustc target metadata probe")
+            .TargetNotKnown -> f.write_str("not a recognised rustc target triple")
+            .SysrootUnavailable -> f.write_str("could not determine the rustc sysroot")
+            .LibraryUnavailable(path) -> f.write_str("target-specific standard-library component is missing or empty ({path.display()})")
+        }
+    }
+    // Rust: Source/Doctor.rs:513
+    pub fn fix(&self, requested: String) -> String {
+        if self == {
+            .TargetNotKnown -> "`{requested}` is not a target this Jet toolchain can build; choose a supported target such as `web`, `sandbox`, or the host target"
+            .TargetListUnavailable -> "the Jet toolchain's code generator is unavailable; run `jet doctor` to see the missing component, then re-run the build"
+            .SysrootUnavailable -> "the Jet toolchain's code generator is unavailable; run `jet doctor` to see the missing component, then re-run the build"
+            .LibraryUnavailable(_) -> "this Jet toolchain has no standard library for `{requested}`; install a Jet toolchain that includes this target (`jet doctor` reports it), or build for the host target"
+        }
+    }
+}
+// Rust: Source/Doctor.rs:533
+pub fn probe_target_component(triple: String) -> OSPath TargetComponentProbeError! {
+    rust_triple :: target_rustc_triple(triple)
+    target_list :: Command.new("rustc").args(["--print", "target-list"]).output() ?? return Err(.TargetListUnavailable)
+    if !target_list.status.success() -> return Err(.TargetListUnavailable)
+    known :: String.from_utf8_lossy(target_list.stdout).lines().any(line -> line.trim() == rust_triple)
+    if !known -> return Err(.TargetNotKnown)
+    sysroot :: Command.new("rustc").args(["--print", "sysroot"]).output() ?? return Err(.SysrootUnavailable)
+    if !sysroot.status.success() -> return Err(.SysrootUnavailable)
+    text :: String.from_utf8_lossy(sysroot.stdout)
+    trimmed := text.trim() // #4303
+    root :: trimmed.to_string()
+    if root.is_empty() -> return Err(.SysrootUnavailable)
+    target_lib :: OSPath.from(root).join("lib").join("rustlib").join(rust_triple).join("lib")
+    has_component := false
+    if fs.read_dir(target_lib) == .Ok(entries) {
+        loop entry in entries {
+            if entry == .Ok(item) {
+                if item.metadata() == .Ok(metadata) {
+                    if metadata.is_file() && metadata.len() > 0 { has_component = true; break }
+                }
+            }
+        }
+    }
+    if !has_component -> return Err(.LibraryUnavailable(target_lib))
+    Ok(target_lib)
+}
+// Rust: Source/Doctor.rs:587
+fn check_cross_target(triple: String) -> Check {
+    if triple == Syntax.TARGET_SANDBOX && !command_ok("wasm-tools", ["--version"]) {
+        return Check.problem("cross", triple, "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)", "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH", false)
+    }
+    target_lib :: probe_target_component(triple) ?? return Check.problem("cross", triple, err.to_string(), err.fix(triple), false)
+    description :: if triple == Syntax.BUILD_TARGET_WEB -> "Jet web backend target (WASM + JS; installed ({target_lib.display()}))"
+        else if triple == Syntax.BUILD_TARGET_WASI_SERVER -> "Jet WASI Preview 2 server Component target ({target_lib.display()})"
+        else -> "installed ({target_lib.display()})"
+    Check.ok("cross", triple, description)
+}
+// Rust: Source/Doctor.rs:628
+fn dirs_home() -> OSPath { OSPath.from(env.var("HOME") ?? env.var("USERPROFILE") ?? "/tmp") }
+// Rust: Source/Doctor.rs:635
+fn command_ok(cmd: String, args: [String]) -> Bool {
+    output :: Command.new(cmd).args(args).output() ?? return false
+    output.status.success()
+}
+// Rust: Source/Doctor.rs:644
+fn which(name: String) -> OSPath? {
+    path :: env.var_os("PATH") ?? return None
+    loop dir in env.split_paths(path) {
+        candidate :: dir.join(name)
+        if candidate.is_file() -> return Val(candidate)
+    }
+    None
+}

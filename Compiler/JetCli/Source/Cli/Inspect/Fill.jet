@@ -1,443 +1,266 @@
-// PORT-PENDING 0687 source-cmdfill-module-group: Source/CmdFill.rs:1-439
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Typed-goal reports and checked candidate proposals for jet check / jet fill.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::fmt::Write as _;
-//RS use std::path::Path;
-//RS 
-//RS use jet::Diagnostics::Span;
-//RS use jet::AST::{Expr, Func, Item, ProgramBundle};
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS 
-//RS use crate::{CmdInspect::CheckProjection, OutputMode};
-//RS 
-//RS #[derive(Clone)]
-//RS struct FunctionInfo {
-//RS     name: String,
-//RS     return_type: String,
-//RS }
-//RS 
-//RS struct GoalSite {
-//RS     file: String,
-//RS     source: String,
-//RS     line: usize,
-//RS     function: String,
-//RS     span: Span,
-//RS     expected_type: String,
-//RS     required_effects: String,
-//RS     params: Vec<(String, String)>,
-//RS     functions: Vec<FunctionInfo>,
-//RS }
-//RS 
-//RS /// Run the checked-candidate command. An optional :line suffix narrows the
-//RS /// report to one goal site; the checker still validates the whole file first.
-//RS pub(crate) fn run_fill(target: &str, mode: OutputMode) {
-//RS     let (file, line) = split_target(target);
-//RS     let path = Path::new(file);
-//RS     let mut checked =
-//RS         match crate::CmdInspect::check_projection_for_effects(path, "dev", &BTreeMap::new()) {
-//RS             Ok(checked) => checked,
-//RS             Err(diagnostics) => {
-//RS                 crate::CmdInspect::render_check_failure(
-//RS                     path,
-//RS                     &diagnostics,
-//RS                     mode.json,
-//RS                     mode.color_stderr(),
-//RS                 );
-//RS             }
-//RS         };
-//RS 
-//RS     let report = render_goal_report(&mut checked, Some(path), line, true, mode.json);
-//RS     match report {
-//RS         Some(report) => println!("{report}"),
-//RS         None if mode.json => println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("fill", true)
-//RS                 .with_field(
-//RS                     "fill",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("goals", StatusValue::array(Vec::<StatusValue>::new())),
-//RS                     ),
-//RS                 )
-//RS                 .json()
-//RS         ),
-//RS         None => println!("no goals found in '{file}'"),
-//RS     }
-//RS }
-//RS 
-//RS /// Render the checked goal facts already present in a projection. fill asks
-//RS /// for candidates; check asks only for the typed goal card.
-//RS pub(crate) fn render_goal_report(
-//RS     checked: &mut CheckProjection,
-//RS     file_filter: Option<&Path>,
-//RS     line_filter: Option<usize>,
-//RS     include_candidates: bool,
-//RS     json: bool,
-//RS ) -> Option<String> {
-//RS     let mut goals = collect_goals(&mut checked.bundle, &checked.facts);
-//RS     if let Some(path) = file_filter {
-//RS         goals.retain(|goal| same_file(&goal.file, path));
-//RS     }
-//RS     if let Some(line) = line_filter {
-//RS         goals.retain(|goal| goal.line == line);
-//RS     }
-//RS     if goals.is_empty() {
-//RS         return None;
-//RS     }
-//RS 
-//RS     let mut out = String::new();
-//RS     if json {
-//RS         let fill = StatusValue::object(
-//RS             StatusFields::new().with(
-//RS                 "goals",
-//RS                 StatusValue::array(goals.iter().map(|goal| {
-//RS                     let candidates = checked_candidates(goal, include_candidates);
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("file", goal.file.as_str())
-//RS                             .with("line", goal.line)
-//RS                             .with("function", goal.function.as_str())
-//RS                             .with("expected_type", goal.expected_type.as_str())
-//RS                             .with("required_effects", goal.required_effects.as_str())
-//RS                             .with(
-//RS                                 "candidates",
-//RS                                 StatusValue::array(
-//RS                                     candidates
-//RS                                         .iter()
-//RS                                         .map(|candidate| StatusValue::from(candidate.as_str())),
-//RS                                 ),
-//RS                             ),
-//RS                     )
-//RS                 })),
-//RS             ),
-//RS         );
-//RS         return Some(
-//RS             StatusEnvelope::new("fill", true)
-//RS                 .with_field("fill", fill)
-//RS                 .json(),
-//RS         );
-//RS     }
-//RS 
-//RS     for goal in &goals {
-//RS         writeln!(out, "goal: {}:{} ({})", goal.file, goal.line, goal.function)
-//RS             .expect("writing to a String cannot fail");
-//RS         writeln!(out, "  expected type: {}", goal.expected_type)
-//RS             .expect("writing to a String cannot fail");
-//RS         writeln!(out, "  required effects: {}", goal.required_effects)
-//RS             .expect("writing to a String cannot fail");
-//RS         if include_candidates {
-//RS             let candidates = checked_candidates(goal, true);
-//RS             if candidates.is_empty() {
-//RS                 out.push_str("  candidates: none (no local expression passed the checker)\n");
-//RS             } else {
-//RS                 out.push_str("  candidates:\n");
-//RS                 for (index, candidate) in candidates.iter().enumerate() {
-//RS                     writeln!(out, "    {}. {candidate} (checked)", index + 1)
-//RS                         .expect("writing to a String cannot fail");
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     Some(out)
-//RS }
-//RS 
-//RS fn split_target(target: &str) -> (&str, Option<usize>) {
-//RS     target
-//RS         .rsplit_once(':')
-//RS         .and_then(|(file, line)| line.parse::<usize>().ok().map(|line| (file, Some(line))))
-//RS         .unwrap_or((target, None))
-//RS }
-//RS 
-//RS fn same_file(display: &str, path: &Path) -> bool {
-//RS     if display == path.to_string_lossy().as_ref() {
-//RS         return true;
-//RS     }
-//RS     match (std::fs::canonicalize(display), std::fs::canonicalize(path)) {
-//RS         (Ok(left), Ok(right)) => left == right,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn collect_goals(
-//RS     bundle: &mut ProgramBundle,
-//RS     facts: &jet::Sema::SemIndexEffectFacts,
-//RS ) -> Vec<GoalSite> {
-//RS     let mut goals = Vec::new();
-//RS     for module in &mut bundle.modules {
-//RS         let mut functions = Vec::new();
-//RS         collect_function_infos(&module.items, &mut functions);
-//RS         let file = module.display.clone();
-//RS         let source = module.source.clone();
-//RS         let alias = module.alias.clone();
-//RS         for item in &mut module.items {
-//RS             collect_item_goals(
-//RS                 item, None, &file, &source, &alias, facts, &functions, &mut goals,
-//RS             );
-//RS         }
-//RS     }
-//RS     goals
-//RS }
-//RS 
-//RS fn collect_function_infos(items: &[Item], out: &mut Vec<FunctionInfo>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => add_function_info(function, out),
-//RS             Item::Struct(structure) => {
-//RS                 for function in &structure.methods {
-//RS                     add_function_info(function, out);
-//RS                 }
-//RS                 for block in &structure.trait_impls {
-//RS                     for function in &block.methods {
-//RS                         add_function_info(function, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(enumeration) => {
-//RS                 for function in &enumeration.methods {
-//RS                     add_function_info(function, out);
-//RS                 }
-//RS                 for block in &enumeration.trait_impls {
-//RS                     for function in &block.methods {
-//RS                         add_function_info(function, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for function in &implementation.methods {
-//RS                     add_function_info(function, out);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn add_function_info(function: &Func, out: &mut Vec<FunctionInfo>) {
-//RS     if function.params.is_empty() {
-//RS         if let Some(return_type) = &function.return_type {
-//RS             out.push(FunctionInfo {
-//RS                 name: function.name.clone(),
-//RS                 return_type: return_type.name(),
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_item_goals(
-//RS     item: &mut Item,
-//RS     owner: Option<&str>,
-//RS     file: &str,
-//RS     source: &str,
-//RS     alias: &str,
-//RS     facts: &jet::Sema::SemIndexEffectFacts,
-//RS     functions: &[FunctionInfo],
-//RS     out: &mut Vec<GoalSite>,
-//RS ) {
-//RS     match item {
-//RS         Item::Func(function) => {
-//RS             collect_function_goals(function, owner, file, source, alias, facts, functions, out)
-//RS         }
-//RS         Item::Impl(implementation) => {
-//RS             let owner = implementation.type_name.clone();
-//RS             for function in &mut implementation.methods {
-//RS                 collect_function_goals(
-//RS                     function,
-//RS                     Some(&owner),
-//RS                     file,
-//RS                     source,
-//RS                     alias,
-//RS                     facts,
-//RS                     functions,
-//RS                     out,
-//RS                 );
-//RS             }
-//RS         }
-//RS         Item::Struct(structure) => {
-//RS             let owner = structure.name.clone();
-//RS             for function in &mut structure.methods {
-//RS                 collect_function_goals(
-//RS                     function,
-//RS                     Some(&owner),
-//RS                     file,
-//RS                     source,
-//RS                     alias,
-//RS                     facts,
-//RS                     functions,
-//RS                     out,
-//RS                 );
-//RS             }
-//RS             for block in &mut structure.trait_impls {
-//RS                 for function in &mut block.methods {
-//RS                     collect_function_goals(
-//RS                         function,
-//RS                         Some(&owner),
-//RS                         file,
-//RS                         source,
-//RS                         alias,
-//RS                         facts,
-//RS                         functions,
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         Item::Enum(enumeration) => {
-//RS             let owner = enumeration.name.clone();
-//RS             for function in &mut enumeration.methods {
-//RS                 collect_function_goals(
-//RS                     function,
-//RS                     Some(&owner),
-//RS                     file,
-//RS                     source,
-//RS                     alias,
-//RS                     facts,
-//RS                     functions,
-//RS                     out,
-//RS                 );
-//RS             }
-//RS             for block in &mut enumeration.trait_impls {
-//RS                 for function in &mut block.methods {
-//RS                     collect_function_goals(
-//RS                         function,
-//RS                         Some(&owner),
-//RS                         file,
-//RS                         source,
-//RS                         alias,
-//RS                         facts,
-//RS                         functions,
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn collect_function_goals(
-//RS     function: &mut Func,
-//RS     owner: Option<&str>,
-//RS     file: &str,
-//RS     source: &str,
-//RS     alias: &str,
-//RS     facts: &jet::Sema::SemIndexEffectFacts,
-//RS     functions: &[FunctionInfo],
-//RS     out: &mut Vec<GoalSite>,
-//RS ) {
-//RS     let function_name = owner
-//RS         .map(|owner| format!("{owner}.{}", function.name))
-//RS         .unwrap_or_else(|| function.name.clone());
-//RS     let params = function
-//RS         .params
-//RS         .iter()
-//RS         .map(|param| (param.name.clone(), param.ty.name()))
-//RS         .collect::<Vec<_>>();
-//RS     let required_effects = required_effects(facts, alias, owner, &function.name);
-//RS     for statement in &mut function.body {
-//RS         statement.for_each_expr_mut(|expr| {
-//RS             let Expr::Todo {
-//RS                 span,
-//RS                 expected_type,
-//RS             } = expr
-//RS             else {
-//RS                 return;
-//RS             };
-//RS             let offset = (*span).start.min(source.len());
-//RS             out.push(GoalSite {
-//RS                 file: file.to_string(),
-//RS                 source: source.to_string(),
-//RS                 line: source[..offset]
-//RS                     .bytes()
-//RS                     .filter(|byte| *byte == b'\n')
-//RS                     .count()
-//RS                     + 1,
-//RS                 function: function_name.clone(),
-//RS                 span: *span,
-//RS                 expected_type: expected_type
-//RS                     .clone()
-//RS                     .unwrap_or_else(|| "(unknown)".to_string()),
-//RS                 required_effects: required_effects.clone(),
-//RS                 params: params.clone(),
-//RS                 functions: functions.to_vec(),
-//RS             });
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn required_effects(
-//RS     facts: &jet::Sema::SemIndexEffectFacts,
-//RS     alias: &str,
-//RS     owner: Option<&str>,
-//RS     name: &str,
-//RS ) -> String {
-//RS     let local_key = owner
-//RS         .map(|owner| format!("{owner}::{name}"))
-//RS         .unwrap_or_else(|| name.to_string());
-//RS     let keys = [format!("{alias}::{local_key}"), local_key, name.to_string()];
-//RS     for key in keys {
-//RS         if let Some(effects) = facts.solved.get(&key) {
-//RS             return if effects.is_empty() {
-//RS                 "none".to_string()
-//RS             } else {
-//RS                 format!("[{}]", jet::Sema::show_set(effects))
-//RS             };
-//RS         }
-//RS     }
-//RS     // The shared reachability projection omits pure rows from its solved
-//RS     // effects table. A collected function is still a checked summary, so a
-//RS     // missing solved row means the function is pure rather than unknown.
-//RS     "none".to_string()
-//RS }
-//RS 
-//RS fn checked_candidates(goal: &GoalSite, include_candidates: bool) -> Vec<String> {
-//RS     if !include_candidates {
-//RS         return Vec::new();
-//RS     }
-//RS 
-//RS     let mut candidates = Vec::new();
-//RS     for (name, ty) in &goal.params {
-//RS         if ty == &goal.expected_type {
-//RS             candidates.push(name.clone());
-//RS         }
-//RS     }
-//RS     let current_name = goal.function.rsplit('.').next().unwrap_or(&goal.function);
-//RS     for function in &goal.functions {
-//RS         if function.name != current_name && function.return_type == goal.expected_type {
-//RS             candidates.push(format!("{}()", function.name));
-//RS         }
-//RS     }
-//RS     match goal.expected_type.as_str() {
-//RS         "Int" => candidates.push("0".to_string()),
-//RS         "Float" | "F32" => candidates.push("0.0".to_string()),
-//RS         "Bool" => candidates.push("false".to_string()),
-//RS         "String" => candidates.push("\"\"".to_string()),
-//RS         "Char" => candidates.push("'a'".to_string()),
-//RS         "Unit" | "()" => candidates.push("()".to_string()),
-//RS         expected if expected.ends_with('?') => candidates.push("null".to_string()),
-//RS         _ => {}
-//RS     }
-//RS 
-//RS     let mut checked = Vec::new();
-//RS     for candidate in candidates {
-//RS         if checked.contains(&candidate) {
-//RS             continue;
-//RS         }
-//RS         if candidate_checks(goal, &candidate) {
-//RS             checked.push(candidate);
-//RS         }
-//RS     }
-//RS     checked
-//RS }
-//RS 
-//RS fn candidate_checks(goal: &GoalSite, candidate: &str) -> bool {
-//RS     if goal.span.end > goal.source.len() || goal.span.start > goal.span.end {
-//RS         return false;
-//RS     }
-//RS     let mut source = goal.source.clone();
-//RS     source.replace_range(goal.span.start..goal.span.end, candidate);
-//RS     jet::Driver::check_eval(&source, &goal.file).is_empty()
-//RS }
-// END-PORT-PENDING 0687 Source/CmdFill.rs:1-439
+// Rust: Source/CmdFill.rs:1
+// Typed-goal reports and checked candidate proposals for jet check / jet fill.
+use core.files as fs
+use jet.Diagnostics.[Span]
+use jet.AST.[Expr, Func, Item, ProgramBundle]
+use jet.Sema.[SemIndexEffectFacts, show_set]
+use jet.Driver
+use jet_foundation.Report.[StatusEnvelope, StatusFields, StatusValue]
+use jet_cli.[OutputMode]
+use jet_cli.CmdInspect.[CheckProjection, check_projection_for_effects, render_check_failure]
 
+// Rust: Source/CmdFill.rs:13
+struct FunctionInfo {
+    name: String
+    return_type: String
+}
+
+// Rust: Source/CmdFill.rs:19
+struct GoalSite {
+    file: String
+    source: String
+    line: UInt
+    function: String
+    span: Span
+    expected_type: String
+    required_effects: String
+    params: [(String, String)]
+    functions: [FunctionInfo]
+}
+
+// Rust: Source/CmdFill.rs:33
+// A :line suffix filters the report only; the whole file is checked first.
+pub fn run_fill(target: String, mode: OutputMode) -> {
+    (file, line) :: split_target(target)
+    path :: OSPath.new(file)
+    environment: [String:String] = [:]
+    checked := if check_projection_for_effects(path, "dev", &environment) == {
+        .Ok(checked) -> checked
+        .Err(diagnostics) -> render_check_failure(path, &diagnostics, mode.json, mode.color_stderr())
+    }
+    report :: render_goal_report(&checked, Some(path), line, true, mode.json)
+    if report == {
+        .Some(report) -> println("{report}")
+        .None if mode.json -> println("{StatusEnvelope.new(\"fill\", true).with_field(\"fill\", StatusValue.object(StatusFields.new().with(\"goals\", StatusValue.array([])))).json()}")
+        .None -> println("no goals found in '{file}'")
+    }
+}
+
+// Rust: Source/CmdFill.rs:70
+pub fn render_goal_report(checked: &CheckProjection, file_filter: OSPath?, line_filter: UInt?, include_candidates: Bool, json: Bool) -> String? {
+    goals := collect_goals(&checked.bundle, &checked.facts)
+    if file_filter == .Some(path) -> goals.retain(goal -> same_file(goal.file, path))
+    if line_filter == .Some(line) -> goals.retain(goal -> goal.line == line)
+    if goals.is_empty() -> return None
+    out := ""
+    if json -> {
+        fill :: StatusValue.object(StatusFields.new().with("goals", StatusValue.array(goals.iter().map(goal -> {
+            candidates :: checked_candidates(goal, include_candidates)
+            StatusValue.object(StatusFields.new()
+                .with("file", goal.file)
+                .with("line", goal.line)
+                .with("function", goal.function)
+                .with("expected_type", goal.expected_type)
+                .with("required_effects", goal.required_effects)
+                .with("candidates", StatusValue.array(candidates.iter().map(candidate -> StatusValue.from(candidate)))))
+        }))))
+        return Some(StatusEnvelope.new("fill", true).with_field("fill", fill).json())
+    }
+    loop goal in &goals {
+        out.push_str("goal: {goal.file}:{goal.line} ({goal.function})\n")
+        out.push_str("  expected type: {goal.expected_type}\n")
+        out.push_str("  required effects: {goal.required_effects}\n")
+        if include_candidates -> {
+            candidates :: checked_candidates(goal, true)
+            if candidates.is_empty() -> {
+                out.push_str("  candidates: none (no local expression passed the checker)\n")
+            } else -> {
+                out.push_str("  candidates:\n")
+                loop (index, candidate) in candidates.iter().enumerate() {
+                    out.push_str("    {index + 1}. {candidate} (checked)\n")
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+// Rust: Source/CmdFill.rs:144
+fn split_target(target: String) -> (String, UInt?) {
+    target.rsplit_once(':')
+        .and_then((file, line) -> line.parse<UInt>().ok().map(line -> (file, Some(line))))
+        .unwrap_or((target, None))
+}
+
+// Rust: Source/CmdFill.rs:151
+fn same_file(display: String, path: OSPath) -> Bool {
+    if display == path.to_string_lossy() -> return true
+    if (fs.canonicalize(display), fs.canonicalize(path)) == {
+        (.Ok(left), .Ok(right)) -> left == right
+        _ -> false
+    }
+}
+
+// Rust: Source/CmdFill.rs:161
+fn collect_goals(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> [GoalSite] {
+    goals := []
+    loop module in &bundle.modules {
+        functions := []
+        collect_function_infos(&module.items, &functions)
+        file :: module.display.clone()
+        source :: module.source.clone()
+        alias :: module.alias.clone()
+        loop item in &module.items {
+            collect_item_goals(item, None, file, source, alias, facts, &functions, &goals)
+        }
+    }
+    goals
+}
+
+// Rust: Source/CmdFill.rs:181
+fn collect_function_infos(items: &[Item], out: &[FunctionInfo]) -> {
+    loop item in items {
+        if item == {
+            .Func(function) -> add_function_info(function, out)
+            .Struct(structure) -> {
+                loop function in &structure.methods -> add_function_info(function, out)
+                loop block in &structure.trait_impls {
+                    loop function in &block.methods -> add_function_info(function, out)
+                }
+            }
+            .Enum(enumeration) -> {
+                loop function in &enumeration.methods -> add_function_info(function, out)
+                loop block in &enumeration.trait_impls {
+                    loop function in &block.methods -> add_function_info(function, out)
+                }
+            }
+            .Impl(implementation) -> {
+                loop function in &implementation.methods -> add_function_info(function, out)
+            }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: Source/CmdFill.rs:215
+fn add_function_info(function: &Func, out: &[FunctionInfo]) -> {
+    if function.params.is_empty() -> {
+        if function.return_type == .Some(return_type) -> {
+            out.push(FunctionInfo{name: function.name.clone(), return_type: return_type.name()})
+        }
+    }
+}
+
+// Rust: Source/CmdFill.rs:226
+fn collect_item_goals(item: &Item, owner: String?, file: String, source: String, alias: String,
+    facts: &SemIndexEffectFacts, functions: &[FunctionInfo], out: &[GoalSite]) -> {
+    if item == {
+        .Func(function) -> collect_function_goals(function, owner, file, source, alias, facts, functions, out)
+        .Impl(implementation) -> {
+            owner :: implementation.type_name.clone()
+            loop function in &implementation.methods {
+                collect_function_goals(function, Some(owner), file, source, alias, facts, functions, out)
+            }
+        }
+        .Struct(structure) -> {
+            owner :: structure.name.clone()
+            loop function in &structure.methods {
+                collect_function_goals(function, Some(owner), file, source, alias, facts, functions, out)
+            }
+            loop block in &structure.trait_impls {
+                loop function in &block.methods {
+                    collect_function_goals(function, Some(owner), file, source, alias, facts, functions, out)
+                }
+            }
+        }
+        .Enum(enumeration) -> {
+            owner :: enumeration.name.clone()
+            loop function in &enumeration.methods {
+                collect_function_goals(function, Some(owner), file, source, alias, facts, functions, out)
+            }
+            loop block in &enumeration.trait_impls {
+                loop function in &block.methods {
+                    collect_function_goals(function, Some(owner), file, source, alias, facts, functions, out)
+                }
+            }
+        }
+        _ -> {}
+    }
+}
+
+// Rust: Source/CmdFill.rs:317
+fn collect_function_goals(function: &Func, owner: String?, file: String, source: String, alias: String,
+    facts: &SemIndexEffectFacts, functions: &[FunctionInfo], out: &[GoalSite]) -> {
+    function_name :: owner.map(owner -> "{owner}.{function.name}").unwrap_or_else(() -> function.name.clone())
+    params :: function.params.iter().map(param -> (param.name.clone(), param.ty.name())).collect<[(String, String)]>()
+    effects :: required_effects(facts, alias, owner, function.name)
+    loop statement in &function.body {
+        statement.for_each_expr_mut(expr -> {
+            if expr == {
+                .Todo{span, expected_type} -> {
+                    offset :: span.start.min(source.len())
+                    out.push(GoalSite{
+                        file: file.to_string(), source: source.to_string(),
+                        line: source[..offset].bytes().filter(byte -> byte == 10).count() + 1,
+                        function: function_name.clone(), span: span,
+                        expected_type: expected_type.clone().unwrap_or_else(() -> "(unknown)"),
+                        required_effects: effects.clone(), params: params.clone(), functions: functions.to_vec()
+                    })
+                }
+                _ -> {}
+            }
+        })
+    }
+}
+
+// Rust: Source/CmdFill.rs:367
+fn required_effects(facts: &SemIndexEffectFacts, alias: String, owner: String?, name: String) -> String {
+    local_key :: owner.map(owner -> "{owner}::{name}").unwrap_or_else(() -> name.to_string())
+    keys :: ["{alias}::{local_key}", local_key, name.to_string()]
+    loop key in keys {
+        if facts.solved.get(&key) == .Some(effects) -> {
+            return if effects.is_empty() -> "none" else -> "[{show_set(effects)}]"
+        }
+    }
+    // Pure rows are omitted from the shared checked reachability projection.
+    "none"
+}
+
+// Rust: Source/CmdFill.rs:392
+fn checked_candidates(goal: &GoalSite, include_candidates: Bool) -> [String] {
+    if !include_candidates -> return []
+    candidates := []
+    loop (name, ty) in &goal.params {
+        if ty == goal.expected_type -> candidates.push(name.clone())
+    }
+    current_name :: goal.function.rsplit('.').next().unwrap_or(goal.function)
+    loop function in &goal.functions {
+        if function.name != current_name && function.return_type == goal.expected_type -> {
+            candidates.push("{function.name}()")
+        }
+    }
+    if goal.expected_type == {
+        "Int" -> candidates.push("0")
+        "Float" | "F32" -> candidates.push("0.0")
+        "Bool" -> candidates.push("false")
+        "String" -> candidates.push("\"\"")
+        "Char" -> candidates.push("'a'")
+        "Unit" | "()" -> candidates.push("()")
+        expected if expected.ends_with('?') -> candidates.push("null")
+        _ -> {}
+    }
+    checked := []
+    loop candidate in candidates {
+        if checked.contains(&candidate) -> next
+        if candidate_checks(goal, &candidate) -> checked.push(candidate)
+    }
+    checked
+}
+
+// Rust: Source/CmdFill.rs:432
+fn candidate_checks(goal: &GoalSite, candidate: String) -> Bool {
+    if goal.span.end > goal.source.len() || goal.span.start > goal.span.end -> return false
+    source := goal.source.clone()
+    source.replace_range(goal.span.start..goal.span.end, candidate)
+    Driver.check_eval(&source, &goal.file).is_empty()
+}

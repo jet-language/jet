@@ -1,0 +1,18 @@
+use Cli.Dev.Commands.[resolve_bless_targets, BLESS_TARGETS, extract_hardcoded_paths, marker_value, binding_plan_command]
+
+// Behavioral controls for Source/CmdDevTools.rs:3791,3957,4967,5217; no inline Rust tests in window.
+#Test("bless_targets_preserve_requested_order_and_unknown_names") {
+    assert(resolve_bless_targets(&[String]{}) == Ok(BLESS_TARGETS.to_vec()))
+    assert(resolve_bless_targets(&["cross", "cli", "cross"]) == Ok(["cross", "cli", "cross"]))
+    assert(resolve_bless_targets(&["unknown", "cli", "another"]) == Err("unknown, another"))
+}
+#Test("fixture_paths_exclude_display_labels_and_dynamic_paths") {
+    text :: "let a = \"tests/ui/example.jet\"; render_diagnostics(\"tests/ui/shown.jet\"); let b = \"tests/ui/{{name}}.jet\";"
+    assert(extract_hardcoded_paths(text) == ["tests/ui/example.jet"])
+}
+#Test("binding_markers_and_plan_flags_follow_original_dispatch") {
+    assert(marker_value("// jet-ffi-effects: \"foreign\"\n", "jet-ffi-effects") == Val("foreign"))
+    assert(marker_value("// jet-ffi-effects: \n", "jet-ffi-effects") == None)
+    assert(binding_plan_command(&["mylib", "--freeze"]))
+    assert(!binding_plan_command(&["header.h", "--preview"]))
+}

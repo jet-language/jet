@@ -1,1805 +1,895 @@
-// PORT-PENDING 0681 source-cmddevtools-slice-3665: Source/CmdDevTools.rs:3665-5465
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn run_devtools_new_ui(args: &[&String]) {
-//RS     if args.is_empty() {
-//RS         eprintln!("usage: {} devtools new-ui <name>", jet::Syntax::BINARY_NAME);
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let name = args[0].as_str();
-//RS     if name.is_empty() || name.contains('/') || name.contains('.') {
-//RS         crate::cli_error!(
-//RS             "E2104",
-//RS             "`new-ui` takes a bare fixture name, no path or extension: got `{}`",
-//RS             name
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     let ext = jet::Syntax::FILE_EXT;
-//RS     let dir = PathBuf::from("tests/ui");
-//RS     let jet_path = dir.join(format!("{}.{}", name, ext));
-//RS     let stderr_path = dir.join(format!("{}.stderr", name));
-//RS 
-//RS     if jet_path.exists() {
-//RS         crate::cli_error!("E2104", "`{}` already exists", jet_path.display());
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     fs::create_dir_all(&dir).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't create `{}`: {}", dir.display(), e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     let src = "// TODO: describe what this diagnostic demonstrates.\n\
-//RS fn run() {\n    print(definitely_undefined_scaffold_symbol)\n}\n"
-//RS         .to_string();
-//RS     fs::write(&jet_path, &src).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't write `{}`: {}", jet_path.display(), e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     // Mirror `tests/diagnostic_snapshots.rs`'s `ui_snapshots` exactly, so the
-//RS     // pair this writes is already a valid harness fixture.
-//RS     let shown_path = format!("tests/ui/{}.{}", name, ext);
-//RS     let actual = match jet::compile_with_path(&src, &shown_path) {
-//RS         Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
-//RS         Ok(_) => "(no errors)\n".to_string(),
-//RS     };
-//RS     fs::write(&stderr_path, &actual).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't write `{}`: {}", stderr_path.display(), e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     println!("wrote {}", jet_path.display());
-//RS     println!("wrote {}", stderr_path.display());
-//RS     if actual == "(no errors)\n" {
-//RS         println!(
-//RS             "note: scaffold compiled cleanly — edit `{}` to trigger the diagnostic you want, \
-//RS              then `{} devtools bless diagnostic_snapshots`",
-//RS             jet_path.display(),
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // c450: `jet self devtools check-fixture-paths` — validate hardcoded path fixtures.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// `jet self devtools check-fixture-paths` — greps every `tests/**/*.rs` file for
-//RS /// hardcoded fixture path literals (`Examples/features/...`, `Docs/spec/...`,
-//RS /// `tests/ui/...`, etc.) and confirms each one exists on disk relative to the
-//RS /// current directory (run from the repo root). Path-embedding fixtures rot
-//RS /// silently when an example moves; this is the check that catches it.
-//RS pub(crate) fn run_devtools_check_fixture_paths() {
-//RS     let tests_dir = PathBuf::from("tests");
-//RS     if !tests_dir.is_dir() {
-//RS         crate::cli_error!(@fix "E2104", "no `tests/` directory here", "run from the repo root");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     let mut rs_files = Vec::new();
-//RS     collect_rs_files(&tests_dir, &mut rs_files);
-//RS 
-//RS     let mut checked = 0usize;
-//RS     let mut missing: Vec<(PathBuf, String)> = Vec::new();
-//RS     for rs in &rs_files {
-//RS         let text = fs::read_to_string(rs).unwrap_or_default();
-//RS         for candidate in extract_hardcoded_paths(&text) {
-//RS             checked += 1;
-//RS             if !Path::new(&candidate).exists() {
-//RS                 missing.push((rs.clone(), candidate));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     if missing.is_empty() {
-//RS         println!(
-//RS             "check-fixture-paths: {} embedded path(s) across {} file(s), all present",
-//RS             checked,
-//RS             rs_files.len()
-//RS         );
-//RS     } else {
-//RS         eprintln!("check-fixture-paths: {} missing path(s):", missing.len());
-//RS         for (file, path) in &missing {
-//RS             eprintln!("  {} -> `{}` does not exist", file.display(), path);
-//RS         }
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS }
-//RS 
-//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for e in entries.flatten() {
-//RS         let p = e.path();
-//RS         if p.is_dir() {
-//RS             collect_rs_files(&p, out);
-//RS         } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
-//RS             out.push(p);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Pull out string-literal path fixtures from Rust source text. Deliberately
-//RS /// conservative: only whole quoted literals (never `format!` templates with a
-//RS /// `{`) whose prefix marks them as a fixture path and whose suffix is a known
-//RS /// fixture extension, so dynamically-joined paths (already covered by their
-//RS /// own `read_to_string`/`unwrap_or_else` panics at test time) are left alone.
-//RS fn extract_hardcoded_paths(text: &str) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let bytes = text.as_bytes();
-//RS     let mut i = 0;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'"' {
-//RS             let start = i + 1;
-//RS             let mut j = start;
-//RS             while j < bytes.len() && bytes[j] != b'"' {
-//RS                 if bytes[j] == b'\\' {
-//RS                     j += 1;
-//RS                 }
-//RS                 j += 1;
-//RS             }
-//RS             if j <= text.len() {
-//RS                 let lit = &text[start..j.min(text.len())];
-//RS                 // `render_diagnostics`/`render_all_*` take a "shown" display
-//RS                 // label as their file-name argument, not a path that must
-//RS                 // exist (tests/net_tls.rs feeds one a made-up name purely so
-//RS                 // the rendered banner looks like a real fixture path).
-//RS                 let mut before_start = start.saturating_sub(40);
-//RS                 while before_start < i && !text.is_char_boundary(before_start) {
-//RS                     before_start += 1;
-//RS                 }
-//RS                 let before = &text[before_start..i];
-//RS                 let is_display_label = before.contains("render_diagnostics(")
-//RS                     || before.contains("render_all_colored(")
-//RS                     || before.contains("render_all_json(");
-//RS                 if !is_display_label && is_hardcoded_fixture_path(lit) {
-//RS                     out.push(lit.to_string());
-//RS                 }
-//RS             }
-//RS             i = j + 1;
-//RS         } else {
-//RS             i += 1;
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn is_hardcoded_fixture_path(lit: &str) -> bool {
-//RS     let known_prefix = lit.starts_with("Examples/features/")
-//RS         || lit.starts_with("Docs/spec/")
-//RS         || lit.starts_with("tests/ui/")
-//RS         || lit.starts_with("tests/ui_lint/")
-//RS         || lit.starts_with("tests/cli/")
-//RS         || lit.starts_with("tests/release/");
-//RS     if !known_prefix || lit.contains('{') || lit.contains('}') {
-//RS         return false;
-//RS     }
-//RS     let ext = format!(".{}", jet::Syntax::FILE_EXT);
-//RS     lit.ends_with(&ext)
-//RS         || lit.ends_with(".md")
-//RS         || lit.ends_with(".out")
-//RS         || lit.ends_with(".stderr")
-//RS         || lit.ends_with(".warn")
-//RS         || lit.ends_with(".txt")
-//RS         || lit.ends_with(".snapshot")
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // c450: `jet self devtools bless` — wrapper over the UPDATE_EXPECT re-bless convention.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// Every test binary that owns `UPDATE_EXPECT`-blessable snapshots (I4). Kept
-//RS /// as one list so `bless` never drifts from what actually re-blesses on
-//RS /// `UPDATE_EXPECT=1`.
-//RS pub(crate) const BLESS_TARGETS: &[&str] = &[
-//RS     "cli",
-//RS     "cross",
-//RS     "diagnostic_snapshots",
-//RS     "diagnostics_coverage",
-//RS     "ice_report_codegen_rejection",
-//RS     "release_gates",
-//RS ];
-//RS 
-//RS /// `jet self devtools bless [target...] [--dry-run]` — runs
-//RS /// `UPDATE_EXPECT=1 cargo test --test <target>` for each named target (all of
-//RS /// `BLESS_TARGETS` when none is given). This is the one re-bless mechanism in
-//RS /// the repo (see each test file's own "bless with UPDATE_EXPECT=1" doc
-//RS /// comment) — `bless` just names and runs it so nobody has to remember the
-//RS /// env var or the target list. `--dry-run` prints the commands without
-//RS /// running them (never mutates a snapshot file).
-//RS ///
-//RS /// A real sweep also needs `UPDATE_EXPECT_REASON` in the environment (card
-//RS /// #2026): the snapshot harness refuses a blanket bless that does not name the
-//RS /// compiler change it records, because 6fd88282b rewrote 122 diagnostic
-//RS /// contracts with zero crate source changed. `Command` inherits the
-//RS /// environment, so the reason reaches every target through the same variable.
-//RS pub(crate) fn run_devtools_bless(args: &[&String]) {
-//RS     let mut dry_run = false;
-//RS     let mut requested: Vec<String> = Vec::new();
-//RS     for a in args {
-//RS         if a.as_str() == jet::CLI::DRY_RUN_FLAG {
-//RS             dry_run = true;
-//RS         } else {
-//RS             requested.push(a.to_string());
-//RS         }
-//RS     }
-//RS 
-//RS     let targets = match resolve_bless_targets(&requested) {
-//RS         Ok(t) => t,
-//RS         Err(unknown) => {
-//RS             crate::cli_error!("E2104", "unknown bless target(s): {}", unknown);
-//RS             eprintln!(
-//RS                 "usage: {} devtools bless [target...] [--dry-run]",
-//RS                 jet::Syntax::BINARY_NAME
-//RS             );
-//RS             eprintln!("known targets: {}", BLESS_TARGETS.join(", "));
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS     };
-//RS 
-//RS     if dry_run {
-//RS         for t in &targets {
-//RS             println!("would run: UPDATE_EXPECT=1 cargo test --test {}", t);
-//RS         }
-//RS         return;
-//RS     }
-//RS 
-//RS     let reason = std::env::var("UPDATE_EXPECT_REASON")
-//RS         .map(|value| value.trim().to_string())
-//RS         .unwrap_or_default();
-//RS     if reason.len() < 8 {
-//RS         crate::cli_error!(
-//RS             "E2104",
-//RS             "a blanket bless must name the compiler change it records"
-//RS         );
-//RS         eprintln!(
-//RS             "set the reason, then re-run:\n    UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" {} self devtools bless",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS         eprintln!(
-//RS             "to bless one reviewed fixture instead: JET_UI_FILTER=<fixture> UPDATE_EXPECT=<same fixture> cargo test --test diagnostic_snapshots"
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     println!("bless: reason recorded — {}", reason);
-//RS 
-//RS     let mut any_failed = false;
-//RS     for t in &targets {
-//RS         println!("bless: UPDATE_EXPECT=1 cargo test --test {}", t);
-//RS         match bless_command(t).status() {
-//RS             Ok(s) if s.success() => {}
-//RS             Ok(s) => {
-//RS                 any_failed = true;
-//RS                 eprintln!("bless: `{}` exited with {}", t, s);
-//RS             }
-//RS             Err(e) => {
-//RS                 any_failed = true;
-//RS                 eprintln!("bless: couldn't run `cargo test --test {}`: {}", t, e);
-//RS             }
-//RS         }
-//RS     }
-//RS     if any_failed {
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     println!(
-//RS         "bless: done ({} target{})",
-//RS         targets.len(),
-//RS         if targets.len() == 1 { "" } else { "s" }
-//RS     );
-//RS }
-//RS 
-//RS /// Resolve requested target names against `BLESS_TARGETS`; empty `requested`
-//RS /// means "all of them". `Err` carries the comma-joined unknown names.
-//RS pub(crate) fn resolve_bless_targets(requested: &[String]) -> Result<Vec<&'static str>, String> {
-//RS     if requested.is_empty() {
-//RS         return Ok(BLESS_TARGETS.to_vec());
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut unknown = Vec::new();
-//RS     for r in requested {
-//RS         match BLESS_TARGETS.iter().find(|k| **k == r.as_str()) {
-//RS             Some(t) => out.push(*t),
-//RS             None => unknown.push(r.clone()),
-//RS         }
-//RS     }
-//RS     if !unknown.is_empty() {
-//RS         return Err(unknown.join(", "));
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS /// Build (never spawns) the `UPDATE_EXPECT=1 cargo test --test <target>`
-//RS /// command for one bless target.
-//RS pub(crate) fn bless_command(target: &str) -> Command {
-//RS     let mut cmd = Command::new("cargo");
-//RS     cmd.env("UPDATE_EXPECT", "1");
-//RS     cmd.args(["test", "--test", target]);
-//RS     cmd
-//RS }
-//RS 
-//RS fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
-//RS     let text = fs::read_to_string(path).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't read `{}`: {}", path, e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let start = text
-//RS         .find(jet::Syntax::HIGHLIGHT_GENERATED_START)
-//RS         .unwrap_or_else(|| {
-//RS             crate::cli_error!(
-//RS                 "E2105",
-//RS                 "`{}` has no `{}` marker",
-//RS                 path,
-//RS                 jet::Syntax::HIGHLIGHT_GENERATED_START
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS     let prefix_start = text[..start].rfind('\n').map_or(0, |idx| idx + 1);
-//RS     let after_start = &text[start..];
-//RS     let end_rel = after_start
-//RS         .find(jet::Syntax::HIGHLIGHT_GENERATED_END)
-//RS         .unwrap_or_else(|| {
-//RS             crate::cli_error!(
-//RS                 "E2105",
-//RS                 "`{}` has no `{}` marker",
-//RS                 path,
-//RS                 jet::Syntax::HIGHLIGHT_GENERATED_END
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS     let end_marker = start + end_rel + jet::Syntax::HIGHLIGHT_GENERATED_END.len();
-//RS     let suffix_start = text[end_marker..]
-//RS         .find('\n')
-//RS         .map_or(text.len(), |idx| end_marker + idx + 1);
-//RS 
-//RS     let mut out = String::new();
-//RS     out.push_str(&text[..prefix_start]);
-//RS     out.push_str(fresh.trim_end());
-//RS     out.push('\n');
-//RS     out.push_str(&text[suffix_start..]);
-//RS     fs::write(path, out).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't write `{}`: {}", path, e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     // #1659 criterion 3 (round 2): the file is still written; `--quiet` only
-//RS     // mutes this per-file progress line (same rule as the summary line below).
-//RS     if !quiet {
-//RS         println!("wrote {}", path);
-//RS     }
-//RS }
-//RS 
-//RS /// `jet self doctor` — environment self-diagnosis with actionable fixes (D-DX2,
-//RS /// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
-//RS /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
-//RS /// problems is L2101.
-//RS pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode, cross_target: Option<&str>) {
-//RS     // E2-M15: main parses both `--target=<triple>` and `--target <triple>`
-//RS     // before dispatch, so Doctor receives the same effective target as build.
-//RS     let checks = jet::Doctor::run(jet::Doctor::Options {
-//RS         online,
-//RS         cross_target: cross_target.map(str::to_string),
-//RS     });
-//RS     let color = mode.color_stderr_for(std::io::stdout().is_terminal());
-//RS 
-//RS     if apply {
-//RS         let fixed = jet::Doctor::apply_fixes(&checks);
-//RS         if fixed.is_empty() {
-//RS             println!("doctor: nothing to auto-fix");
-//RS         } else {
-//RS             for f in &fixed {
-//RS                 println!("fixed: {}", f);
-//RS             }
-//RS         }
-//RS         // Re-run so the report reflects the world after fixes.
-//RS         return run_doctor(online, false, mode, cross_target);
-//RS     }
-//RS 
-//RS     use jet::Doctor::Health;
-//RS     let bold = |s: &str| {
-//RS         if color {
-//RS             format!("\x1b[1m{}\x1b[0m", s)
-//RS         } else {
-//RS             s.to_string()
-//RS         }
-//RS     };
-//RS     let green = |s: &str| {
-//RS         if color {
-//RS             format!("\x1b[32m{}\x1b[0m", s)
-//RS         } else {
-//RS             s.to_string()
-//RS         }
-//RS     };
-//RS     let yellow = |s: &str| {
-//RS         if color {
-//RS             format!("\x1b[33m{}\x1b[0m", s)
-//RS         } else {
-//RS             s.to_string()
-//RS         }
-//RS     };
-//RS 
-//RS     println!("{}", bold(&format!("{} doctor", jet::Syntax::BINARY_NAME)));
-//RS     let mut last_section = "";
-//RS     for c in &checks {
-//RS         if c.section != last_section {
-//RS             println!();
-//RS             println!("{}", bold(c.section));
-//RS             last_section = c.section;
-//RS         }
-//RS         let (mark, label) = match c.health {
-//RS             Health::Ok => (green("ok  "), c.label.clone()),
-//RS             Health::Note => ("note".to_string(), c.label.clone()),
-//RS             Health::Problem => (yellow("warn"), c.label.clone()),
-//RS         };
-//RS         println!("  [{}] {}: {}", mark, label, c.detail);
-//RS         if let Some(fix) = &c.fix {
-//RS             println!("        Fix: {}", fix);
-//RS             if c.auto_fixable {
-//RS                 println!(
-//RS                     "        (auto-fixable: run `{} doctor --fix`)",
-//RS                     jet::Syntax::BINARY_NAME
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     println!();
-//RS     if jet::Doctor::has_problem(&checks) {
-//RS         println!("Warning [L2101] (doctor_advisory): Toolchain checks need attention");
-//RS         println!(" Why: One or more required tools or paths are unavailable");
-//RS         println!(" Fix: Follow the fixes above, then run `jet self doctor` again");
-//RS         println!(" {}", jet::Explain::pointer_line("L2101", color));
-//RS         println!("More: jet-lang.dev/e/L2101");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     } else {
-//RS         println!("everything looks good.");
-//RS     }
-//RS }
-//RS 
-//RS /// `jet explain --web-graph <file>` — print the sema-known application graph.
-//RS pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
-//RS     let mut file: Option<&str> = None;
-//RS     for arg in args {
-//RS         if arg.starts_with('-') {
-//RS             continue;
-//RS         }
-//RS         file = Some(arg.as_str());
-//RS         break;
-//RS     }
-//RS     let Some(path) = file else {
-//RS         eprintln!(
-//RS             "usage: {} explain --web-graph <file.{}>",
-//RS             jet::Syntax::BINARY_NAME,
-//RS             jet::Syntax::FILE_EXT
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     };
-//RS     let abs = if Path::new(path).is_absolute() {
-//RS         PathBuf::from(path)
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .unwrap_or_else(|_| PathBuf::from("."))
-//RS             .join(path)
-//RS     };
-//RS     let entry = abs.display().to_string();
-//RS     let (diags, _bundle, facts) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
-//RS     let Some(graph) = facts.web_app.as_ref() else {
-//RS         if diags
-//RS             .iter()
-//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error)
-//RS         {
-//RS             for d in &diags {
-//RS                 eprintln!(
-//RS                     "{}",
-//RS                     jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
-//RS                 );
-//RS             }
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         if mode.json {
-//RS             println!(
-//RS                 "{}",
-//RS                 StatusEnvelope::new("inspect.web", true)
-//RS                     .with_field("web_app", StatusValue::Null)
-//RS                     .json()
-//RS             );
-//RS         } else {
-//RS             println!("(none)");
-//RS         }
-//RS         return;
-//RS     };
-//RS     let empty = graph.entry_file.is_empty()
-//RS         && graph.routes.is_empty()
-//RS         && graph.actions.is_empty()
-//RS         && graph.mounts.is_empty()
-//RS         && graph.routes_from.is_empty();
-//RS     if empty {
-//RS         if diags
-//RS             .iter()
-//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error)
-//RS         {
-//RS             for d in &diags {
-//RS                 eprintln!(
-//RS                     "{}",
-//RS                     jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
-//RS                 );
-//RS             }
-//RS         }
-//RS         if mode.json {
-//RS             println!(
-//RS                 "{}",
-//RS                 StatusEnvelope::new("inspect.web", true)
-//RS                     .with_field("web_app", StatusValue::Null)
-//RS                     .json()
-//RS             );
-//RS         } else {
-//RS             println!("(none)");
-//RS         }
-//RS         return;
-//RS     }
-//RS     if mode.json {
-//RS         let web_app =
-//RS             StatusValue::parse(&graph.to_json()).expect("web graph projection must be valid JSON");
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.web", true)
-//RS                 .with_field("web_app", web_app)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         for line in graph.explain_lines() {
-//RS             println!("{line}");
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `jet explain <CODE|FACT> [file]` — print a diagnostic essay or one complete
-//RS /// build-fact writer chain. `verbose` adds a syntax token's registry name and
-//RS /// owning decision after its plain-words explanation.
-//RS pub(crate) fn run_explain(
-//RS     code: Option<&str>,
-//RS     fact_file: Option<&str>,
-//RS     mode: OutputMode,
-//RS     verbose: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) {
-//RS     let code = match code {
-//RS         Some(c) => c,
-//RS         None => {
-//RS             eprintln!(
-//RS                 "usage: {} explain <CODE|FACT> [file]\n       {} explain marker <file>:<line> <policy-key>",
-//RS                 jet::Syntax::BINARY_NAME,
-//RS                 jet::Syntax::BINARY_NAME
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS     };
-//RS     if let Some(name) = jet::Explain::build_fact_name(code) {
-//RS         run_explain_fact(&name, fact_file, mode, profile, setting_overrides);
-//RS         return;
-//RS     }
-//RS     if let Some(key) = jet::Policy::PolicyKey::parse(code.trim_start_matches('@')) {
-//RS         if fact_file.is_some() {
-//RS             run_explain_policy(key, fact_file, mode);
-//RS             return;
-//RS         }
-//RS     }
-//RS     match jet::Explain::lookup(code) {
-//RS         Some(ex) => {
-//RS             print_explanation(&ex, mode);
-//RS             if verbose && !mode.json {
-//RS                 if let Some(internals) = jet::Explain::syntax_internals(code) {
-//RS                     print!("\n{internals}");
-//RS                 }
-//RS             }
-//RS         }
-//RS         None => {
-//RS             if jet::Explain::is_syntax_query(code) {
-//RS                 let closest = jet::Explain::nearest_syntax(code)
-//RS                     .unwrap_or_else(|| "a registered syntax token".to_string());
-//RS                 // No typed edit: E2106 is an argv `explain` query, not a Jet source diagnostic.
-//RS                 crate::emit_cli_row(
-//RS                     "E2106",
-//RS                     &[("token", code), ("closest", closest.as_str())],
-//RS                     mode.json,
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             crate::cli_error!(@fix "E2104", format!("no diagnostic code `{}` exists", code), format!("run a command that reports an error to see its code, e.g. `{} check file.{}`", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS /// `jet explain --cost <file>` — print the typed TIR cost projection.  This
-//RS /// deliberately reports both semantic remainders and optimizer-proven
-//RS /// removals; the latter are evidence for why no lint is emitted.
-//RS pub(crate) fn run_explain_cost(
-//RS     file: Option<&str>,
-//RS     mode: OutputMode,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) {
-//RS     let Some(file) = file else {
-//RS         eprintln!(
-//RS             "usage: {} explain --cost <file.{}>",
-//RS             jet::Syntax::BINARY_NAME,
-//RS             jet::Syntax::FILE_EXT
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     };
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(src) => src,
-//RS         Err(_) => {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let projection = match crate::CmdInspect::check_projection_for_effects(
-//RS         Path::new(file),
-//RS         profile,
-//RS         setting_overrides,
-//RS     ) {
-//RS         Ok(projection) => projection,
-//RS         Err(diagnostics) => {
-//RS             let errors: Vec<_> = diagnostics
-//RS                 .iter()
-//RS                 .filter(|diagnostic| {
-//RS                     matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
-//RS                 })
-//RS                 .cloned()
-//RS                 .collect();
-//RS             if !errors.is_empty() {
-//RS                 report_problems(mode, file, &src, &errors);
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             crate::cli_error!("E2104", "cost projection could not check `{}`", file);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
-//RS         Ok(report) => report,
-//RS         Err(error) => exit_cost_projection_error(file, &error),
-//RS     };
-//RS     if mode.json {
-//RS         let sites = StatusValue::array(report.sites.iter().map(|site| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("function", site.function.clone())
-//RS                     .with("line", source_line(&src, site.span))
-//RS                     .with("kind", site.kind.label())
-//RS                     .with("state", cost_state_label(site.state))
-//RS                     .with("loop_depth", site.loop_depth)
-//RS                     .with("tier", COST_TIER),
-//RS             )
-//RS         }));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("explain.cost", true)
-//RS                 .with_field("file", file)
-//RS                 .with_field("sites", sites)
-//RS                 .json()
-//RS         );
-//RS         return;
-//RS     }
-//RS     if report.sites.is_empty() {
-//RS         println!("cost: `{}` has no typed cost sites", file);
-//RS         return;
-//RS     }
-//RS     for site in report.sites {
-//RS         println!(
-//RS             "{}:{} fn {} — {} — {} (loop depth {}; tier={})",
-//RS             file,
-//RS             source_line(&src, site.span),
-//RS             site.function,
-//RS             site.kind.label(),
-//RS             cost_state_label(site.state),
-//RS             site.loop_depth,
-//RS             COST_TIER,
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS const COST_TIER: &str = "shared-tir";
-//RS 
-//RS pub(crate) fn exit_cost_projection_error(
-//RS     file: &str,
-//RS     error: &jet::Codegen::TIR::TCostReportError,
-//RS ) -> ! {
-//RS     let fix = match error {
-//RS         jet::Codegen::TIR::TCostReportError::Incomplete { surfaces } => format!(
-//RS             "report the missing checked specialization for {} with this source file; its cost cannot be proved until the compiler lowers that specialization",
-//RS             surfaces.join("; ")
-//RS         ),
-//RS         jet::Codegen::TIR::TCostReportError::Lowering { .. } => {
-//RS             "report this checked-TIR lowering failure with the source file".to_string()
-//RS         }
-//RS     };
-//RS     crate::cli_error!(
-//RS         @full "E2104",
-//RS         format!("cost projection for `{file}` failed"),
-//RS         error.message(),
-//RS         fix
-//RS     );
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS fn source_line(source: &str, span: jet::Diagnostics::Span) -> usize {
-//RS     source
-//RS         .get(..span.start.min(source.len()))
-//RS         .map_or(1, |prefix| {
-//RS             prefix.bytes().filter(|byte| *byte == b'\n').count() + 1
-//RS         })
-//RS }
-//RS 
-//RS fn cost_state_label(state: jet::Codegen::TIR::TCostState) -> &'static str {
-//RS     match state {
-//RS         jet::Codegen::TIR::TCostState::SemanticRemainder => "semantic remainder",
-//RS         jet::Codegen::TIR::TCostState::OptimizerRemoved => "optimizer-proven removed",
-//RS     }
-//RS }
-//RS 
-//RS fn explain_source_file(fact_file: Option<&str>) -> PathBuf {
-//RS     fact_file
-//RS         .map(PathBuf::from)
-//RS         .or_else(|| {
-//RS             let cwd = std::env::current_dir().ok()?;
-//RS             let mode = OutputMode {
-//RS                 json: false,
-//RS                 color: ColorChoice::Never,
-//RS                 quiet: false,
-//RS             };
-//RS             crate::resolve_bare_entry("run", &cwd, None, mode, false).map(|entry| entry.path)
-//RS         })
-//RS         .unwrap_or_else(|| {
-//RS             crate::cli_error!(
-//RS                 "E2104",
-//RS                 "a source file is required to explain this build fact"
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         })
-//RS }
-//RS 
-//RS fn explain_bundle(
-//RS     fact_file: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> jet_foundation::Facts::BuildFactSnapshot {
-//RS     let file = explain_source_file(fact_file);
-//RS     jet::Driver::query_build_facts(file.to_string_lossy().as_ref(), profile, setting_overrides)
-//RS         .unwrap_or_else(|diags| {
-//RS             for diagnostic in diags {
-//RS                 eprintln!("{}", diagnostic.what);
-//RS             }
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         })
-//RS }
-//RS 
-//RS fn explain_policy_bundle(fact_file: Option<&str>) -> jet::AST::ProgramBundle {
-//RS     let file = explain_source_file(fact_file);
-//RS     jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
-//RS         for diagnostic in diags {
-//RS             eprintln!("{}", diagnostic.what);
-//RS         }
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     })
-//RS }
-//RS 
-//RS fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) {
-//RS     if mode.json {
-//RS         let what = explanation
-//RS             .what
-//RS             .as_deref()
-//RS             .unwrap_or(explanation.meaning.as_str());
-//RS         let optional = |value: Option<&String>| {
-//RS             value
-//RS                 .map(|value| StatusValue::from(value.clone()))
-//RS                 .unwrap_or(StatusValue::Null)
-//RS         };
-//RS         let fields = StatusFields::new()
-//RS             .with("code", explanation.code.clone())
-//RS             .with("stage", explanation.stage.clone())
-//RS             .with("what", what)
-//RS             .with("why", optional(explanation.why.as_ref()))
-//RS             .with("fix", optional(explanation.fix.as_ref()))
-//RS             .with("example", optional(explanation.example.as_ref()));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("explain", true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS         return;
-//RS     }
-//RS     let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
-//RS     print!("{}", jet::Explain::render(explanation, color));
-//RS }
-//RS 
-//RS fn run_explain_fact(
-//RS     name: &str,
-//RS     fact_file: Option<&str>,
-//RS     mode: OutputMode,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) {
-//RS     let build_facts = explain_bundle(fact_file, profile, setting_overrides);
-//RS     let Some(fact) = build_facts.contribution(name) else {
-//RS         if let Some(key) = name.strip_prefix("Build.Settings.") {
-//RS             crate::cli_error!(@full "E0302", format!("`build.settings.{key}` is undeclared"), "settings are declared in the package manifest", format!("add `{key}: Type = default` to `package.jet`"));
-//RS         } else {
-//RS             crate::cli_error!("E2104", "the selected build has no `{name}` fact");
-//RS         }
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone())
-//RS     else {
-//RS         crate::cli_error!(
-//RS             @full "E3521",
-//RS             "the build fact contribution chain could not be resolved",
-//RS             "the selected fact writers must pass the shared contribution law",
-//RS             "remove the conflicting writer or choose one explicit contribution"
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     print_explanation(&explanation, mode);
-//RS }
-//RS 
-//RS fn run_explain_policy(key: jet::Policy::PolicyKey, fact_file: Option<&str>, mode: OutputMode) {
-//RS     let bundle = explain_policy_bundle(fact_file);
-//RS     let declarations = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .flat_map(|module| module.policy_declarations.iter())
-//RS         .filter(|declaration| declaration.key == key)
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     let Some(explanation) = jet::Explain::lookup_policy(key, declarations) else {
-//RS         crate::cli_error!(@full "E2104", format!("policy `{}` has no effective declaration", key.name()), "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     print_explanation(&explanation, mode);
-//RS }
-//RS 
-//RS /*
-//RS     The settings path deliberately has no separate renderer. `run_explain_fact`
-//RS     reads the resolved snapshot and sends every build fact through
-//RS     `Policy::explain`, so settings, fixed facts, and policy explanations keep
-//RS     one writer per line and one effective marker.
-//RS */
-//RS 
-//RS /// D-MARK-SCOPE1: `jet explain marker <file>:<line> <policy-key>`.
-//RS pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: OutputMode) {
-//RS     let (Some(site), Some(key)) = (site, key) else {
-//RS         eprintln!(
-//RS             "usage: {} explain marker <file>:<line> <policy-key>",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     };
-//RS     let Some((file, line_text)) = site.rsplit_once(':') else {
-//RS         crate::cli_error!("E2104", "marker site must be `<file>:<line>`");
-//RS         exit(ExitCodes::USAGE);
-//RS     };
-//RS     let line = line_text
-//RS         .parse::<usize>()
-//RS         .ok()
-//RS         .filter(|line| *line > 0)
-//RS         .unwrap_or_else(|| {
-//RS             crate::cli_error!("E2104", "marker line must be a positive number");
-//RS             exit(ExitCodes::USAGE)
-//RS         });
-//RS     let Some(policy_key) = jet::Policy::PolicyKey::parse(key) else {
-//RS         crate::cli_error!("E2104", "`{key}` is not a registered scoped policy");
-//RS         exit(ExitCodes::USER_ERROR)
-//RS     };
-//RS     let bundle = jet::Loader::load_entry(file).unwrap_or_else(|diags| {
-//RS         for diag in diags {
-//RS             eprintln!("{}", diag.what);
-//RS         }
-//RS         exit(ExitCodes::USER_ERROR)
-//RS     });
-//RS     let module = &bundle.modules[0];
-//RS     let offset = if line == 1 {
-//RS         0
-//RS     } else {
-//RS         module
-//RS             .source
-//RS             .match_indices('\n')
-//RS             .nth(line - 2)
-//RS             .map(|(at, _)| at + 1)
-//RS             .unwrap_or(module.source.len())
-//RS     };
-//RS     let declarations = module
-//RS         .policy_declarations
-//RS         .iter()
-//RS         .filter(|declaration| match declaration.scope {
-//RS             jet::Policy::PolicyScope::Organization
-//RS             | jet::Policy::PolicyScope::Package
-//RS             | jet::Policy::PolicyScope::Module => true,
-//RS             jet::Policy::PolicyScope::Function | jet::Policy::PolicyScope::Block => declaration
-//RS                 .target
-//RS                 .is_some_and(|target| target.start <= offset && offset <= target.end),
-//RS         })
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     let Some(explanation) = jet::Explain::lookup_policy(policy_key, declarations) else {
-//RS         crate::cli_error!("E2104", "`{key}` has no effective declaration at {site}");
-//RS         exit(ExitCodes::USER_ERROR)
-//RS     };
-//RS     print_explanation(&explanation, mode);
-//RS }
-//RS 
-//RS /// `jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
-//RS ///
-//RS /// Generates a `#Bindgen module c.<lib>.__bindgen__` cache from a C header,
-//RS /// using the same native std-only backend the compiler invokes on a cache miss.
-//RS /// Parses C function prototypes over the bindable type subset; skips and reports
-//RS /// what it cannot map (I3). An opaque handle without a close contract is
-//RS /// reported as E3208 with the handle name so the caller can supply a typed
-//RS /// overlay. E3208 also fires when the header is unreadable or has no bindable
-//RS /// prototypes — use `#Import module c.<lib>` for those declarations.
-//RS pub(crate) fn run_bind(args: &[&String]) {
-//RS     if matches!(
-//RS         args.first().map(|arg| arg.as_str()),
-//RS         Some("json" | "csv" | "sql" | "xml" | "proto")
-//RS     ) {
-//RS         let format = args[0].as_str();
-//RS         run_data_bind(format, &args[1..]);
-//RS         return;
-//RS     }
-//RS     if binding_plan_command(args) {
-//RS         run_binding_plan_command(args);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT)
-//RS     {
-//RS         run_cpp_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::COM_MODULE_ROOT)
-//RS     {
-//RS         run_com_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::COBOL_MODULE_ROOT)
-//RS     {
-//RS         run_cobol_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::PERL_MODULE_ROOT)
-//RS     {
-//RS         run_perl_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::RUBY_MODULE_ROOT)
-//RS     {
-//RS         run_ruby_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::PHP_MODULE_ROOT)
-//RS     {
-//RS         run_php_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::R_MODULE_ROOT)
-//RS     {
-//RS         run_r_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::PY_MODULE_ROOT)
-//RS     {
-//RS         run_python_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::JS_MODULE_ROOT)
-//RS     {
-//RS         run_javascript_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::OCTAVE_MODULE_ROOT)
-//RS     {
-//RS         run_octave_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::PWSH_MODULE_ROOT)
-//RS     {
-//RS         run_powershell_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::DART_MODULE_ROOT)
-//RS     {
-//RS         run_dart_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::PASCAL_MODULE_ROOT)
-//RS     {
-//RS         run_pascal_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::ADA_MODULE_ROOT)
-//RS     {
-//RS         run_ada_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::TCL_MODULE_ROOT)
-//RS     {
-//RS         run_tcl_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::LUA_MODULE_ROOT)
-//RS     {
-//RS         run_lua_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::JAVA_MODULE_ROOT)
-//RS     {
-//RS         run_java_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::CS_MODULE_ROOT)
-//RS     {
-//RS         run_dotnet_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::GO_MODULE_ROOT)
-//RS     {
-//RS         run_go_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args
-//RS         .first()
-//RS         .is_some_and(|arg| arg.as_str() == jet::Syntax::FORTRAN_MODULE_ROOT)
-//RS     {
-//RS         run_fortran_bind(&args[1..]);
-//RS         return;
-//RS     }
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         eprintln!(
-//RS             "usage: {} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS         eprintln!(
-//RS             "       {} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS         eprintln!();
-//RS         eprintln!("Generate a C binding cache from a header (S59). The output is");
-//RS         eprintln!("a `#Bindgen module c.<lib>.__bindgen__` file, by default written");
-//RS         eprintln!("to .jet/bindings/c/<lib>.jet. The compiler also runs this");
-//RS         eprintln!("automatically on a cache miss; `jet inspect bind` is the manual refresh.");
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         });
-//RS     }
-//RS 
-//RS     let header = args[0].as_str();
-//RS     let mut pkg: Option<String> = None;
-//RS     let mut out: Option<String> = None;
-//RS     let mut overlay_path: Option<String> = None;
-//RS     let mut links: Vec<String> = Vec::new();
-//RS     let mut quiet = false;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--pkg" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`inspect bind` requires a value after `--pkg`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 pkg = Some(value.to_string());
-//RS                 i += 2;
-//RS             }
-//RS             "--overlay" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`inspect bind` requires a value after `--overlay`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 overlay_path = Some(value.to_string());
-//RS                 i += 2;
-//RS             }
-//RS             "--link" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`inspect bind` requires a value after `--link`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 links.push(value.to_string());
-//RS                 i += 2;
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!(
-//RS                         "E2102",
-//RS                         "`inspect bind` requires a value after `{}`",
-//RS                         args[i]
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 out = Some(value.to_string());
-//RS                 i += 2;
-//RS             }
-//RS             // #1659 c3: --quiet suppresses the `bound …` status line; the
-//RS             // skipped-declaration notice stays (it is a warning, not status).
-//RS             "--quiet" => {
-//RS                 quiet = true;
-//RS                 i += 1;
-//RS             }
-//RS             other => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind` flag `{}`", other);
-//RS                 eprintln!(
-//RS                     "usage: {} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]",
-//RS                     jet::Syntax::BINARY_NAME
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // Link key: --pkg if given, else the header basename (header→lib rule).
-//RS     let raw_lib = pkg.unwrap_or_else(|| {
-//RS         let base = header.rsplit('/').next().unwrap_or(header);
-//RS         base.strip_suffix(".h").unwrap_or(base).to_string()
-//RS     });
-//RS     let lib =
-//RS         jet::Syntax::sanitize_generated_name(&raw_lib, jet::Syntax::NameCase::Snake, "library");
-//RS 
-//RS     let header_src = match std::fs::read_to_string(header) {
-//RS         Ok(s) => s,
-//RS         Err(e) => bind_e3208(
-//RS             format!("Could not generate bindings from `{header}`."),
-//RS             format!("the header file could not be read ({e})."),
-//RS             "check the path, or install the library's dev headers.".to_string(),
-//RS         ),
-//RS     };
-//RS     let mut handle_overlay = match overlay_path.as_deref() {
-//RS         Some(path) => match read_c_bind_overlay(path, &lib) {
-//RS             Ok(overlay) => overlay,
-//RS             Err(reason) => bind_e3208(
-//RS                 format!("Could not read C binding overlay `{path}`."),
-//RS                 format!("{reason}."),
-//RS                 format!("write `#Import module c.{lib} {{ … }}` in the overlay file"),
-//RS             ),
-//RS         },
-//RS         None => jet::CBind::HandleOverlay::default(),
-//RS     };
-//RS     for link in links {
-//RS         if !handle_overlay.links.contains(&link) {
-//RS             handle_overlay.links.push(link);
-//RS         }
-//RS     }
-//RS 
-//RS     // E2-M14 (owner 2026-06-18, supersedes D-CBIND3=B): native std-only backend.
-//RS     let result = match jet::CBind::generate_with_overlay(&header_src, &lib, &handle_overlay) {
-//RS         Ok(r) => r,
-//RS         Err(why) => bind_e3208(
-//RS             format!("Could not generate bindings from `{header}`."),
-//RS             format!("{why}."),
-//RS             format!("hand-write `#Import module c.{lib} {{ … }}` for the symbols you need."),
-//RS         ),
-//RS     };
-//RS     if !result.handle_skipped.is_empty() {
-//RS         let details = result
-//RS             .handle_skipped
-//RS             .iter()
-//RS             .map(|(handle, reason)| format!("`{handle}`: {reason}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join("; ");
-//RS         bind_e3208(
-//RS             format!("Could not generate bindings from `{header}`."),
-//RS             format!("opaque handle bindings were unresolved: {details}."),
-//RS             format!(
-//RS                 "add `#Close(close_function)` to `{}` in the overlay",
-//RS                 overlay_path.as_deref().unwrap_or("<overlay>")
-//RS             ),
-//RS         );
-//RS     }
-//RS 
-//RS     // Default cache path follows D-CBIND7 under the selected project root.
-//RS     let project_root = selected_project_root_for_path(header);
-//RS     let out_path = out.unwrap_or_else(|| default_binding_output(header, "c", &lib));
-//RS     if let Some(parent) = std::path::Path::new(&out_path).parent() {
-//RS         if let Err(e) = std::fs::create_dir_all(parent) {
-//RS             crate::cli_error!("E2105", "could not create `{}`: {}", parent.display(), e);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
-//RS         crate::cli_error!("E2105", "could not write `{}`: {}", out_path, e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     // Phase 3 (D-CBIND2): write hash and typed handle/link metadata sidecars
-//RS     // alongside the cache so compiler identities retain binding provenance.
-//RS     // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
-//RS     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
-//RS     if let Err(error) = jet::CFFI::write_c_binding_metadata(
-//RS         std::path::Path::new(&out_path),
-//RS         &result.handles,
-//RS         &result.link_closure,
-//RS     ) {
-//RS         bind_e3208(
-//RS             format!("Could not publish C binding metadata for `{header}`."),
-//RS             format!("{error}."),
-//RS             "rerun `jet inspect bind` after checking the output path".to_string(),
-//RS         );
-//RS     }
-//RS     let header_path = std::fs::canonicalize(header).unwrap_or_else(|error| {
-//RS         bind_e3208(
-//RS             format!("Could not publish C binding provenance for `{header}`."),
-//RS             format!("the header path could not be resolved ({error})."),
-//RS             "check the header path and rerun `jet inspect bind`".to_string(),
-//RS         )
-//RS     });
-//RS     if let Err(error) = jet::CFFI::write_c_binding_provenance(
-//RS         &project_root,
-//RS         &lib,
-//RS         &header_path,
-//RS         std::path::Path::new(&out_path),
-//RS     ) {
-//RS         bind_e3208(
-//RS             format!("Could not publish C binding provenance for `{header}`."),
-//RS             format!("{error}."),
-//RS             "check the project and local library paths, then rerun `jet inspect bind`".to_string(),
-//RS         );
-//RS     }
-//RS 
-//RS     if !quiet {
-//RS         println!(
-//RS             "bound {} function{} from `{}` → {}",
-//RS             result.bound.len(),
-//RS             if result.bound.len() == 1 { "" } else { "s" },
-//RS             header,
-//RS             out_path
-//RS         );
-//RS     }
-//RS     if !result.skipped.is_empty() {
-//RS         println!(
-//RS             "skipped {} declaration{} outside the bindable subset (hand-write `#Import` for these):",
-//RS             result.skipped.len(),
-//RS             if result.skipped.len() == 1 { "" } else { "s" }
-//RS         );
-//RS         for (name, why) in &result.skipped {
-//RS             println!("  - {} — {}", name, why);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn binding_plan_command(args: &[&String]) -> bool {
-//RS     args.iter().any(|arg| {
-//RS         matches!(
-//RS             arg.as_str(),
-//RS             "--shape" | "--freeze" | "--policy" | "--accept" | "--update" | "--explain"
-//RS         )
-//RS     }) || args.first().is_some_and(|arg| arg.as_str() == "--policy")
-//RS }
-//RS 
-//RS fn run_binding_plan_command(args: &[&String]) {
-//RS     let mut name: Option<String> = None;
-//RS     let mut shape = jet::Bindgen::BindingShape::Automatic;
-//RS     let mut policy: Option<jet::Bindgen::BindingPolicy> = None;
-//RS     let mut explain = false;
-//RS     let mut freeze = false;
-//RS     let mut update = false;
-//RS     let mut preview = false;
-//RS     let mut accept: Option<String> = None;
-//RS     let mut i = 0;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--shape" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`bind` requires a value after `--shape`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 shape = jet::Bindgen::BindingShape::parse(value).unwrap_or_else(|error| {
-//RS                     crate::cli_error!("E2102", "{error}");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 });
-//RS                 i += 2;
-//RS             }
-//RS             "--policy" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`bind` requires a value after `--policy`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 policy = Some(
-//RS                     jet::Bindgen::BindingPolicy::parse(value).unwrap_or_else(|error| {
-//RS                         crate::cli_error!("E2102", "{error}");
-//RS                         exit(ExitCodes::USAGE);
-//RS                     }),
-//RS                 );
-//RS                 i += 2;
-//RS             }
-//RS             "--explain" => {
-//RS                 explain = true;
-//RS                 i += 1;
-//RS             }
-//RS             "--freeze" => {
-//RS                 freeze = true;
-//RS                 i += 1;
-//RS             }
-//RS             "--update" => {
-//RS                 update = true;
-//RS                 i += 1;
-//RS             }
-//RS             "--preview" => {
-//RS                 preview = true;
-//RS                 i += 1;
-//RS             }
-//RS             "--accept" => {
-//RS                 let Some(value) = args.get(i + 1) else {
-//RS                     crate::cli_error!("E2102", "`bind` requires a value after `--accept`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 accept = Some(value.to_string());
-//RS                 update = true;
-//RS                 i += 2;
-//RS             }
-//RS             arg if arg.starts_with('-') => {
-//RS                 crate::cli_error!("E2102", "unknown `bind` flag `{arg}`");
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             value => {
-//RS                 if name.replace(value.to_string()).is_some() {
-//RS                     crate::cli_error!("E2102", "`bind` accepts one binding name");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 i += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let package_path = Path::new("package.jet");
-//RS     let project_root = selected_project_root_for_path("package.jet");
-//RS     if let Some(policy) = policy {
-//RS         if name.is_none() {
-//RS             if let Err(error) =
-//RS                 update_binding_package_config(package_path, None, None, Some(policy))
-//RS             {
-//RS                 crate::cli_error!("E2105", "{error}");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             println!("binding policy: {policy}");
-//RS             return;
-//RS         }
-//RS     }
-//RS     let Some(name) = name else {
-//RS         crate::cli_error!(
-//RS             "E2102",
-//RS             "usage: jet bind <name> [--shape automatic|native] [--freeze]"
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     };
-//RS 
-//RS     let Some(header) = binding_header_path(&project_root, &name) else {
-//RS         if explain {
-//RS             if let Some(record) = read_binding_plan(&project_root, &name) {
-//RS                 print!("{record}");
-//RS                 return;
-//RS             }
-//RS         }
-//RS         crate::cli_error!(
-//RS             "E3208",
-//RS             "binding `{name}` has no pinned foreign header; pass an exact header through the project binding record"
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     let header_source = fs::read_to_string(&header).unwrap_or_else(|error| {
-//RS         crate::cli_error!(
-//RS             "E3208",
-//RS             "could not read binding header `{}`: {error}",
-//RS             header.display()
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let lib = jet::Syntax::sanitize_generated_name(&name, jet::Syntax::NameCase::Snake, "library");
-//RS     let generated = jet::CBind::generate_with_overlay(
-//RS         &header_source,
-//RS         &lib,
-//RS         &jet::CBind::HandleOverlay::default(),
-//RS     )
-//RS     .unwrap_or_else(|error| {
-//RS         crate::cli_error!("E3208", "could not generate binding `{name}`: {error}");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let contract = annotate_binding_contract(generated.boundary, &header_source, &header)
-//RS         .unwrap_or_else(|error| {
-//RS             crate::cli_error!(
-//RS                 "E3208",
-//RS                 "binding `{name}` has invalid canonical evidence: {error}"
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS     let operation = binding_operation_from_header(&name, &header_source);
-//RS     let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
-//RS     let inputs = jet::Bindgen::BindingInputs::new(
-//RS         target,
-//RS         "jet-bindgen-v1",
-//RS         format!(
-//RS             "{}:sha256-{}",
-//RS             header.display(),
-//RS             jet::SHA256::sha256_hex(header_source.as_bytes())
-//RS         ),
-//RS     )
-//RS     .with_dependencies(std::iter::empty::<String>())
-//RS     .with_compiler_flags(std::iter::empty::<String>());
-//RS     let plan = jet::Bindgen::BindingPlan::resolve(&contract, operation, inputs, shape)
-//RS         .unwrap_or_else(|error| {
-//RS             crate::cli_error!("E3208", "{error}");
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS     if let Some(recorded) = read_binding_plan(&project_root, &name) {
-//RS         if policy == Some(jet::Bindgen::BindingPolicy::Frozen) || freeze {
-//RS             if let Err(error) = plan.frozen_drift(recorded_digest(&recorded)) {
-//RS                 crate::cli_error!("E3208", "{error}");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS     if explain {
-//RS         print!("{}", plan.explain());
-//RS         return;
-//RS     }
-//RS     if preview {
-//RS         print!("{}", plan.explain());
-//RS         println!("preview: no package, lock, or generated facade files were written");
-//RS         return;
-//RS     }
-//RS     if let Some(expected) = accept {
-//RS         if expected != plan.candidate_digest() {
-//RS             crate::cli_error!(
-//RS                 "E3208",
-//RS                 "`--accept` digest `{expected}` does not match candidate `{}`",
-//RS                 plan.candidate_digest()
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     } else if update && !freeze && policy != Some(jet::Bindgen::BindingPolicy::Frozen) {
-//RS         // `--update` without `--accept` is intentionally a preview-like refusal:
-//RS         // accepting a new identity must name the exact candidate digest.
-//RS         crate::cli_error!(
-//RS             "E3208",
-//RS             "`--update` requires `--preview` or `--accept {}`",
-//RS             plan.candidate_digest()
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let mut selected_plans = BTreeMap::new();
-//RS     selected_plans.insert(name.clone(), plan.clone());
-//RS     let projected = jet::CBind::generate_with_contract_and_plans(
-//RS         &header_source,
-//RS         &lib,
-//RS         &jet::CBind::HandleOverlay::default(),
-//RS         contract,
-//RS         &selected_plans,
-//RS     )
-//RS     .unwrap_or_else(|error| {
-//RS         crate::cli_error!(
-//RS             "E3208",
-//RS             "could not materialize binding facade `{name}`: {error}"
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     if let Err(error) = write_binding_cache(&project_root, &name, &projected.source) {
-//RS         crate::cli_error!("E2105", "{error}");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     if let Err(error) = write_binding_plan(&project_root, &name, &plan) {
-//RS         crate::cli_error!("E2105", "{error}");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     if let Err(error) = update_binding_package_config(
-//RS         package_path,
-//RS         Some(&name),
-//RS         Some(shape),
-//RS         policy.or_else(|| freeze.then_some(jet::Bindgen::BindingPolicy::Frozen)),
-//RS     ) {
-//RS         crate::cli_error!("E2105", "{error}");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     if let Err(error) = write_binding_facade(&project_root, &name, &plan) {
-//RS         crate::cli_error!("E2105", "{error}");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     println!("binding plan {} ({})", name, plan.candidate_digest());
-//RS }
-//RS 
-//RS fn binding_header_path(project_root: &Path, name: &str) -> Option<PathBuf> {
-//RS     let candidates = [
-//RS         PathBuf::from(name),
-//RS         PathBuf::from(format!("{name}.h")),
-//RS         PathBuf::from(format!("include/{name}.h")),
-//RS         PathBuf::from(format!("ffi/{name}.h")),
-//RS         project_root.join(".jet").join("ffi").join(format!("{name}.h")),
-//RS     ];
-//RS     candidates.into_iter().find(|path| path.is_file())
-//RS }
-//RS 
-//RS fn marker_value(source: &str, marker: &str) -> Option<String> {
-//RS     source.lines().find_map(|line| {
-//RS         let value = line.split_once(marker)?.1.trim();
-//RS         let value = value.strip_prefix(':').unwrap_or(value).trim();
-//RS         (!value.is_empty()).then(|| value.trim_matches('"').to_string())
-//RS     })
-//RS }
-//RS 
-//RS fn binding_operation_from_header(name: &str, source: &str) -> jet::Bindgen::BindingOperation {
-//RS     let declaration = source
-//RS         .lines()
-//RS         .map(str::trim)
-//RS         .find(|line| line.contains(&format!("{name}(")))
-//RS         .unwrap_or("");
-//RS     let native_signature = declaration.trim_end_matches(';').to_string();
-//RS     let result_type = declaration
-//RS         .split_once(&format!("{name}("))
-//RS         .map(|(prefix, _)| {
-//RS             if prefix.contains("char") && prefix.contains('*') {
-//RS                 return "String".to_string();
-//RS             }
-//RS             prefix
-//RS                 .split_whitespace()
-//RS                 .last()
-//RS                 .unwrap_or("Unit")
-//RS                 .replace("const ", "")
-//RS         })
-//RS         .filter(|value| !value.is_empty())
-//RS         .map(|value| match value.as_str() {
-//RS             "void" => "Unit".to_string(),
-//RS             "uint64_t" | "size_t" => "U64".to_string(),
-//RS             "int" | "int32_t" => "Int".to_string(),
-//RS             "float" | "double" => "Float".to_string(),
-//RS             _ => value,
-//RS         })
-//RS         .unwrap_or_else(|| "Unit".to_string());
-//RS     let mut operation = jet::Bindgen::BindingOperation::new(name, native_signature, result_type);
-//RS     if let Some((_, params)) = declaration.split_once(&format!("{name}(")) {
-//RS         if let Some(params) = params.split_once(')').map(|(params, _)| params) {
-//RS             let parameters = params.split(',').map(str::trim).collect::<Vec<_>>();
-//RS             let pointer = parameters
-//RS                 .iter()
-//RS                 .find(|parameter| parameter.contains('*'))
-//RS                 .and_then(|parameter| parameter.split_whitespace().last())
-//RS                 .map(|value| value.trim_start_matches('*').to_string());
-//RS             let count = parameters
-//RS                 .iter()
-//RS                 .find(|parameter| {
-//RS                     if parameter.contains('*') {
-//RS                         return false;
-//RS                     }
-//RS                     let lower = parameter.to_ascii_lowercase();
-//RS                     lower.contains("count")
-//RS                         || lower.contains("length")
-//RS                         || lower.contains("len")
-//RS                         || lower == "n"
-//RS                         || lower.ends_with(" n")
-//RS                 })
-//RS                 .and_then(|parameter| parameter.split_whitespace().last())
-//RS                 .map(str::to_string);
-//RS             if let (Some(pointer), Some(count)) = (pointer, count) {
-//RS                 let unit = match marker_value(source, "jet-ffi-count-unit").as_deref() {
-//RS                     Some("bytes") => jet::Bindgen::CountUnit::Bytes,
-//RS                     Some(value) if value.starts_with("elements:") => {
-//RS                         jet::Bindgen::CountUnit::Elements(value[9..].to_string())
-//RS                     }
-//RS                     _ => jet::Bindgen::CountUnit::Unknown,
-//RS                 };
-//RS                 let meaning = match marker_value(source, "jet-ffi-count-meaning").as_deref() {
-//RS                     Some("full-extent") => jet::Bindgen::CountMeaning::FullExtent,
-//RS                     Some("prefix") => jet::Bindgen::CountMeaning::Prefix,
-//RS                     _ => jet::Bindgen::CountMeaning::Unknown,
-//RS                 };
-//RS                 let width = marker_value(source, "jet-ffi-count-width")
-//RS                     .and_then(|value| value.parse::<u16>().ok())
-//RS                     .unwrap_or(0);
-//RS                 let retention = match marker_value(source, "jet-ffi-retention").as_deref() {
-//RS                     Some("borrowed-for-call") => jet::Bindgen::PointerRetention::BorrowedForCall,
-//RS                     Some("may-retain") => jet::Bindgen::PointerRetention::MayRetain,
-//RS                     _ => jet::Bindgen::PointerRetention::Unknown,
-//RS                 };
-//RS                 operation = operation.with_pointer_count(jet::Bindgen::PointerCountFact::new(
-//RS                     pointer, count, unit, meaning, width, retention,
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     operation.nullable_return = source.contains("jet-ffi-nullable");
-//RS     operation.borrowed_view = source.contains("jet-ffi-borrowed-view");
-//RS     operation.status_out = source.contains("jet-ffi-status-out");
-//RS     operation.partial_success = source.contains("jet-ffi-partial-success");
-//RS     operation.fallible_close = source.contains("jet-ffi-fallible-close");
-//RS     operation.callback_transport =
-//RS         marker_value(source, "jet-ffi-callback").unwrap_or_else(|| "none".to_string());
-//RS     operation.effects =
-//RS         marker_value(source, "jet-ffi-effects").unwrap_or_else(|| "foreign".to_string());
-//RS     operation.ownership = marker_value(source, "jet-ffi-ownership")
-//RS         .unwrap_or_else(|| "signature-declared".to_string());
-//RS     operation.failure_mapping =
-//RS         marker_value(source, "jet-ffi-failure").unwrap_or_else(|| "preserve".to_string());
-//RS     operation.copies = marker_value(source, "jet-ffi-copies").unwrap_or_else(|| "none".to_string());
-//RS     operation.placement =
-//RS         marker_value(source, "jet-ffi-placement").unwrap_or_else(|| "caller".to_string());
-//RS     operation.cleanup =
-//RS         marker_value(source, "jet-ffi-cleanup").unwrap_or_else(|| "none".to_string());
-//RS     operation
-//RS }
-//RS 
-//RS fn annotate_binding_contract(
-//RS     mut contract: jet::ForeignBridge::ForeignBoundaryContract,
-//RS     source: &str,
-//RS     header: &Path,
-//RS ) -> Result<jet::ForeignBridge::ForeignBoundaryContract, String> {
-//RS     let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
-//RS     let coverage = jet::ForeignBridge::ForeignArtifactCoverage::new(
-//RS         format!(
-//RS             "{}:sha256-{}",
-//RS             header.display(),
-//RS             jet::SHA256::sha256_hex(source.as_bytes())
-//RS         ),
-//RS         target,
-//RS         "jet-bindgen-v1",
-//RS     )
-//RS     .with_transitive_dependencies(std::iter::empty::<String>())
-//RS     .with_reachable_callbacks(std::iter::empty::<String>())
-//RS     .with_compiler_flags(std::iter::empty::<String>());
-//RS     contract = contract.with_artifact_coverage(coverage);
-//RS     for line in source.lines().filter_map(|line| {
-//RS         line.split_once("jet-ffi-obligation:")
-//RS             .map(|(_, value)| value.trim())
-//RS     }) {
-//RS         let mut obligation = None;
-//RS         let mut basis = jet::ForeignBridge::ForeignEvidenceBasis::Unknown;
-//RS         let mut checker = String::new();
-//RS         let mut assumptions = Vec::new();
-//RS         for field in line.split(';') {
-//RS             let Some((key, value)) = field.split_once('=') else {
-//RS                 continue;
-//RS             };
-//RS             match key.trim() {
-//RS                 "name" | "obligation" => obligation = Some(value.trim().to_string()),
-//RS                 "basis" => {
-//RS                     basis = match value.trim() {
-//RS                         "proved" => jet::ForeignBridge::ForeignEvidenceBasis::Proved,
-//RS                         "enforced" => jet::ForeignBridge::ForeignEvidenceBasis::Enforced,
-//RS                         "contained" => jet::ForeignBridge::ForeignEvidenceBasis::Contained,
-//RS                         "trusted" => jet::ForeignBridge::ForeignEvidenceBasis::Trusted,
-//RS                         "unknown" => jet::ForeignBridge::ForeignEvidenceBasis::Unknown,
-//RS                         other => return Err(format!("unknown evidence basis `{other}`")),
-//RS                     }
-//RS                 }
-//RS                 "checker" => checker = value.trim().to_string(),
-//RS                 "assumptions" => {
-//RS                     assumptions = value
-//RS                         .split('|')
-//RS                         .map(str::trim)
-//RS                         .filter(|value| !value.is_empty())
-//RS                         .map(str::to_string)
-//RS                         .collect()
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         let Some(obligation) = obligation else {
-//RS             return Err("an obligation marker needs `name=`".to_string());
-//RS         };
-//RS         contract.set_obligation(obligation, basis, checker, assumptions)?;
-//RS     }
-//RS     Ok(contract)
-//RS }
-//RS 
-//RS fn binding_plan_path(project_root: &Path, name: &str) -> PathBuf {
-//RS     project_root
-//RS         .join(".jet")
-//RS         .join("lock")
-//RS         .join("bindings")
-//RS         .join(format!("{name}.plan"))
-//RS }
-//RS 
-//RS fn read_binding_plan(project_root: &Path, name: &str) -> Option<String> {
-//RS     fs::read_to_string(binding_plan_path(project_root, name)).ok()
-//RS }
-//RS 
-//RS fn recorded_digest(record: &str) -> &str {
-//RS     record
-//RS         .lines()
-//RS         .find_map(|line| line.strip_prefix("digest="))
-//RS         .unwrap_or("")
-//RS }
-//RS 
-//RS fn write_binding_plan(
-//RS     project_root: &Path,
-//RS     name: &str,
-//RS     plan: &jet::Bindgen::BindingPlan,
-//RS ) -> Result<(), String> {
-//RS     let path = binding_plan_path(project_root, name);
-//RS     let Some(parent) = path.parent() else {
-//RS         return Err("binding lock path has no parent".to_string());
-//RS     };
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
-//RS     let mut record = format!(
-//RS         "schema=jet-ffi-binding-plan-v1\nname={name}\ndigest={}\nshape={}\nboundary={}\ninputs={}\nartifact={}\n",
-//RS         plan.digest, plan.shape, plan.boundary_digest, plan.input_digest, plan.artifact
-//RS     );
-//RS     record.push_str(&plan.explain());
-//RS     record.push_str("\nfacade:\n");
-//RS     record.push_str(&plan.render_facade());
-//RS     fs::write(path, record).map_err(|error| format!("could not write binding lock: {error}"))
-//RS }
-//RS 
-//RS fn write_binding_facade(
-//RS     project_root: &Path,
-//RS     name: &str,
-//RS     plan: &jet::Bindgen::BindingPlan,
-//RS ) -> Result<(), String> {
-//RS     let path = project_root
-//RS         .join(".jet")
-//RS         .join("bindings")
-//RS         .join("c")
-//RS         .join(format!("{name}.adapted.jet"));
-//RS     let Some(parent) = path.parent() else {
-//RS         return Err("binding facade path has no parent".to_string());
-//RS     };
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
-//RS     fs::write(path, plan.render_facade())
-//RS         .map_err(|error| format!("could not write generated binding facade: {error}"))
-//RS }
-//RS 
-//RS fn write_binding_cache(
-//RS     project_root: &Path,
-//RS     name: &str,
-//RS     source: &str,
-//RS ) -> Result<(), String> {
-//RS     let path = project_root
-//RS         .join(".jet")
-//RS         .join("bindings")
-//RS         .join("c")
-//RS         .join(format!("{name}.jet"));
-//RS     let Some(parent) = path.parent() else {
-//RS         return Err("binding cache path has no parent".to_string());
-//RS     };
-//RS     fs::create_dir_all(parent)
-//RS         .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
-//RS     fs::write(path, source)
-//RS         .map_err(|error| format!("could not write generated binding cache: {error}"))
-//RS }
-//RS 
-// END-PORT-PENDING 0681 Source/CmdDevTools.rs:3665-5465
+// Fragment of canonical Cli.Dev.Commands.
+use std.fs as fs // GATE #4494 native IO; #4409 exact IO error kinds.
+use std.process.[Command, exit] // GATE #4494 native commands.
+use jet.Syntax as Syntax
+use jet_foundation.[Span, Severity]
+use jet_foundation.Facts.BuildFactSnapshot
+use jet.Explain.Explanation
+use jet.Policy.[PolicyKey, PolicyScope]
+use jet.AST.ProgramBundle
+use jet.Codegen.TIR.[TCostReportError, TCostState]
+
+// Rust: Source/CmdDevTools.rs:3665
+pub fn run_devtools_new_ui(args: &[String]) -> {
+    if args.is_empty() {
+        eprintln("usage: {Syntax.BINARY_NAME} devtools new-ui <name>")
+        exit(ExitCodes.USAGE)
+    }
+    name :: args[0]
+    if name.is_empty() || name.contains('/') || name.contains('.') {
+        cli_error!("E2104", "`new-ui` takes a bare fixture name, no path or extension: got `{name}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    ext :: Syntax.FILE_EXT
+    dir :: OSPath.from("tests/ui")
+    jet_path :: dir.join("{name}.{ext}")
+    stderr_path :: dir.join("{name}.stderr")
+    if jet_path.exists() {
+        cli_error!("E2104", "`{jet_path.display()}` already exists")
+        exit(ExitCodes.USER_ERROR)
+    }
+    fs.create_dir_all(&dir) ?? {
+        cli_error!("E2105", "couldn't create `{dir.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    // The TODO below is original generated fixture text, not a port placeholder.
+    src :: "// TODO: describe what this diagnostic demonstrates.\nfn run() {{\n    print(definitely_undefined_scaffold_symbol)\n}}\n"
+    fs.write(&jet_path, src) ?? {
+        cli_error!("E2105", "couldn't write `{jet_path.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    shown_path :: "tests/ui/{name}.{ext}"
+    actual :: match jet.compile_with_path(src, shown_path) {
+        .Err(diags) -> jet.render_diagnostics(shown_path, src, &diags)
+        .Ok(_) -> "(no errors)\n"
+    }
+    fs.write(&stderr_path, actual) ?? {
+        cli_error!("E2105", "couldn't write `{stderr_path.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    println("wrote {jet_path.display()}")
+    println("wrote {stderr_path.display()}")
+    if actual == "(no errors)\n" -> println("note: scaffold compiled cleanly — edit `{jet_path.display()}` to trigger the diagnostic you want, then `{Syntax.BINARY_NAME} devtools bless diagnostic_snapshots`")
+}
+// Rust: Source/CmdDevTools.rs:3735
+pub fn run_devtools_check_fixture_paths() -> {
+    tests_dir :: OSPath.from("tests")
+    if !tests_dir.is_dir() {
+        cli_error!(@fix "E2104", "no `tests/` directory here", "run from the repo root")
+        exit(ExitCodes.USER_ERROR)
+    }
+    rs_files := [OSPath]{}
+    collect_rs_files(&tests_dir, &rs_files)
+    checked := 0
+    missing := [(OSPath, String)]{}
+    loop rs in rs_files {
+        text :: fs.read_to_string(&rs).unwrap_or_default()
+        loop candidate in extract_hardcoded_paths(text) {
+            checked += 1
+            if !OSPath.from(candidate).exists() -> &missing.push((rs, candidate))
+        }
+    }
+    if missing.is_empty() -> println("check-fixture-paths: {checked} embedded path(s) across {rs_files.len()} file(s), all present")
+    else {
+        eprintln("check-fixture-paths: {missing.len()} missing path(s):")
+        loop (file, path) in missing -> eprintln("  {file.display()} -> `{path}` does not exist")
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+// Rust: Source/CmdDevTools.rs:3772
+fn collect_rs_files(dir: &OSPath, out: &[OSPath]) -> {
+    entries :: fs.read_dir(dir) ?? return
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() -> collect_rs_files(&path, out)
+        else if path.extension().and_then(|s| -> s.to_str()) == Val("rs") -> &out.push(path)
+    }
+}
+// Rust: Source/CmdDevTools.rs:3791
+fn extract_hardcoded_paths(text: String) -> [String] {
+    out := [String]{}
+    bytes :: text.bytes()
+    i := 0
+    loop i < bytes.len() {
+        if bytes[i] == U8{34} {
+            start :: i + 1
+            j := start
+            loop j < bytes.len() && bytes[j] != U8{34} {
+                if bytes[j] == U8{92} -> j += 1
+                j += 1
+            }
+            if j <= text.len() {
+                lit :: text[start..<j.min(text.len())]
+                before_start := start.saturating_sub(40)
+                loop before_start < i && !text.is_char_boundary(before_start) -> before_start += 1
+                before :: text[before_start..<i]
+                display_label :: before.contains("render_diagnostics(") || before.contains("render_all_colored(") || before.contains("render_all_json(")
+                if !display_label && is_hardcoded_fixture_path(lit) -> &out.push(lit.to_string())
+            }
+            i = j + 1
+        } else -> i += 1
+    }
+    out
+}
+// Rust: Source/CmdDevTools.rs:3831
+fn is_hardcoded_fixture_path(lit: String) -> Bool {
+    known_prefix :: lit.starts_with("Examples/features/") || lit.starts_with("Docs/spec/") || lit.starts_with("tests/ui/") || lit.starts_with("tests/ui_lint/") || lit.starts_with("tests/cli/") || lit.starts_with("tests/release/")
+    if !known_prefix || lit.contains('{') || lit.contains('}') -> return false
+    lit.ends_with(".{Syntax.FILE_EXT}") || lit.ends_with(".md") || lit.ends_with(".out") || lit.ends_with(".stderr") || lit.ends_with(".warn") || lit.ends_with(".txt") || lit.ends_with(".snapshot")
+}
+// Rust: Source/CmdDevTools.rs:3858
+pub BLESS_TARGETS :: ["cli", "cross", "diagnostic_snapshots", "diagnostics_coverage", "ice_report_codegen_rejection", "release_gates"]
+// Rust: Source/CmdDevTools.rs:3880
+pub fn run_devtools_bless(args: &[String]) -> {
+    dry_run := false
+    requested := [String]{}
+    loop arg in args {
+        if arg == jet.CLI.DRY_RUN_FLAG -> dry_run = true else -> &requested.push(arg)
+    }
+    targets :: resolve_bless_targets(&requested) ?? {
+        cli_error!("E2104", "unknown bless target(s): {err}")
+        eprintln("usage: {Syntax.BINARY_NAME} devtools bless [target...] [--dry-run]")
+        eprintln("known targets: {BLESS_TARGETS.join(\", \")}")
+        exit(ExitCodes.USAGE)
+    }
+    if dry_run {
+        loop target in targets -> println("would run: UPDATE_EXPECT=1 cargo test --test {target}")
+        return
+    }
+    reason_raw :: std.env.var("UPDATE_EXPECT_REASON").unwrap_or_default()
+    reason := reason_raw.trim() // #4303
+    if reason.len() < 8 {
+        cli_error!("E2104", "a blanket bless must name the compiler change it records")
+        eprintln("set the reason, then re-run:\n    UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" {Syntax.BINARY_NAME} self devtools bless")
+        eprintln("to bless one reviewed fixture instead: JET_UI_FILTER=<fixture> UPDATE_EXPECT=<same fixture> cargo test --test diagnostic_snapshots")
+        exit(ExitCodes.USAGE)
+    }
+    println("bless: reason recorded — {reason}")
+    any_failed := false
+    loop target in targets {
+        println("bless: UPDATE_EXPECT=1 cargo test --test {target}")
+        match bless_command(target).status() {
+            .Ok(status) -> {
+                if !status.success() {
+                    any_failed = true
+                    eprintln("bless: `{target}` exited with {status}")
+                }
+            }
+            .Err(error) -> {
+                any_failed = true
+                eprintln("bless: couldn't run `cargo test --test {target}`: {error}")
+            }
+        }
+    }
+    if any_failed -> exit(ExitCodes.USER_ERROR)
+    suffix :: if targets.len() == 1 -> "" else "s"
+    println("bless: done ({targets.len()} target{suffix})")
+}
+// Rust: Source/CmdDevTools.rs:3957
+pub fn resolve_bless_targets(requested: &[String]) -> [String] Err! {
+    if requested.is_empty() -> return Ok(BLESS_TARGETS.to_vec())
+    out := [String]{}
+    unknown := [String]{}
+    loop request in requested {
+        if BLESS_TARGETS.iter().find(|known| -> known == request) == .Val(target) -> &out.push(target)
+        else -> &unknown.push(request)
+    }
+    if !unknown.is_empty() -> return Err(unknown.join(", "))
+    Ok(out)
+}
+// Rust: Source/CmdDevTools.rs:3977
+pub fn bless_command(target: String) -> Command {
+    cmd := Command.new("cargo")
+    cmd.env("UPDATE_EXPECT", "1")
+    cmd.args(["test", "--test", target])
+    cmd
+}
+// Rust: Source/CmdDevTools.rs:3984
+fn write_generated_section(path: String, fresh: String, quiet: Bool) -> {
+    text :: fs.read_to_string(path) ?? {
+        cli_error!("E2105", "couldn't read `{path}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    start :: text.find(Syntax.HIGHLIGHT_GENERATED_START).unwrap_or_else(|| -> {
+        cli_error!("E2105", "`{path}` has no `{Syntax.HIGHLIGHT_GENERATED_START}` marker")
+        exit(ExitCodes.USER_ERROR)
+    })
+    prefix_start :: text[0..<start].rfind('\n').map_or(0, |idx| -> idx + 1)
+    after_start :: text[start..<text.len()]
+    end_rel :: after_start.find(Syntax.HIGHLIGHT_GENERATED_END).unwrap_or_else(|| -> {
+        cli_error!("E2105", "`{path}` has no `{Syntax.HIGHLIGHT_GENERATED_END}` marker")
+        exit(ExitCodes.USER_ERROR)
+    })
+    end_marker :: start + end_rel + Syntax.HIGHLIGHT_GENERATED_END.len()
+    suffix_start :: text[end_marker..<text.len()].find('\n').map_or(text.len(), |idx| -> end_marker + idx + 1)
+    out := String.new()
+    &out.push_str(text[0..<prefix_start])
+    trimmed := fresh.trim_end() // #4303
+    &out.push_str(trimmed)
+    &out.push('\n')
+    &out.push_str(text[suffix_start..<text.len()])
+    fs.write(path, out) ?? {
+        cli_error!("E2105", "couldn't write `{path}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    if !quiet -> println("wrote {path}")
+}
+// Rust: Source/CmdDevTools.rs:4038
+pub fn run_doctor(online: Bool, apply: Bool, mode: OutputMode, cross_target: String?) -> {
+    checks :: jet.Doctor.run(jet.Doctor.Options{online: online, cross_target: cross_target})
+    color :: mode.color_stderr_for(std.io.stdout().is_terminal())
+    if apply {
+        fixed :: jet.Doctor.apply_fixes(&checks)
+        if fixed.is_empty() -> println("doctor: nothing to auto-fix")
+        else -> loop item in fixed -> println("fixed: {item}")
+        return run_doctor(online, false, mode, cross_target)
+    }
+    bold :: |s: String| -> if color -> "\x1b[1m{s}\x1b[0m" else s
+    green :: |s: String| -> if color -> "\x1b[32m{s}\x1b[0m" else s
+    yellow :: |s: String| -> if color -> "\x1b[33m{s}\x1b[0m" else s
+    println(bold("{Syntax.BINARY_NAME} doctor"))
+    last_section := ""
+    loop check in checks {
+        if check.section != last_section {
+            println("")
+            println(bold(check.section))
+            last_section = check.section
+        }
+        (mark, label) :: match check.health {
+            .Ok -> (green("ok  "), check.label)
+            .Note -> ("note", check.label)
+            .Problem -> (yellow("warn"), check.label)
+        }
+        println("  [{mark}] {label}: {check.detail}")
+        if check.fix == .Val(fix) {
+            println("        Fix: {fix}")
+            if check.auto_fixable -> println("        (auto-fixable: run `{Syntax.BINARY_NAME} doctor --fix`)")
+        }
+    }
+    println("")
+    if jet.Doctor.has_problem(&checks) {
+        println("Warning [L2101] (doctor_advisory): Toolchain checks need attention")
+        println(" Why: One or more required tools or paths are unavailable")
+        println(" Fix: Follow the fixes above, then run `jet self doctor` again")
+        println(" {jet.Explain.pointer_line(\"L2101\", color)}")
+        println("More: jet-lang.dev/e/L2101")
+        exit(ExitCodes.USER_ERROR)
+    } else -> println("everything looks good.")
+}
+// Rust: Source/CmdDevTools.rs:4121
+pub fn run_explain_web_graph(args: &[String], mode: OutputMode) -> {
+    file := String?{None}
+    loop arg in args {
+        if arg.starts_with('-') -> next
+        file = Val(arg)
+        break
+    }
+    path :: file.unwrap_or_else(|| -> {
+        eprintln("usage: {Syntax.BINARY_NAME} explain --web-graph <file.{Syntax.FILE_EXT}>")
+        exit(ExitCodes.USAGE)
+    })
+    abs :: if OSPath.from(path).is_absolute() -> OSPath.from(path) else std.env.current_dir().unwrap_or(OSPath.from(".")).join(path)
+    entry :: abs.display().to_string()
+    (diags, _bundle, facts) :: jet.Driver.check_file_with_effect_facts(entry, None, false)
+    if facts.web_app.is_none() {
+        if diags.iter().any(|d| -> d.severity == Severity.Error) {
+            loop diag in diags -> eprintln(jet.render_diagnostics(entry, "", &[diag]))
+            exit(ExitCodes.USER_ERROR)
+        }
+        if mode.json -> println(StatusEnvelope.new("inspect.web", true).with_field("web_app", StatusValue.Null).json())
+        else -> println("(none)")
+        return
+    }
+    graph :: facts.web_app.unwrap()
+    empty :: graph.entry_file.is_empty() && graph.routes.is_empty() && graph.actions.is_empty() && graph.mounts.is_empty() && graph.routes_from.is_empty()
+    if empty {
+        if diags.iter().any(|d| -> d.severity == Severity.Error) -> loop diag in diags -> eprintln(jet.render_diagnostics(entry, "", &[diag]))
+        if mode.json -> println(StatusEnvelope.new("inspect.web", true).with_field("web_app", StatusValue.Null).json())
+        else -> println("(none)")
+        return
+    }
+    if mode.json {
+        web_app :: StatusValue.parse(graph.to_json()).expect("web graph projection must be valid JSON")
+        println(StatusEnvelope.new("inspect.web", true).with_field("web_app", web_app).json())
+    } else -> loop line in graph.explain_lines() -> println(line)
+}
+// Rust: Source/CmdDevTools.rs:4220
+pub fn run_explain(code_input: String?, fact_file: String?, mode: OutputMode, verbose: Bool, profile: String, setting_overrides: &[String:String]) -> {
+    code :: code_input.unwrap_or_else(|| -> {
+        eprintln("usage: {Syntax.BINARY_NAME} explain <CODE|FACT> [file]\n       {Syntax.BINARY_NAME} explain marker <file>:<line> <policy-key>")
+        exit(ExitCodes.USAGE)
+    })
+    if jet.Explain.build_fact_name(code) == .Val(name) {
+        run_explain_fact(name, fact_file, mode, profile, setting_overrides)
+        return
+    }
+    if PolicyKey.parse(code.trim_start_matches('@')) == .Val(key) && fact_file.is_some() {
+        run_explain_policy(key, fact_file, mode)
+        return
+    }
+    if jet.Explain.lookup(code) == .Val(explanation) {
+        print_explanation(&explanation, mode)
+        if verbose && !mode.json && jet.Explain.syntax_internals(code) == .Val(internals) -> print("\n{internals}")
+    } else {
+        if jet.Explain.is_syntax_query(code) {
+            closest :: jet.Explain.nearest_syntax(code).unwrap_or("a registered syntax token")
+            emit_cli_row("E2106", &[("token", code), ("closest", closest)], mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+        cli_error!(@fix "E2104", "no diagnostic code `{code}` exists", "run a command that reports an error to see its code, e.g. `{Syntax.BINARY_NAME} check file.{Syntax.FILE_EXT}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+// Rust: Source/CmdDevTools.rs:4278
+pub fn run_explain_cost(file_input: String?, mode: OutputMode, profile: String, setting_overrides: &[String:String]) -> {
+    file :: file_input.unwrap_or_else(|| -> {
+        eprintln("usage: {Syntax.BINARY_NAME} explain --cost <file.{Syntax.FILE_EXT}>")
+        exit(ExitCodes.USAGE)
+    })
+    src :: fs.read_to_string(file) ?? {
+        cli_error!(@fix "E2105", "can't find the file `{file}`", "check the spelling, or run {Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    projection :: CmdInspect.check_projection_for_effects(&OSPath.from(file), profile, setting_overrides) ?? {
+        errors :: err.iter().filter(|diagnostic| -> diagnostic.severity == Severity.Error).collect()
+        if !errors.is_empty() {
+            report_problems(mode, file, src, &errors)
+            exit(ExitCodes.USER_ERROR)
+        }
+        cli_error!("E2104", "cost projection could not check `{file}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    report :: jet.Codegen.TIR.cost_report(&projection.bundle) ?? exit_cost_projection_error(file, &err)
+    if mode.json {
+        sites :: StatusValue.array(report.sites.iter().map(|site| -> StatusValue.object(StatusFields.new()
+            .with("function", site.function).with("line", source_line(src, site.span)).with("kind", site.kind.label())
+            .with("state", cost_state_label(site.state)).with("loop_depth", site.loop_depth).with("tier", COST_TIER))))
+        println(StatusEnvelope.new("explain.cost", true).with_field("file", file).with_field("sites", sites).json())
+        return
+    }
+    if report.sites.is_empty() {
+        println("cost: `{file}` has no typed cost sites")
+        return
+    }
+    loop site in report.sites -> println("{file}:{source_line(src, site.span)} fn {site.function} — {site.kind.label()} — {cost_state_label(site.state)} (loop depth {site.loop_depth}; tier={COST_TIER})")
+}
+// Rust: Source/CmdDevTools.rs:4364
+COST_TIER :: "shared-tir"
+// Rust: Source/CmdDevTools.rs:4366
+pub fn exit_cost_projection_error(file: String, error: &TCostReportError) -> Never {
+    fix :: match error {
+        .Incomplete{surfaces} -> "report the missing checked specialization for {surfaces.join(\"; \")} with this source file; its cost cannot be proved until the compiler lowers that specialization"
+        .Lowering{..} -> "report this checked-TIR lowering failure with the source file"
+    }
+    cli_error!(@full "E2104", "cost projection for `{file}` failed", error.message(), fix)
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdDevTools.rs:4388
+fn source_line(source: String, span: Span) -> Int {
+    source.get(0..<span.start.min(source.len())).map_or(1, |prefix| -> prefix.bytes().filter(|byte| -> byte == U8{10}).count() + 1)
+}
+// Rust: Source/CmdDevTools.rs:4396
+fn cost_state_label(state: TCostState) -> String {
+    match state {
+        .SemanticRemainder -> "semantic remainder"
+        .OptimizerRemoved -> "optimizer-proven removed"
+    }
+}
+// Rust: Source/CmdDevTools.rs:4403
+fn explain_source_file(fact_file: String?) -> OSPath {
+    fact_file.map(OSPath.from).or_else(|| -> {
+        if std.env.current_dir() == .Ok(cwd) {
+            mode :: OutputMode{json: false, color: ColorChoice.Never, quiet: false}
+            return resolve_bare_entry("run", &cwd, None, mode, false).map(|entry| -> entry.path)
+        }
+        None
+    }).unwrap_or_else(|| -> {
+        cli_error!("E2104", "a source file is required to explain this build fact")
+        exit(ExitCodes.USAGE)
+    })
+}
+// Rust: Source/CmdDevTools.rs:4424
+fn explain_bundle(fact_file: String?, profile: String, setting_overrides: &[String:String]) -> BuildFactSnapshot {
+    file :: explain_source_file(fact_file)
+    jet.Driver.query_build_facts(file.to_string_lossy(), profile, setting_overrides) ?? {
+        loop diagnostic in err -> eprintln(diagnostic.what)
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+// Rust: Source/CmdDevTools.rs:4439
+fn explain_policy_bundle(fact_file: String?) -> ProgramBundle {
+    file :: explain_source_file(fact_file)
+    jet.Loader.load_entry(file.to_string_lossy()) ?? {
+        loop diagnostic in err -> eprintln(diagnostic.what)
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+// Rust: Source/CmdDevTools.rs:4449
+fn print_explanation(explanation: &Explanation, mode: OutputMode) -> {
+    if mode.json {
+        what :: explanation.what.unwrap_or(explanation.meaning)
+        optional :: |value: String?| -> value.map(StatusValue.from).unwrap_or(StatusValue.Null)
+        fields :: StatusFields.new().with("code", explanation.code).with("stage", explanation.stage).with("what", what)
+            .with("why", optional(explanation.why)).with("fix", optional(explanation.fix)).with("example", optional(explanation.example))
+        println(StatusEnvelope.new("explain", true).with_fields(fields).json())
+        return
+    }
+    color :: ColorChoice.resolve(mode.color, std.io.stdout().is_terminal())
+    print(jet.Explain.render(explanation, color))
+}
+// Rust: Source/CmdDevTools.rs:4479
+fn run_explain_fact(name: String, fact_file: String?, mode: OutputMode, profile: String, setting_overrides: &[String:String]) -> {
+    build_facts :: explain_bundle(fact_file, profile, setting_overrides)
+    fact :: build_facts.contribution(name).unwrap_or_else(|| -> {
+        if name.strip_prefix("Build.Settings.") == .Val(key) -> cli_error!(@full "E0302", "`build.settings.{key}` is undeclared", "settings are declared in the package manifest", "add `{key}: Type = default` to `package.jet`")
+        else -> cli_error!("E2104", "the selected build has no `{name}` fact")
+        exit(ExitCodes.USER_ERROR)
+    })
+    explanation :: jet.Explain.lookup_fact(fact.key, fact.provenance).unwrap_or_else(|| -> {
+        cli_error!(@full "E3521", "the build fact contribution chain could not be resolved", "the selected fact writers must pass the shared contribution law", "remove the conflicting writer or choose one explicit contribution")
+        exit(ExitCodes.USER_ERROR)
+    })
+    print_explanation(&explanation, mode)
+}
+// Rust: Source/CmdDevTools.rs:4508
+fn run_explain_policy(key: PolicyKey, fact_file: String?, mode: OutputMode) -> {
+    bundle :: explain_policy_bundle(fact_file)
+    declarations :: bundle.modules.iter().flat_map(|module| -> module.policy_declarations.iter()).filter(|declaration| -> declaration.key == key).collect()
+    explanation :: jet.Explain.lookup_policy(key, declarations).unwrap_or_else(|| -> {
+        cli_error!(@full "E2104", "policy `{key.name()}` has no effective declaration", "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site")
+        exit(ExitCodes.USER_ERROR)
+    })
+    print_explanation(&explanation, mode)
+}
+// Rust: Source/CmdDevTools.rs:4532
+pub fn run_explain_marker(site_input: String?, key_input: String?, mode: OutputMode) -> {
+    if site_input.is_none() || key_input.is_none() {
+        eprintln("usage: {Syntax.BINARY_NAME} explain marker <file>:<line> <policy-key>")
+        exit(ExitCodes.USAGE)
+    }
+    site :: site_input.unwrap()
+    key :: key_input.unwrap()
+    (file, line_text) :: site.rsplit_once(':').unwrap_or_else(|| -> {
+        cli_error!("E2104", "marker site must be `<file>:<line>`")
+        exit(ExitCodes.USAGE)
+    })
+    line :: line_text.parse::<USize>().ok().filter(|line| -> line > 0).unwrap_or_else(|| -> {
+        cli_error!("E2104", "marker line must be a positive number")
+        exit(ExitCodes.USAGE)
+    })
+    policy_key :: PolicyKey.parse(key).unwrap_or_else(|| -> {
+        cli_error!("E2104", "`{key}` is not a registered scoped policy")
+        exit(ExitCodes.USER_ERROR)
+    })
+    bundle :: jet.Loader.load_entry(file) ?? {
+        loop diag in err -> eprintln(diag.what)
+        exit(ExitCodes.USER_ERROR)
+    }
+    module :: bundle.modules[0]
+    offset :: if line == 1 -> 0 else module.source.match_indices('\n').nth(line - 2).map(|(at, _)| -> at + 1).unwrap_or(module.source.len())
+    declarations :: module.policy_declarations.iter().filter(|declaration| -> match declaration.scope {
+        .Organization, .Package, .Module -> true
+        .Function, .Block -> declaration.target.is_some_and(|target| -> target.start <= offset && offset <= target.end)
+    }).collect()
+    explanation :: jet.Explain.lookup_policy(policy_key, declarations).unwrap_or_else(|| -> {
+        cli_error!("E2104", "`{key}` has no effective declaration at {site}")
+        exit(ExitCodes.USER_ERROR)
+    })
+    print_explanation(&explanation, mode)
+}
+
+use jet.Bindgen.[BindingShape, BindingPolicy, BindingInputs, BindingPlan, BindingOperation, CountUnit, CountMeaning, PointerRetention, PointerCountFact]
+use jet.ForeignBridge.[ForeignBoundaryContract, ForeignArtifactCoverage, ForeignEvidenceBasis]
+use core.sys.target.[selected_os, selected_arch] // GATE #4483 selected target identity.
+
+// Rust: Source/CmdDevTools.rs:4602
+pub fn run_bind(args: &[String]) -> {
+    if args.first() == .Val(format) && (format == "json" || format == "csv" || format == "sql" || format == "xml" || format == "proto") {
+        run_data_bind(format, &args[1..<args.len()])
+        return
+    }
+    if binding_plan_command(args) {
+        run_binding_plan_command(args)
+        return
+    }
+    if args.first() == .Val(root) {
+        rest :: &args[1..<args.len()]
+        if root == Syntax.CPP_MODULE_ROOT { run_cpp_bind(rest); return }
+        if root == Syntax.COM_MODULE_ROOT { run_com_bind(rest); return }
+        if root == Syntax.COBOL_MODULE_ROOT { run_cobol_bind(rest); return }
+        if root == Syntax.PERL_MODULE_ROOT { run_perl_bind(rest); return }
+        if root == Syntax.RUBY_MODULE_ROOT { run_ruby_bind(rest); return }
+        if root == Syntax.PHP_MODULE_ROOT { run_php_bind(rest); return }
+        if root == Syntax.R_MODULE_ROOT { run_r_bind(rest); return }
+        if root == Syntax.PY_MODULE_ROOT { run_python_bind(rest); return }
+        if root == Syntax.JS_MODULE_ROOT { run_javascript_bind(rest); return }
+        if root == Syntax.OCTAVE_MODULE_ROOT { run_octave_bind(rest); return }
+        if root == Syntax.PWSH_MODULE_ROOT { run_powershell_bind(rest); return }
+        if root == Syntax.DART_MODULE_ROOT { run_dart_bind(rest); return }
+        if root == Syntax.PASCAL_MODULE_ROOT { run_pascal_bind(rest); return }
+        if root == Syntax.ADA_MODULE_ROOT { run_ada_bind(rest); return }
+        if root == Syntax.TCL_MODULE_ROOT { run_tcl_bind(rest); return }
+        if root == Syntax.LUA_MODULE_ROOT { run_lua_bind(rest); return }
+        if root == Syntax.JAVA_MODULE_ROOT { run_java_bind(rest); return }
+        if root == Syntax.CS_MODULE_ROOT { run_dotnet_bind(rest); return }
+        if root == Syntax.GO_MODULE_ROOT { run_go_bind(rest); return }
+        if root == Syntax.FORTRAN_MODULE_ROOT { run_fortran_bind(rest); return }
+    }
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) {
+        eprintln("usage: {Syntax.BINARY_NAME} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]")
+        eprintln("       {Syntax.BINARY_NAME} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]")
+        eprintln("")
+        eprintln("Generate a C binding cache from a header (S59). The output is")
+        eprintln("a `#Bindgen module c.<lib>.__bindgen__` file, by default written")
+        eprintln("to .jet/bindings/c/<lib>.jet. The compiler also runs this")
+        eprintln("automatically on a cache miss; `jet inspect bind` is the manual refresh.")
+        exit(if args.is_empty() -> ExitCodes.USAGE else ExitCodes.OK)
+    }
+    header :: args[0]
+    pkg := String?{None}
+    out := String?{None}
+    overlay_path := String?{None}
+    links := [String]{}
+    quiet := false
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        match flag {
+            "--pkg", "--overlay", "--link", "-o", "--out" -> {
+                value :: args.get(i + 1).unwrap_or_else(|| -> {
+                    cli_error!("E2102", "`inspect bind` requires a value after `{flag}`")
+                    exit(ExitCodes.USAGE)
+                })
+                match flag {
+                    "--pkg" -> pkg = Val(value)
+                    "--overlay" -> overlay_path = Val(value)
+                    "--link" -> &links.push(value)
+                    _ -> out = Val(value)
+                }
+                i += 2
+            }
+            "--quiet" -> { quiet = true; i += 1 }
+            other -> {
+                cli_error!("E2102", "unknown `inspect bind` flag `{other}`")
+                eprintln("usage: {Syntax.BINARY_NAME} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]")
+                exit(ExitCodes.USAGE)
+            }
+        }
+    }
+    raw_lib :: pkg.unwrap_or_else(|| -> {
+        base :: header.rsplit('/').next().unwrap_or(header)
+        base.strip_suffix(".h").unwrap_or(base).to_string()
+    })
+    lib :: Syntax.sanitize_generated_name(raw_lib, Syntax.NameCase.Snake, "library")
+    header_src :: fs.read_to_string(header) ?? bind_e3208("Could not generate bindings from `{header}`.", "the header file could not be read ({err}).", "check the path, or install the library's dev headers.")
+    handle_overlay := if overlay_path == .Val(path) {
+        read_c_bind_overlay(path, lib) ?? bind_e3208("Could not read C binding overlay `{path}`.", "{err}.", "write `#Import module c.{lib} {{ … }}` in the overlay file")
+    } else jet.CBind.HandleOverlay.default()
+    loop link in links {
+        if !handle_overlay.links.contains(link) -> &handle_overlay.links.push(link)
+    }
+    result :: jet.CBind.generate_with_overlay(header_src, lib, &handle_overlay) ?? bind_e3208("Could not generate bindings from `{header}`.", "{err}.", "hand-write `#Import module c.{lib} {{ … }}` for the symbols you need.")
+    if !result.handle_skipped.is_empty() {
+        details :: result.handle_skipped.iter().map(|(handle, reason)| -> "`{handle}`: {reason}").collect::<[String]>().join("; ")
+        overlay :: overlay_path.unwrap_or("<overlay>")
+        bind_e3208("Could not generate bindings from `{header}`.", "opaque handle bindings were unresolved: {details}.", "add `#Close(close_function)` to `{overlay}` in the overlay")
+    }
+    project_root :: selected_project_root_for_path(header)
+    out_path :: out.unwrap_or_else(|| -> default_binding_output(header, "c", lib))
+    if OSPath.from(out_path).parent() == .Val(parent) {
+        fs.create_dir_all(&parent) ?? {
+            cli_error!("E2105", "could not create `{parent.display()}`: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    fs.write(out_path, result.source) ?? {
+        cli_error!("E2105", "could not write `{out_path}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    _ :: jet.CBind.write_bind_hash(&OSPath.from(out_path), header_src, "")
+    jet.CFFI.write_c_binding_metadata(&OSPath.from(out_path), &result.handles, &result.link_closure) ?? bind_e3208("Could not publish C binding metadata for `{header}`.", "{err}.", "rerun `jet inspect bind` after checking the output path")
+    header_path :: fs.canonicalize(header) ?? bind_e3208("Could not publish C binding provenance for `{header}`.", "the header path could not be resolved ({err}).", "check the header path and rerun `jet inspect bind`")
+    jet.CFFI.write_c_binding_provenance(&project_root, lib, &header_path, &OSPath.from(out_path)) ?? bind_e3208("Could not publish C binding provenance for `{header}`.", "{err}.", "check the project and local library paths, then rerun `jet inspect bind`")
+    if !quiet {
+        suffix :: if result.bound.len() == 1 -> "" else "s"
+        println("bound {result.bound.len()} function{suffix} from `{header}` → {out_path}")
+    }
+    if !result.skipped.is_empty() {
+        suffix :: if result.skipped.len() == 1 -> "" else "s"
+        println("skipped {result.skipped.len()} declaration{suffix} outside the bindable subset (hand-write `#Import` for these):")
+        loop (name, why) in result.skipped -> println("  - {name} — {why}")
+    }
+}
+// Rust: Source/CmdDevTools.rs:4967
+fn binding_plan_command(args: &[String]) -> Bool {
+    args.iter().any(|arg| -> arg == "--shape" || arg == "--freeze" || arg == "--policy" || arg == "--accept" || arg == "--update" || arg == "--explain") || args.first() == Val("--policy")
+}
+// Rust: Source/CmdDevTools.rs:4976
+fn run_binding_plan_command(args: &[String]) -> {
+    name := String?{None}
+    shape := BindingShape.Automatic
+    policy := BindingPolicy?{None}
+    explain := false
+    freeze := false
+    update := false
+    preview := false
+    accept := String?{None}
+    i := 0
+    loop i < args.len() {
+        flag :: args[i]
+        match flag {
+            "--shape", "--policy", "--accept" -> {
+                value :: args.get(i + 1).unwrap_or_else(|| -> {
+                    cli_error!("E2102", "`bind` requires a value after `{flag}`")
+                    exit(ExitCodes.USAGE)
+                })
+                match flag {
+                    "--shape" -> shape = BindingShape.parse(value) ?? {
+                        cli_error!("E2102", "{err}")
+                        exit(ExitCodes.USAGE)
+                    }
+                    "--policy" -> policy = Val(BindingPolicy.parse(value) ?? {
+                        cli_error!("E2102", "{err}")
+                        exit(ExitCodes.USAGE)
+                    })
+                    _ -> { accept = Val(value); update = true }
+                }
+                i += 2
+            }
+            "--explain" -> { explain = true; i += 1 }
+            "--freeze" -> { freeze = true; i += 1 }
+            "--update" -> { update = true; i += 1 }
+            "--preview" -> { preview = true; i += 1 }
+            value -> {
+                if value.starts_with('-') {
+                    cli_error!("E2102", "unknown `bind` flag `{value}`")
+                    exit(ExitCodes.USAGE)
+                }
+                if name.replace(value).is_some() {
+                    cli_error!("E2102", "`bind` accepts one binding name")
+                    exit(ExitCodes.USAGE)
+                }
+                i += 1
+            }
+        }
+    }
+    package_path :: OSPath.from("package.jet")
+    project_root :: selected_project_root_for_path("package.jet")
+    if policy == .Val(selected_policy) && name.is_none() {
+        update_binding_package_config(&package_path, None, None, Val(selected_policy)) ?? {
+            cli_error!("E2105", "{err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+        println("binding policy: {selected_policy}")
+        return
+    }
+    binding_name :: name.unwrap_or_else(|| -> {
+        cli_error!("E2102", "usage: jet bind <name> [--shape automatic|native] [--freeze]")
+        exit(ExitCodes.USAGE)
+    })
+    header_option :: binding_header_path(&project_root, binding_name)
+    if header_option.is_none() {
+        if explain && read_binding_plan(&project_root, binding_name) == .Val(record) {
+            print(record)
+            return
+        }
+        cli_error!("E3208", "binding `{binding_name}` has no pinned foreign header; pass an exact header through the project binding record")
+        exit(ExitCodes.USER_ERROR)
+    }
+    header :: header_option.unwrap()
+    header_source :: fs.read_to_string(&header) ?? {
+        cli_error!("E3208", "could not read binding header `{header.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    lib :: Syntax.sanitize_generated_name(binding_name, Syntax.NameCase.Snake, "library")
+    generated :: jet.CBind.generate_with_overlay(header_source, lib, &jet.CBind.HandleOverlay.default()) ?? {
+        cli_error!("E3208", "could not generate binding `{binding_name}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    contract :: annotate_binding_contract(generated.boundary, header_source, &header) ?? {
+        cli_error!("E3208", "binding `{binding_name}` has invalid canonical evidence: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    operation :: binding_operation_from_header(binding_name, header_source)
+    target :: "{selected_arch()}-{selected_os()}"
+    inputs :: BindingInputs.new(target, "jet-bindgen-v1", "{header.display()}:sha256-{jet.SHA256.sha256_hex(header_source.bytes())}").with_dependencies([String]{}).with_compiler_flags([String]{})
+    plan :: BindingPlan.resolve(&contract, operation, inputs, shape) ?? {
+        cli_error!("E3208", "{err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    if read_binding_plan(&project_root, binding_name) == .Val(recorded) && (policy == Val(BindingPolicy.Frozen) || freeze) {
+        plan.frozen_drift(recorded_digest(recorded)) ?? {
+            cli_error!("E3208", "{err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    if explain { print(plan.explain()); return }
+    if preview {
+        print(plan.explain())
+        println("preview: no package, lock, or generated facade files were written")
+        return
+    }
+    if accept == .Val(expected) {
+        if expected != plan.candidate_digest() {
+            cli_error!("E3208", "`--accept` digest `{expected}` does not match candidate `{plan.candidate_digest()}`")
+            exit(ExitCodes.USER_ERROR)
+        }
+    } else if update && !freeze && policy != Val(BindingPolicy.Frozen) {
+        cli_error!("E3208", "`--update` requires `--preview` or `--accept {plan.candidate_digest()}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    selected_plans := [String:BindingPlan]{}
+    selected_plans[binding_name] = plan
+    projected :: jet.CBind.generate_with_contract_and_plans(header_source, lib, &jet.CBind.HandleOverlay.default(), contract, &selected_plans) ?? {
+        cli_error!("E3208", "could not materialize binding facade `{binding_name}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    write_binding_cache(&project_root, binding_name, projected.source) ?? {
+        cli_error!("E2105", "{err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    write_binding_plan(&project_root, binding_name, &plan) ?? {
+        cli_error!("E2105", "{err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    update_binding_package_config(&package_path, Val(binding_name), Val(shape), policy.or_else(|| -> if freeze -> Val(BindingPolicy.Frozen) else None)) ?? {
+        cli_error!("E2105", "{err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    write_binding_facade(&project_root, binding_name, &plan) ?? {
+        cli_error!("E2105", "{err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    println("binding plan {binding_name} ({plan.candidate_digest()})")
+}
+// Rust: Source/CmdDevTools.rs:5206
+fn binding_header_path(project_root: &OSPath, name: String) -> OSPath? {
+    candidates :: [OSPath.from(name), OSPath.from("{name}.h"), OSPath.from("include/{name}.h"), OSPath.from("ffi/{name}.h"), project_root.join(".jet").join("ffi").join("{name}.h")]
+    candidates.iter().find(|path| -> path.is_file())
+}
+// Rust: Source/CmdDevTools.rs:5217
+fn marker_value(source: String, marker: String) -> String? {
+    loop line in source.lines() {
+        if line.split_once(marker) == .Val((_, rest)) {
+            value := rest.trim() // #4303
+            stripped :: value.strip_prefix(':').unwrap_or(value)
+            inner := stripped.trim() // #4303
+            if !inner.is_empty() -> return Val(inner.trim_matches('"').to_string())
+        }
+    }
+    None
+}
+// Rust: Source/CmdDevTools.rs:5225
+fn binding_operation_from_header(name: String, source: String) -> BindingOperation {
+    declaration := source.lines().map(|line| -> line.trim()).find(|line| -> line.contains("{name}(")).unwrap_or("") // #4303
+    native_signature :: declaration.trim_end_matches(';').to_string()
+    result_type :: declaration.split_once("{name}(").map(|(prefix, _)| -> {
+        if prefix.contains("char") && prefix.contains('*') -> return "String"
+        prefix.split_whitespace().last().unwrap_or("Unit").replace("const ", "")
+    }).filter(|value| -> !value.is_empty()).map(|value| -> match value {
+        "void" -> "Unit"
+        "uint64_t", "size_t" -> "U64"
+        "int", "int32_t" -> "Int"
+        "float", "double" -> "Float"
+        _ -> value
+    }).unwrap_or("Unit")
+    operation := BindingOperation.new(name, native_signature, result_type)
+    if declaration.split_once("{name}(") == .Val((_, tail)) && tail.split_once(')') == .Val((params, _)) {
+        parameters :: params.split(',').map(|value| -> value.trim()).collect::<[String]>() // #4303
+        pointer :: parameters.iter().find(|parameter| -> parameter.contains('*')).and_then(|parameter| -> parameter.split_whitespace().last()).map(|value| -> value.trim_start_matches('*').to_string())
+        count :: parameters.iter().find(|parameter| -> {
+            if parameter.contains('*') -> return false
+            lower :: parameter.to_ascii_lowercase()
+            lower.contains("count") || lower.contains("length") || lower.contains("len") || lower == "n" || lower.ends_with(" n")
+        }).and_then(|parameter| -> parameter.split_whitespace().last()).map(|value| -> value.to_string())
+        if pointer == .Val(pointer_name) && count == .Val(count_name) {
+            unit :: match marker_value(source, "jet-ffi-count-unit") {
+                .Val("bytes") -> CountUnit.Bytes
+                .Val(value) -> if value.starts_with("elements:") -> CountUnit.Elements(value[9..<value.len()].to_string()) else CountUnit.Unknown
+                _ -> CountUnit.Unknown
+            }
+            meaning :: match marker_value(source, "jet-ffi-count-meaning") {
+                .Val("full-extent") -> CountMeaning.FullExtent
+                .Val("prefix") -> CountMeaning.Prefix
+                _ -> CountMeaning.Unknown
+            }
+            width :: marker_value(source, "jet-ffi-count-width").and_then(|value| -> value.parse::<U16>().ok()).unwrap_or(0)
+            retention :: match marker_value(source, "jet-ffi-retention") {
+                .Val("borrowed-for-call") -> PointerRetention.BorrowedForCall
+                .Val("may-retain") -> PointerRetention.MayRetain
+                _ -> PointerRetention.Unknown
+            }
+            operation = operation.with_pointer_count(PointerCountFact.new(pointer_name, count_name, unit, meaning, width, retention))
+        }
+    }
+    operation.nullable_return = source.contains("jet-ffi-nullable")
+    operation.borrowed_view = source.contains("jet-ffi-borrowed-view")
+    operation.status_out = source.contains("jet-ffi-status-out")
+    operation.partial_success = source.contains("jet-ffi-partial-success")
+    operation.fallible_close = source.contains("jet-ffi-fallible-close")
+    operation.callback_transport = marker_value(source, "jet-ffi-callback").unwrap_or("none")
+    operation.effects = marker_value(source, "jet-ffi-effects").unwrap_or("foreign")
+    operation.ownership = marker_value(source, "jet-ffi-ownership").unwrap_or("signature-declared")
+    operation.failure_mapping = marker_value(source, "jet-ffi-failure").unwrap_or("preserve")
+    operation.copies = marker_value(source, "jet-ffi-copies").unwrap_or("none")
+    operation.placement = marker_value(source, "jet-ffi-placement").unwrap_or("caller")
+    operation.cleanup = marker_value(source, "jet-ffi-cleanup").unwrap_or("none")
+    operation
+}
+// Rust: Source/CmdDevTools.rs:5325
+fn annotate_binding_contract(contract_input: ForeignBoundaryContract, source: String, header: &OSPath) -> ForeignBoundaryContract Err! {
+    contract := ^contract_input
+    target :: "{selected_arch()}-{selected_os()}"
+    coverage :: ForeignArtifactCoverage.new("{header.display()}:sha256-{jet.SHA256.sha256_hex(source.bytes())}", target, "jet-bindgen-v1")
+        .with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
+    contract = contract.with_artifact_coverage(coverage)
+    loop raw_line in source.lines() {
+        if raw_line.split_once("jet-ffi-obligation:") != .Val((_, rest)) -> next
+        line := rest.trim() // #4303
+        obligation := String?{None}
+        basis := ForeignEvidenceBasis.Unknown
+        checker := ""
+        assumptions := [String]{}
+        loop field in line.split(';') {
+            if field.split_once('=') != .Val((raw_key, raw_value)) -> next
+            key := raw_key.trim() // #4303
+            value := raw_value.trim() // #4303
+            match key {
+                "name", "obligation" -> obligation = Val(value.to_string())
+                "basis" -> basis = match value {
+                    "proved" -> ForeignEvidenceBasis.Proved
+                    "enforced" -> ForeignEvidenceBasis.Enforced
+                    "contained" -> ForeignEvidenceBasis.Contained
+                    "trusted" -> ForeignEvidenceBasis.Trusted
+                    "unknown" -> ForeignEvidenceBasis.Unknown
+                    other -> return Err("unknown evidence basis `{other}`")
+                }
+                "checker" -> checker = value.to_string()
+                "assumptions" -> assumptions = raw_value.split('|').map(|item| -> item.trim()).filter(|item| -> !item.is_empty()).map(|item| -> item.to_string()).collect() // #4303
+                _ -> {}
+            }
+        }
+        if obligation == .Val(name) -> contract.set_obligation(name, basis, checker, assumptions)?
+        else -> return Err("an obligation marker needs `name=`")
+    }
+    Ok(contract)
+}
+// Rust: Source/CmdDevTools.rs:5388
+fn binding_plan_path(project_root: &OSPath, name: String) -> OSPath {
+    project_root.join(".jet").join("lock").join("bindings").join("{name}.plan")
+}
+// Rust: Source/CmdDevTools.rs:5396
+fn read_binding_plan(project_root: &OSPath, name: String) -> String? { fs.read_to_string(binding_plan_path(project_root, name)).ok() }
+// Rust: Source/CmdDevTools.rs:5400
+fn recorded_digest(record: String) -> String {
+    record.lines().find_map(|line| -> line.strip_prefix("digest=")).unwrap_or("")
+}
+// Rust: Source/CmdDevTools.rs:5407
+fn write_binding_plan(project_root: &OSPath, name: String, plan: &BindingPlan) -> Unit Err! {
+    path :: binding_plan_path(project_root, name)
+    if path.parent() != .Val(parent) -> return Err("binding lock path has no parent")
+    fs.create_dir_all(&parent) ?? return Err("could not create `{parent.display()}`: {err}")
+    record := "schema=jet-ffi-binding-plan-v1\nname={name}\ndigest={plan.digest}\nshape={plan.shape}\nboundary={plan.boundary_digest}\ninputs={plan.input_digest}\nartifact={plan.artifact}\n"
+    &record.push_str(plan.explain())
+    &record.push_str("\nfacade:\n")
+    &record.push_str(plan.render_facade())
+    fs.write(&path, record) ?? return Err("could not write binding lock: {err}")
+    Ok(())
+}
+// Rust: Source/CmdDevTools.rs:5428
+fn write_binding_facade(project_root: &OSPath, name: String, plan: &BindingPlan) -> Unit Err! {
+    path :: project_root.join(".jet").join("bindings").join("c").join("{name}.adapted.jet")
+    if path.parent() != .Val(parent) -> return Err("binding facade path has no parent")
+    fs.create_dir_all(&parent) ?? return Err("could not create `{parent.display()}`: {err}")
+    fs.write(&path, plan.render_facade()) ?? return Err("could not write generated binding facade: {err}")
+    Ok(())
+}
+// Rust: Source/CmdDevTools.rs:5447
+fn write_binding_cache(project_root: &OSPath, name: String, source: String) -> Unit Err! {
+    path :: project_root.join(".jet").join("bindings").join("c").join("{name}.jet")
+    if path.parent() != .Val(parent) -> return Err("binding cache path has no parent")
+    fs.create_dir_all(&parent) ?? return Err("could not create `{parent.display()}`: {err}")
+    fs.write(&path, source) ?? return Err("could not write generated binding cache: {err}")
+    Ok(())
+}
 

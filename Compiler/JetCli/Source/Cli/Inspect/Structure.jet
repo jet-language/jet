@@ -1,430 +1,185 @@
-// PORT-PENDING 0696 source-cmdmemory-module-group: Source/CmdStructure.rs:1-426
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-STRUCT-PLANE1=A: `jet inspect structure` projects the checked structure
-//RS //! facts and the structure slice of the one gate ledger. It does not run a
-//RS //! second analyzer and it never passes these compiler facts to codegen.
-//RS 
-//RS use std::path::PathBuf;
-//RS use std::process::exit;
-//RS 
-//RS use jet::Sema::GateLedger::{GateKind, GateLedger};
-//RS use jet_foundation::CoreModuleExports::{
-//RS     core_bootstrap_order, core_modules, CoreLeafKind, CORE_ROOT_TYPES,
-//RS };
-//RS use jet_foundation::Names::StructureFact;
-//RS use jet_foundation::Registry;
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS 
-//RS use crate::absolutize;
-//RS 
-//RS pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
-//RS     if args.iter().any(|argument| argument == "--core") {
-//RS         if json {
-//RS             render_core_json();
-//RS         } else {
-//RS             render_core_text();
-//RS         }
-//RS         return;
-//RS     }
-//RS     let Some(path) = entry_file(args) else {
-//RS         crate::cli_error!(
-//RS             @full "E2104",
-//RS             "`jet inspect structure` needs an entry file",
-//RS             "structure facts come from one checked Jet entry file",
-//RS             "run `jet inspect structure Examples/features/basics/hello.jet`"
-//RS         );
-//RS         exit(jet::ExitCodes::USAGE);
-//RS     };
-//RS 
-//RS     let abs = absolutize(&path);
-//RS     // Preserve the command's relative spelling in provenance. Loading still
-//RS     // resolves from the same working directory, while committed reports stay
-//RS     // deterministic across checkout paths.
-//RS     let entry = path;
-//RS     let (diagnostics, bundle, facts) =
-//RS         jet::Driver::check_file_with_effect_facts(&entry, None, false);
-//RS     let has_errors = diagnostics
-//RS         .iter()
-//RS         .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
-//RS     let Some(bundle) = (if has_errors { None } else { bundle }) else {
-//RS         if !facts.name_ledger.structure_facts().is_empty() {
-//RS             let mut ledger = GateLedger::default();
-//RS             ledger.append_structure_facts(&facts.name_ledger);
-//RS             if json {
-//RS                 render_json(facts.name_ledger.structure_facts(), &ledger);
-//RS             } else {
-//RS                 render_text(facts.name_ledger.structure_facts(), &ledger);
-//RS             }
-//RS         }
-//RS         render_frontend_diagnostics(&entry, &abs, &diagnostics, json, color);
-//RS     };
-//RS 
-//RS     let ledger = GateLedger::collect(&bundle, gates);
-//RS     if !ledger.diagnostics().is_empty() {
-//RS         render_gate_diagnostics(&ledger, &bundle, json, color);
-//RS     }
-//RS 
-//RS     if json {
-//RS         render_json(facts.name_ledger.structure_facts(), &ledger);
-//RS     } else {
-//RS         render_text(facts.name_ledger.structure_facts(), &ledger);
-//RS     }
-//RS }
-//RS 
-//RS fn entry_file(args: &[String]) -> Option<String> {
-//RS     args.iter()
-//RS         .find(|argument| !argument.starts_with('-'))
-//RS         .cloned()
-//RS }
-//RS 
-//RS fn render_core_text() {
-//RS     println!("core");
-//RS     println!("bootstrap:");
-//RS     for (index, step) in core_bootstrap_order().iter().enumerate() {
-//RS         let dependencies = if step.dependencies.is_empty() {
-//RS             "none".to_string()
-//RS         } else {
-//RS             step.dependencies.join(", ")
-//RS         };
-//RS         println!(
-//RS             "  {}. {}  depends_on [{}]",
-//RS             index + 1,
-//RS             step.name,
-//RS             dependencies
-//RS         );
-//RS     }
-//RS 
-//RS     println!("root types: {}", CORE_ROOT_TYPES.join(", "));
-//RS     println!("modules: {}", core_modules().len());
-//RS     for module in core_modules() {
-//RS         let dependencies = if module.dependencies.is_empty() {
-//RS             "none".to_string()
-//RS         } else {
-//RS             module.dependencies.join(", ")
-//RS         };
-//RS         println!("  module {}  depends_on [{}]", module.module, dependencies);
-//RS         println!("    members: {}", module.members.join(", "));
-//RS         if module.type_exports.is_empty() {
-//RS             println!("    types: (none)");
-//RS         } else {
-//RS             println!("    types:");
-//RS             for &(name, kind) in module.type_exports {
-//RS                 println!("      {name} ({})", core_leaf_kind_text(kind));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn core_leaf_kind_text(kind: CoreLeafKind) -> String {
-//RS     match kind {
-//RS         CoreLeafKind::Plain => "plain".to_string(),
-//RS         CoreLeafKind::CryptoNominal => "crypto_nominal".to_string(),
-//RS         CoreLeafKind::Generic(arity) => format!("generic({arity})"),
-//RS         CoreLeafKind::Enum(variants) => {
-//RS             format!("enum [{}]", variants.iter().copied().collect::<Vec<_>>().join(", "))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn core_type_json(name: &str, kind: CoreLeafKind) -> StatusValue {
-//RS     let mut fields = StatusFields::new()
-//RS         .with("name", name)
-//RS         .with(
-//RS             "kind",
-//RS             match kind {
-//RS                 CoreLeafKind::Plain => "plain",
-//RS                 CoreLeafKind::CryptoNominal => "crypto_nominal",
-//RS                 CoreLeafKind::Generic(_) => "generic",
-//RS                 CoreLeafKind::Enum(_) => "enum",
-//RS             },
-//RS         );
-//RS     if let CoreLeafKind::Enum(variants) = kind {
-//RS         fields = fields.with(
-//RS             "variants",
-//RS             StatusValue::array(variants.iter().copied().map(StatusValue::from)),
-//RS         );
-//RS     }
-//RS     StatusValue::object(fields)
-//RS }
-//RS 
-//RS fn render_core_json() {
-//RS     let bootstrap = StatusValue::array(core_bootstrap_order().iter().map(|step| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("name", step.name)
-//RS                 .with(
-//RS                     "dependencies",
-//RS                     StatusValue::array(step.dependencies.iter().copied().map(StatusValue::from)),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     let roots = StatusValue::array(CORE_ROOT_TYPES.iter().copied().map(StatusValue::from));
-//RS     let modules = StatusValue::array(core_modules().iter().map(|module| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("module", module.module)
-//RS                 .with(
-//RS                     "members",
-//RS                     StatusValue::array(module.members.iter().copied().map(StatusValue::from)),
-//RS                 )
-//RS                 .with(
-//RS                     "type_exports",
-//RS                     StatusValue::array(
-//RS                         module
-//RS                             .type_exports
-//RS                             .iter()
-//RS                             .map(|(name, kind)| core_type_json(name, *kind)),
-//RS                     ),
-//RS                 )
-//RS                 .with(
-//RS                     "dependencies",
-//RS                     StatusValue::array(module.dependencies.iter().copied().map(StatusValue::from)),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     let core = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("bootstrap", bootstrap)
-//RS             .with("root_types", roots)
-//RS             .with("modules", modules),
-//RS     );
-//RS     println!(
-//RS         "{}",
-//RS         StatusEnvelope::new("inspect.structure", true)
-//RS             .with_field("core", core)
-//RS             .json()
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS fn render_text(facts: &[StructureFact], ledger: &GateLedger) {
-//RS     println!("structure");
-//RS     for row in Registry::structure_rows() {
-//RS         println!(
-//RS             "  {}  safe={}  gates={}",
-//RS             row.name,
-//RS             row.safe_direction.name(),
-//RS             row.gates.join(", ")
-//RS         );
-//RS     }
-//RS 
-//RS     println!("facts: {}", facts.len());
-//RS     if facts.is_empty() {
-//RS         println!("  (none in this program)");
-//RS     } else {
-//RS         for fact in facts {
-//RS             println!(
-//RS                 "  {}  {}:{}..{}  {}  {} — {}",
-//RS                 fact.kind.name(),
-//RS                 fact.source,
-//RS                 fact.span.start,
-//RS                 fact.span.end,
-//RS                 fact.subject,
-//RS                 fact.status,
-//RS                 fact.detail
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let gates: Vec<_> = ledger
-//RS         .entries()
-//RS         .iter()
-//RS         .filter(|entry| entry.kind == GateKind::Structure)
-//RS         .collect();
-//RS     println!("gates: {}", gates.len());
-//RS     if gates.is_empty() {
-//RS         println!("  (none in this program)");
-//RS     } else {
-//RS         for entry in gates {
-//RS             println!(
-//RS                 "  {}  {}:{}..{}  {}  {} — {}",
-//RS                 entry.scope,
-//RS                 entry.source,
-//RS                 entry.span.map_or(0, |span| span.start),
-//RS                 entry.span.map_or(0, |span| span.end),
-//RS                 entry.subject,
-//RS                 entry.reason.as_deref().unwrap_or("unknown"),
-//RS                 entry.detail
-//RS             );
-//RS             for provenance in &entry.provenance {
-//RS                 println!("    provenance {provenance}");
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn render_json(facts: &[StructureFact], ledger: &GateLedger) {
-//RS     let rows = StatusValue::array(Registry::structure_rows().map(|row| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("name", row.name)
-//RS                 .with("safe_direction", row.safe_direction.name())
-//RS                 .with(
-//RS                     "gates",
-//RS                     StatusValue::array(row.gates.iter().copied().map(StatusValue::from)),
-//RS                 )
-//RS                 .with("decision", row.decision),
-//RS         )
-//RS     }));
-//RS     let facts = StatusValue::array(facts.iter().map(|fact| {
-//RS         let span = StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("start", fact.span.start)
-//RS                 .with("end", fact.span.end),
-//RS         );
-//RS         let gate = fact
-//RS             .gate
-//RS             .as_deref()
-//RS             .map(StatusValue::from)
-//RS             .unwrap_or(StatusValue::Null);
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", fact.kind.name())
-//RS                 .with(
-//RS                     "registry",
-//RS                     Registry::structure_row(fact.kind)
-//RS                         .map(|row| row.name)
-//RS                         .unwrap_or(fact.kind.name()),
-//RS                 )
-//RS                 .with("subject", fact.subject.as_str())
-//RS                 .with("source", fact.source.as_str())
-//RS                 .with("span", span)
-//RS                 .with("status", fact.status.as_str())
-//RS                 .with("detail", fact.detail.as_str())
-//RS                 .with("gate", gate),
-//RS         )
-//RS     }));
-//RS     let gates = StatusValue::array(
-//RS         ledger
-//RS             .entries()
-//RS             .iter()
-//RS             .filter(|entry| entry.kind == GateKind::Structure)
-//RS             .map(|entry| {
-//RS                 let span = StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("start", entry.span.map_or(0, |span| span.start))
-//RS                         .with("end", entry.span.map_or(0, |span| span.end)),
-//RS                 );
-//RS                 let reason = entry
-//RS                     .reason
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null);
-//RS                 let status = entry
-//RS                     .status
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null);
-//RS                 let provenance = StatusValue::array(
-//RS                     entry
-//RS                         .provenance
-//RS                         .iter()
-//RS                         .map(|value| StatusValue::from(value.as_str())),
-//RS                 );
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("kind", entry.kind.name())
-//RS                         .with("scope", entry.scope.as_str())
-//RS                         .with("source", entry.source.as_str())
-//RS                         .with("span", span)
-//RS                         .with("subject", entry.subject.as_str())
-//RS                         .with("reason", reason)
-//RS                         .with("status", status)
-//RS                         .with("detail", entry.detail.as_str())
-//RS                         .with("provenance", provenance),
-//RS                 )
-//RS             }),
-//RS     );
-//RS     let structure = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("rows", rows)
-//RS             .with("facts", facts)
-//RS             .with("gates", gates),
-//RS     );
-//RS     println!(
-//RS         "{}",
-//RS         StatusEnvelope::new("inspect.structure", true)
-//RS             .with_field("structure", structure)
-//RS             .json()
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS fn render_frontend_diagnostics(
-//RS     entry: &str,
-//RS     path: &PathBuf,
-//RS     diagnostics: &[jet::Diagnostics::Diagnostic],
-//RS     json: bool,
-//RS     color: bool,
-//RS ) -> ! {
-//RS     let source = std::fs::read_to_string(path).unwrap_or_default();
-//RS     if json {
-//RS         let reports = diagnostics.iter().map(|diagnostic| {
-//RS             diagnostic.to_report(
-//RS                 &crate::machine_report_path_for_process(entry),
-//RS                 &source,
-//RS             )
-//RS         });
-//RS         print!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.structure", false)
-//RS                 .with_reports(reports)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         for diagnostic in diagnostics {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(entry, &source, std::slice::from_ref(diagnostic), color,)
-//RS             );
-//RS         }
-//RS     }
-//RS     exit(jet::ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS fn render_gate_diagnostics(
-//RS     ledger: &GateLedger,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     json: bool,
-//RS     color: bool,
-//RS ) -> ! {
-//RS     if json {
-//RS         let reports = ledger.diagnostics().iter().map(|diagnostic| {
-//RS             let source = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .find(|module| module.display == diagnostic.source)
-//RS                 .map(|module| module.source.as_str())
-//RS                 .unwrap_or("");
-//RS             let file = crate::machine_report_path_for_bundle(bundle, &diagnostic.source);
-//RS             diagnostic.diagnostic.to_report(&file, source)
-//RS         });
-//RS         print!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.structure", false)
-//RS                 .with_reports(reports)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         for diagnostic in ledger.diagnostics() {
-//RS             let source = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .find(|module| module.display == diagnostic.source)
-//RS                 .map(|module| module.source.as_str())
-//RS                 .unwrap_or("");
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(
-//RS                     &diagnostic.source,
-//RS                     source,
-//RS                     std::slice::from_ref(&diagnostic.diagnostic),
-//RS                     color,
-//RS                 )
-//RS             );
-//RS         }
-//RS     }
-//RS     exit(jet::ExitCodes::USER_ERROR);
-//RS }
-// END-PORT-PENDING 0696 Source/CmdStructure.rs:1-426
+// Rust: Source/CmdStructure.rs:1
+// Projects checked structure facts and the structure slice of the one gate ledger.
+// No second analyzer; these facts never flow to codegen.
+use jet.[Sema, Policy, Driver, Diagnostics, AST, ExitCodes, render_all_colored]
+use jet_foundation.[core_bootstrap_order, core_modules, CoreLeafKind, CORE_ROOT_TYPES,
+    StructureFact, Registry, StatusEnvelope, StatusFields, StatusValue]
+use crate.[absolutize, cli_error, machine_report_path_for_process, machine_report_path_for_bundle]
+use std.[fs, process]
 
+// Rust: Source/CmdStructure.rs:18
+pub fn run_structure(args: &[String], json: Bool, color: Bool, gates: Policy.GateSet) -> {
+    if args.iter().any(argument -> argument == "--core") {
+        if json { render_core_json() } else { render_core_text() }
+        return
+    }
+    path :: if entry_file(args) == {
+        Val(path) -> path
+        None -> {
+            cli_error.full("E2104", "`jet inspect structure` needs an entry file",
+                "structure facts come from one checked Jet entry file",
+                "run `jet inspect structure Examples/features/basics/hello.jet`")
+            // GATE #4494: native process exit.
+            process.exit(ExitCodes.USAGE)
+        }
+    }
+    abs :: absolutize(path)
+    // Preserve relative provenance while loading from the same working directory.
+    entry :: path
+    (diagnostics, maybe_bundle, facts) :: Driver.check_file_with_effect_facts(entry, None, false)
+    has_errors :: diagnostics.iter().any(diagnostic -> diagnostic.severity == Diagnostics.Severity.Error)
+    bundle :: if (if has_errors { None } else { maybe_bundle }) == {
+        Val(bundle) -> bundle
+        None -> {
+            if !facts.name_ledger.structure_facts().is_empty() {
+                ledger := Sema.GateLedger.GateLedger.default()
+                ledger.append_structure_facts(facts.name_ledger)
+                if json { render_json(facts.name_ledger.structure_facts(), ledger) }
+                else { render_text(facts.name_ledger.structure_facts(), ledger) }
+            }
+            render_frontend_diagnostics(entry, abs, diagnostics, json, color)
+        }
+    }
+    ledger :: Sema.GateLedger.GateLedger.collect(bundle, gates)
+    if !ledger.diagnostics().is_empty() { render_gate_diagnostics(ledger, bundle, json, color) }
+    if json { render_json(facts.name_ledger.structure_facts(), ledger) }
+    else { render_text(facts.name_ledger.structure_facts(), ledger) }
+}
+// Rust: Source/CmdStructure.rs:72
+fn entry_file(args: &[String]) -> String? {
+    args.iter().find(argument -> !argument.starts_with("-")).cloned()
+}
+// Rust: Source/CmdStructure.rs:78
+fn render_core_text() -> {
+    println("core")
+    println("bootstrap:")
+    loop (index, step) in core_bootstrap_order().iter().enumerate() {
+        dependencies :: if step.dependencies.is_empty() { "none" } else { step.dependencies.join(", ") }
+        println("  {index + 1}. {step.name}  depends_on [{dependencies}]")
+    }
+    println("root types: {CORE_ROOT_TYPES.join(\", \")}")
+    println("modules: {core_modules().len()}")
+    loop module in core_modules() {
+        dependencies :: if module.dependencies.is_empty() { "none" } else { module.dependencies.join(", ") }
+        println("  module {module.module}  depends_on [{dependencies}]")
+        println("    members: {module.members.join(\", \")}")
+        if module.type_exports.is_empty() { println("    types: (none)") }
+        else {
+            println("    types:")
+            loop (name, kind) in module.type_exports { println("      {name} ({core_leaf_kind_text(kind)})") }
+        }
+    }
+}
+// Rust: Source/CmdStructure.rs:116
+fn core_leaf_kind_text(kind: CoreLeafKind) -> String {
+    if kind == {
+        .Plain -> "plain"
+        .CryptoNominal -> "crypto_nominal"
+        .Generic(arity) -> "generic({arity})"
+        .Enum(variants) -> "enum [{variants.join(\", \")}]"
+    }
+}
+// Rust: Source/CmdStructure.rs:127
+fn core_type_json(name: String, kind: CoreLeafKind) -> StatusValue {
+    kind_name :: if kind == { .Plain -> "plain"; .CryptoNominal -> "crypto_nominal"; .Generic(_) -> "generic"; .Enum(_) -> "enum" }
+    fields := StatusFields.new().with("name", name).with("kind", kind_name)
+    if kind == {
+        .Enum(variants) -> fields = fields.with("variants", StatusValue.array(variants.iter().map(value -> StatusValue.from(value))))
+        _ -> {}
+    }
+    StatusValue.object(fields)
+}
+// Rust: Source/CmdStructure.rs:148
+fn render_core_json() -> {
+    bootstrap :: StatusValue.array(core_bootstrap_order().iter().map(step ->
+        StatusValue.object(StatusFields.new().with("name", step.name)
+            .with("dependencies", StatusValue.array(step.dependencies.iter().map(value -> StatusValue.from(value)))))))
+    roots :: StatusValue.array(CORE_ROOT_TYPES.iter().map(value -> StatusValue.from(value)))
+    modules :: StatusValue.array(core_modules().iter().map(module ->
+        StatusValue.object(StatusFields.new().with("module", module.module)
+            .with("members", StatusValue.array(module.members.iter().map(value -> StatusValue.from(value))))
+            .with("type_exports", StatusValue.array(module.type_exports.iter().map(item -> core_type_json(item.0, item.1))))
+            .with("dependencies", StatusValue.array(module.dependencies.iter().map(value -> StatusValue.from(value)))))))
+    core :: StatusValue.object(StatusFields.new().with("bootstrap", bootstrap).with("root_types", roots).with("modules", modules))
+    println("{StatusEnvelope.new(\"inspect.structure\", true).with_field(\"core\", core).json()}")
+}
+// Rust: Source/CmdStructure.rs:198
+fn render_text(facts: &[StructureFact], ledger: &Sema.GateLedger.GateLedger) -> {
+    println("structure")
+    loop row in Registry.structure_rows() { println("  {row.name}  safe={row.safe_direction.name()}  gates={row.gates.join(\", \")}") }
+    println("facts: {facts.len()}")
+    if facts.is_empty() { println("  (none in this program)") }
+    else {
+        loop fact in facts {
+            println("  {fact.kind.name()}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}")
+        }
+    }
+    gates :: ledger.entries().iter().filter(entry -> entry.kind == Sema.GateLedger.GateKind.Structure).collect()
+    println("gates: {gates.len()}")
+    if gates.is_empty() { println("  (none in this program)") }
+    else {
+        loop entry in gates {
+            start :: entry.span.map_or(0, span -> span.start)
+            end :: entry.span.map_or(0, span -> span.end)
+            reason :: entry.reason ?? "unknown"
+            println("  {entry.scope}  {entry.source}:{start}..{end}  {entry.subject}  {reason} — {entry.detail}")
+            loop provenance in &entry.provenance { println("    provenance {provenance}") }
+        }
+    }
+}
+// Rust: Source/CmdStructure.rs:254
+fn render_json(facts: &[StructureFact], ledger: &Sema.GateLedger.GateLedger) -> {
+    rows :: StatusValue.array(Registry.structure_rows().map(row ->
+        StatusValue.object(StatusFields.new().with("name", row.name).with("safe_direction", row.safe_direction.name())
+            .with("gates", StatusValue.array(row.gates.iter().map(value -> StatusValue.from(value)))).with("decision", row.decision))))
+    fact_values :: StatusValue.array(facts.iter().map(fact -> {
+        span :: StatusValue.object(StatusFields.new().with("start", fact.span.start).with("end", fact.span.end))
+        gate :: fact.gate.map(value -> StatusValue.from(value)) ?? StatusValue.Null
+        registry :: Registry.structure_row(fact.kind).map(row -> row.name) ?? fact.kind.name()
+        StatusValue.object(StatusFields.new().with("kind", fact.kind.name()).with("registry", registry)
+            .with("subject", fact.subject).with("source", fact.source).with("span", span)
+            .with("status", fact.status).with("detail", fact.detail).with("gate", gate))
+    }))
+    gates :: StatusValue.array(ledger.entries().iter().filter(entry -> entry.kind == Sema.GateLedger.GateKind.Structure).map(entry -> {
+        span :: StatusValue.object(StatusFields.new().with("start", entry.span.map_or(0, span -> span.start))
+            .with("end", entry.span.map_or(0, span -> span.end)))
+        reason :: entry.reason.map(value -> StatusValue.from(value)) ?? StatusValue.Null
+        status :: entry.status.map(value -> StatusValue.from(value)) ?? StatusValue.Null
+        provenance :: StatusValue.array(entry.provenance.iter().map(value -> StatusValue.from(value)))
+        StatusValue.object(StatusFields.new().with("kind", entry.kind.name()).with("scope", entry.scope)
+            .with("source", entry.source).with("span", span).with("subject", entry.subject)
+            .with("reason", reason).with("status", status).with("detail", entry.detail).with("provenance", provenance))
+    }))
+    structure :: StatusValue.object(StatusFields.new().with("rows", rows).with("facts", fact_values).with("gates", gates))
+    println("{StatusEnvelope.new(\"inspect.structure\", true).with_field(\"structure\", structure).json()}")
+}
+// Rust: Source/CmdStructure.rs:351
+fn render_frontend_diagnostics(entry: String, path: &OSPath, diagnostics: &[Diagnostics.Diagnostic], json: Bool, color: Bool) -> Never {
+    // GATE #4494: native filesystem and process exit.
+    source :: fs.read_to_string(path).unwrap_or_default()
+    if json {
+        reports :: diagnostics.iter().map(diagnostic -> diagnostic.to_report(machine_report_path_for_process(entry), source))
+        print("{StatusEnvelope.new(\"inspect.structure\", false).with_reports(reports).json()}")
+    } else {
+        loop diagnostic in diagnostics { eprint("{render_all_colored(entry, source, [diagnostic], color)}") }
+    }
+    process.exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdStructure.rs:383
+fn render_gate_diagnostics(ledger: &Sema.GateLedger.GateLedger, bundle: &AST.ProgramBundle, json: Bool, color: Bool) -> Never {
+    if json {
+        reports :: ledger.diagnostics().iter().map(diagnostic -> {
+            source :: bundle.modules.iter().find(module -> module.display == diagnostic.source).map(module -> module.source) ?? ""
+            file :: machine_report_path_for_bundle(bundle, diagnostic.source)
+            diagnostic.diagnostic.to_report(file, source)
+        })
+        print("{StatusEnvelope.new(\"inspect.structure\", false).with_reports(reports).json()}")
+    } else {
+        loop diagnostic in ledger.diagnostics() {
+            source :: bundle.modules.iter().find(module -> module.display == diagnostic.source).map(module -> module.source) ?? ""
+            eprint("{render_all_colored(diagnostic.source, source, [diagnostic.diagnostic], color)}")
+        }
+    }
+    // GATE #4494: native process exit.
+    process.exit(ExitCodes.USER_ERROR)
+}

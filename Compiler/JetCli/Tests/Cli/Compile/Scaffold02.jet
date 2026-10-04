@@ -1,0 +1,17 @@
+use Cli.Compile.Scaffold.[library_stem, missing_c_lib, missing_linker, first_rustc_error_block]
+
+// Behavioral controls for Source/CmdCompile.rs:14148,15501-15563; no inline Rust tests in this window.
+#Test("library_stem_preserves_ascii_and_guards_leading_digit") {
+    assert(library_stem("12 café/lib") == "_12_caf__lib")
+    assert(library_stem("") == "library")
+    assert(library_stem("a-b_C") == "a-b_C")
+}
+#Test("missing_tools_remain_distinct_from_generated_code_rejection") {
+    assert(missing_c_lib("ld: cannot find -lraylib: No such file") == Val("raylib"))
+    assert(missing_linker("error: linker `cc` not found") == Val("cc"))
+    assert(missing_c_lib("error[E0308]: mismatched types") == None)
+}
+#Test("first_rustc_error_stops_at_next_diagnostic") {
+    assert(first_rustc_error_block("warning: earlier\nerror[E0308]: first\r\n  detail\r\n\r\nwarning: second\n") == Val("error[E0308]: first\r\n  detail"))
+    assert(first_rustc_error_block("warning: only\n") == None)
+}

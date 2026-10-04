@@ -1,0 +1,27 @@
+use jet_cli.Cli.Package.Bundle.[game_phase_names, validate_game_profile_name, profile_is_development, validate_declared_game_profile, validate_game_asset_relative_path]
+
+// Rust: Source/CmdPackage.rs:2170 — behavioral control (no original inline test).
+#Test("game phases include prerequisites in canonical order") {
+    assert(game_phase_names(Some("package,cook")).unwrap() == ["build", "cook", "stage", "package"])
+    assert(game_phase_names(Some("all")).unwrap() == ["build", "cook", "stage", "package", "export", "deploy", "run"])
+    assert(game_phase_names(Some(" , ")).is_err())
+    assert(game_phase_names(Some("unknown")).is_err())
+}
+
+// Rust: Source/CmdPackage.rs:2128,2140,2144 — behavioral control.
+#Test("game profiles preserve lexical and declaration validation") {
+    assert(validate_game_profile_name("release").is_ok())
+    assert(validate_game_profile_name("bad/name").is_err())
+    assert(profile_is_development("ci"))
+    assert(!profile_is_development("release"))
+    assert(validate_declared_game_profile("release", None).is_ok())
+    assert(validate_declared_game_profile("custom", None).is_err())
+}
+
+// Rust: Source/CmdPackage.rs:2681 — behavioral control.
+#Test("game asset paths reject noncanonical components") {
+    assert(validate_game_asset_relative_path("levels/main.jet").is_ok())
+    assert(validate_game_asset_relative_path("../main.jet").is_err())
+    assert(validate_game_asset_relative_path("levels//main.jet").is_err())
+    assert(validate_game_asset_relative_path("levels\\main.jet").is_err())
+}

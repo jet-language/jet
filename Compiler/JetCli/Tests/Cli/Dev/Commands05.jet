@@ -1,0 +1,22 @@
+use jet.AST.EverySchedule
+
+// Rust: Source/CmdDevTools.rs:9670
+#Test("interval_fires_once_then_waits") {
+    clock := JobClock.new()
+    jobs :: [("prune", EverySchedule.Duration(nanos: 60 * 1000000000))]
+    assert(clock.due(jobs) == ["prune"])
+    assert(clock.due(jobs).is_empty(), "must not re-fire on the very next tick")
+}
+// Rust: Source/CmdDevTools.rs:9689
+#Test("daily_fires_in_window_then_dedupes_same_day") {
+    clock := JobClock.new()
+    jobs :: [("nightly", EverySchedule.WallClockTime(hour: 3, minute: 0))]
+    day0_before_window :: 10 * 86400 + 2 * 3600 + 59 * 60
+    day0_in_window :: 10 * 86400 + 3 * 3600 + 0 * 60 + 30
+    day0_after_window :: 10 * 86400 + 3 * 3600 + 5 * 60
+    day1_in_window :: 11 * 86400 + 3 * 3600
+    assert(clock.due_at(jobs, day0_before_window).is_empty(), "must not fire before the target minute")
+    assert(clock.due_at(jobs, day0_in_window) == ["nightly"], "must fire inside the target minute")
+    assert(clock.due_at(jobs, day0_after_window).is_empty(), "must not re-fire later the same day, even outside the window")
+    assert(clock.due_at(jobs, day1_in_window) == ["nightly"], "must fire again the next day's matching window")
+}

@@ -1,533 +1,320 @@
-// PORT-PENDING 0696 source-cmdmemory-module-group: Source/CmdMemory.rs:1-529
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #1895: cross-run runtime-witness ledger and conservative repairs.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::exit;
-//RS 
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::parse_json;
-//RS 
-//RS use crate::OutputMode;
-//RS 
-//RS const LEDGER_SCHEMA: &str = "jet.memory.ledger";
-//RS const LEDGER_VERSION: u64 = 1;
-//RS const MAX_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
-//RS const MAX_LEDGER_ROWS: usize = 65_536;
-//RS const MAX_FIELD_BYTES: usize = 4 * 1024;
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS struct Row {
-//RS     kind: String,
-//RS     code: String,
-//RS     source: String,
-//RS     span_start: u64,
-//RS     span_end: u64,
-//RS     byte_spans: bool,
-//RS     scope: String,
-//RS     provenance: String,
-//RS     detail: String,
-//RS     expected: Option<String>,
-//RS     repairs: Vec<String>,
-//RS }
-//RS 
-//RS pub(crate) fn configure_ledger() {
-//RS     if std::env::var_os("JET_MEMORY_LEDGER").is_none() {
-//RS         let root = project_root();
-//RS         std::env::set_var("JET_MEMORY_LEDGER", ledger_path(&root));
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn audit(args: &[String], mode: OutputMode) {
-//RS     reject_arguments(args, "audit memory", mode);
-//RS     let rows = load(mode);
-//RS     if mode.json {
-//RS         println!("{}", render_audit_json(&rows));
-//RS     } else {
-//RS         let color = mode.color_stderr();
-//RS         print!("{}", render_audit_text(&rows, color));
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn fix(args: &[String], mode: OutputMode) {
-//RS     reject_arguments(args, "fix memory", mode);
-//RS     let dry_run = args.iter().any(|argument| argument == "--dry-run");
-//RS     let root = project_root();
-//RS     let rows = load(mode);
-//RS     let mut candidates: BTreeMap<PathBuf, Vec<&Row>> = BTreeMap::new();
-//RS     let mut options = Vec::new();
-//RS     for row in &rows {
-//RS         if row.byte_spans && row.expected.is_some() && row.repairs.len() == 1 {
-//RS             if let Some(path) = repair_path(&root, &row.source) {
-//RS                 candidates.entry(path).or_default().push(row);
-//RS             } else {
-//RS                 options.push(row);
-//RS             }
-//RS         } else {
-//RS             options.push(row);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut applied = Vec::new();
-//RS     for (path, mut edits) in candidates {
-//RS         let mut source = match std::fs::read_to_string(&path) {
-//RS             Ok(source) => source,
-//RS             Err(_) => {
-//RS                 options.extend(edits);
-//RS                 continue;
-//RS             }
-//RS         };
-//RS         edits.sort_by_key(|row| std::cmp::Reverse((row.span_start, row.span_end)));
-//RS         let mut last_start = u64::MAX;
-//RS         let mut changed = false;
-//RS         for row in edits {
-//RS             let Ok(start) = usize::try_from(row.span_start) else {
-//RS                 options.push(row);
-//RS                 continue;
-//RS             };
-//RS             let Ok(end) = usize::try_from(row.span_end) else {
-//RS                 options.push(row);
-//RS                 continue;
-//RS             };
-//RS             let expected = row
-//RS                 .expected
-//RS                 .as_deref()
-//RS                 .expect("candidate has expected text");
-//RS             let replacement = &row.repairs[0];
-//RS             if row.span_end > last_start {
-//RS                 options.push(row);
-//RS                 continue;
-//RS             }
-//RS             let replacement_end = start.checked_add(replacement.len());
-//RS             if start <= source.len()
-//RS                 && source.is_char_boundary(start)
-//RS                 && replacement_end.is_some_and(|end| {
-//RS                     end <= source.len()
-//RS                         && source.is_char_boundary(end)
-//RS                         && &source[start..end] == replacement
-//RS                 })
-//RS             {
-//RS                 applied.push((row, false));
-//RS                 last_start = row.span_start;
-//RS                 continue;
-//RS             }
-//RS             if start > end
-//RS                 || end > source.len()
-//RS                 || !source.is_char_boundary(start)
-//RS                 || !source.is_char_boundary(end)
-//RS                 || &source[start..end] != expected
-//RS             {
-//RS                 options.push(row);
-//RS                 continue;
-//RS             }
-//RS             source.replace_range(start..end, replacement);
-//RS             changed = true;
-//RS             applied.push((row, true));
-//RS             last_start = row.span_start;
-//RS         }
-//RS         if changed && !dry_run {
-//RS             write_atomic(&path, &source).unwrap_or_else(|error| {
-//RS                 fail(
-//RS                     format!(
-//RS                         "cannot apply memory repair to `{}`: {error}",
-//RS                         path.display()
-//RS                     ),
-//RS                     mode,
-//RS                 )
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     if mode.json {
-//RS         let applied = StatusValue::array(applied.iter().map(|(row, changed)| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("source", row.source.as_str())
-//RS                     .with("span_start", row.span_start)
-//RS                     .with("span_end", row.span_end)
-//RS                     .with("repair", row.repairs[0].as_str())
-//RS                     .with("changed", *changed && !dry_run),
-//RS             )
-//RS         }));
-//RS         let memory = StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("dry_run", dry_run)
-//RS                 .with("applied", applied)
-//RS                 .with("options", options.len()),
-//RS         );
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("fix.memory", true)
-//RS                 .with_field("memory", memory)
-//RS                 .json()
-//RS         );
-//RS         return;
-//RS     }
-//RS 
-//RS     println!("jet fix memory");
-//RS     println!("coverage: exercised runs only");
-//RS     if applied.is_empty() {
-//RS         println!("applied: none");
-//RS     } else {
-//RS         for (row, changed) in &applied {
-//RS             let action = if dry_run && *changed {
-//RS                 "would apply"
-//RS             } else if *changed {
-//RS                 "applied"
-//RS             } else {
-//RS                 "already applied"
-//RS             };
-//RS             println!(
-//RS                 "{action}: {}:{}..{} -> {}",
-//RS                 row.source, row.span_start, row.span_end, row.repairs[0]
-//RS             );
-//RS         }
-//RS     }
-//RS     for row in options {
-//RS         println!(
-//RS             "options: {}:{}..{} {}",
-//RS             row.source, row.span_start, row.span_end, row.detail
-//RS         );
-//RS         if row.repairs.is_empty() {
-//RS             println!("  - no safe automatic repair is known");
-//RS         } else {
-//RS             for repair in &row.repairs {
-//RS                 println!("  - {repair}");
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn load(mode: OutputMode) -> Vec<Row> {
-//RS     let root = project_root();
-//RS     let path = std::env::var_os("JET_MEMORY_LEDGER")
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|| ledger_path(&root));
-//RS     read_rows(&path).unwrap_or_else(|error| fail(error, mode))
-//RS }
-//RS 
-//RS fn reject_arguments(args: &[String], command: &str, mode: OutputMode) {
-//RS     if let Some(argument) = args.iter().find(|argument| !argument.starts_with('-')) {
-//RS         fail(format!("unexpected {command} argument `{argument}`"), mode);
-//RS     }
-//RS }
-//RS 
-//RS /// The workspace root, whose one `.jet/` holds the ledger.
-//RS fn project_root() -> PathBuf {
-//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     jet::Loader::selected_project_root(&cwd).unwrap_or(cwd)
-//RS }
-//RS 
-//RS fn ledger_path(root: &Path) -> PathBuf {
-//RS     root.join(".jet").join("memory").join("ledger-v1.jsonl")
-//RS }
-//RS fn repair_path(root: &Path, source: &str) -> Option<PathBuf> {
-//RS     let source = PathBuf::from(source);
-//RS     let joined = if source.is_absolute() {
-//RS         source
-//RS     } else {
-//RS         root.join(source)
-//RS     };
-//RS     let metadata = std::fs::symlink_metadata(&joined).ok()?;
-//RS     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-//RS         return None;
-//RS     }
-//RS     let canonical_root = std::fs::canonicalize(root).ok()?;
-//RS     let canonical_source = std::fs::canonicalize(joined).ok()?;
-//RS     canonical_source
-//RS         .starts_with(&canonical_root)
-//RS         .then_some(canonical_source)
-//RS }
-//RS 
-//RS fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
-//RS     let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-//RS         if error.kind() == std::io::ErrorKind::NotFound {
-//RS             format!("no memory ledger exists at `{}`", path.display())
-//RS         } else {
-//RS             format!("cannot inspect memory ledger `{}`: {error}", path.display())
-//RS         }
-//RS     })?;
-//RS     if !metadata.file_type().is_file() {
-//RS         return Err(format!(
-//RS             "memory ledger `{}` is not a regular file",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     if metadata.len() > MAX_LEDGER_BYTES {
-//RS         return Err("memory ledger exceeds its 4 MiB safety limit".to_string());
-//RS     }
-//RS     let raw = std::fs::read_to_string(path)
-//RS         .map_err(|error| format!("cannot read memory ledger `{}`: {error}", path.display()))?;
-//RS     let mut rows = Vec::new();
-//RS     for (index, line) in raw
-//RS         .lines()
-//RS         .filter(|line| !line.trim().is_empty())
-//RS         .enumerate()
-//RS     {
-//RS         if rows.len() >= MAX_LEDGER_ROWS {
-//RS             return Err(format!(
-//RS                 "memory ledger has more than {MAX_LEDGER_ROWS} rows"
-//RS             ));
-//RS         }
-//RS         let value = parse_json(line)
-//RS             .map_err(|_| format!("memory ledger row {} is malformed", index + 1))?;
-//RS         rows.push(parse_row(&value, index + 1)?);
-//RS     }
-//RS     rows.sort_by(|left, right| {
-//RS         (
-//RS             &left.source,
-//RS             left.span_start,
-//RS             left.span_end,
-//RS             &left.kind,
-//RS             &left.code,
-//RS             &left.provenance,
-//RS             &left.detail,
-//RS             &left.repairs,
-//RS         )
-//RS             .cmp(&(
-//RS                 &right.source,
-//RS                 right.span_start,
-//RS                 right.span_end,
-//RS                 &right.kind,
-//RS                 &right.code,
-//RS                 &right.provenance,
-//RS                 &right.detail,
-//RS                 &right.repairs,
-//RS             ))
-//RS     });
-//RS     Ok(rows)
-//RS }
-//RS fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
-//RS     let object = match value {
-//RS         DataTree::Object(object) => object,
-//RS         _ => return Err(format!("memory ledger row {line} is not an object")),
-//RS     };
-//RS     if string(object, "schema", line)? != LEDGER_SCHEMA
-//RS         || uint(object, "version", line)? != LEDGER_VERSION
-//RS     {
-//RS         return Err(format!(
-//RS             "memory ledger row {line} has an incompatible schema"
-//RS         ));
-//RS     }
-//RS     let span_start = uint(object, "span_start", line)?;
-//RS     let span_end = uint(object, "span_end", line)?;
-//RS     if span_start > span_end {
-//RS         return Err(format!("memory ledger row {line} has a reversed span"));
-//RS     }
-//RS     let expected = match object_field(object, "expected") {
-//RS         Some(DataTree::Null) | None => None,
-//RS         Some(value) => match value.as_str().ok().filter(|value| value.len() <= MAX_FIELD_BYTES) {
-//RS             Some(value) => Some(value.to_string()),
-//RS             None => {
-//RS                 return Err(format!(
-//RS                     "memory ledger row {line} has invalid expected text"
-//RS                 ))
-//RS             }
-//RS         },
-//RS     };
-//RS     let repairs = match object_field(object, "repairs") {
-//RS         Some(DataTree::Array(values)) if values.len() <= 16 => values
-//RS             .iter()
-//RS             .map(|value| {
-//RS                 value
-//RS                     .as_str()
-//RS                     .ok()
-//RS                     .filter(|value| !value.is_empty() && value.len() <= MAX_FIELD_BYTES)
-//RS                     .map(str::to_string)
-//RS                     .ok_or_else(|| format!("memory ledger row {line} has an invalid repair"))
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()?,
-//RS         _ => return Err(format!("memory ledger row {line} has invalid repairs")),
-//RS     };
-//RS     Ok(Row {
-//RS         kind: safe_string(object, "kind", line)?,
-//RS         code: safe_string(object, "code", line)?,
-//RS         source: safe_string(object, "source", line)?,
-//RS         span_start,
-//RS         span_end,
-//RS         byte_spans: boolean(object, "byte_spans", line)?,
-//RS         scope: safe_string(object, "scope", line)?,
-//RS         provenance: safe_string(object, "provenance", line)?,
-//RS         detail: safe_string(object, "detail", line)?,
-//RS         expected,
-//RS         repairs,
-//RS     })
-//RS }
-//RS 
-//RS fn object_field<'a>(object: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
-//RS     object.iter().find_map(|(key, value)| (key == name).then_some(value))
-//RS }
-//RS 
-//RS fn field<'a>(
-//RS     object: &'a [(String, DataTree)],
-//RS     name: &str,
-//RS     line: usize,
-//RS ) -> Result<&'a DataTree, String> {
-//RS     object_field(object, name)
-//RS         .ok_or_else(|| format!("memory ledger row {line} is missing `{name}`"))
-//RS }
-//RS 
-//RS fn string<'a>(
-//RS     object: &'a [(String, DataTree)],
-//RS     name: &str,
-//RS     line: usize,
-//RS ) -> Result<&'a str, String> {
-//RS     field(object, name, line)?
-//RS         .as_str()
-//RS         .map_err(|_| format!("memory ledger row {line} `{name}` is not text"))
-//RS }
-//RS 
-//RS fn safe_string(
-//RS     object: &[(String, DataTree)],
-//RS     name: &str,
-//RS     line: usize,
-//RS ) -> Result<String, String> {
-//RS     let value = string(object, name, line)?;
-//RS     if value.is_empty() || value.len() > MAX_FIELD_BYTES || value.chars().any(char::is_control) {
-//RS         return Err(format!(
-//RS             "memory ledger row {line} `{name}` is empty, unsafe, or too long"
-//RS         ));
-//RS     }
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn uint(
-//RS     object: &[(String, DataTree)],
-//RS     name: &str,
-//RS     line: usize,
-//RS ) -> Result<u64, String> {
-//RS     match field(object, name, line)? {
-//RS         DataTree::Int(value) if *value >= 0 => u64::try_from(*value).map_err(|_| {
-//RS             format!("memory ledger row {line} `{name}` is not a non-negative integer")
-//RS         }),
-//RS         _ => Err(format!(
-//RS             "memory ledger row {line} `{name}` is not a non-negative integer"
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn boolean(
-//RS     object: &[(String, DataTree)],
-//RS     name: &str,
-//RS     line: usize,
-//RS ) -> Result<bool, String> {
-//RS     match field(object, name, line)? {
-//RS         DataTree::Bool(value) => Ok(*value),
-//RS         _ => Err(format!("memory ledger row {line} `{name}` is not Bool")),
-//RS     }
-//RS }
-//RS 
-//RS fn render_audit_text(rows: &[Row], color: bool) -> String {
-//RS     let title = if color {
-//RS         "\x1b[1;36mjet audit memory\x1b[0m"
-//RS     } else {
-//RS         "jet audit memory"
-//RS     };
-//RS     let mut out = format!(
-//RS         "{title}\ncoverage: exercised runs only\nwitnesses: {}\n",
-//RS         rows.len()
-//RS     );
-//RS     if rows.is_empty() {
-//RS         out.push_str("\nNo runtime memory witnesses recorded.\n");
-//RS         return out;
-//RS     }
-//RS     for row in rows {
-//RS         out.push_str(&format!(
-//RS             "\n{}:{}..{}  {} {}\n  scope: {}\n  provenance: {}\n  witness: {}\n",
-//RS             row.source,
-//RS             row.span_start,
-//RS             row.span_end,
-//RS             row.kind,
-//RS             row.code,
-//RS             row.scope,
-//RS             row.provenance,
-//RS             row.detail
-//RS         ));
-//RS         if row.repairs.len() == 1 && row.byte_spans && row.expected.is_some() {
-//RS             out.push_str(&format!("  static repair: {}\n", row.repairs[0]));
-//RS         } else if row.repairs.is_empty() {
-//RS             out.push_str("  static repair: none known\n");
-//RS         } else {
-//RS             out.push_str("  static repair options:\n");
-//RS             for repair in &row.repairs {
-//RS                 out.push_str(&format!("    - {repair}\n"));
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn render_audit_json(rows: &[Row]) -> String {
-//RS     let count = rows.len();
-//RS     let rows = StatusValue::array(rows.iter().map(|row| {
-//RS         let repairs = StatusValue::array(
-//RS             row.repairs
-//RS                 .iter()
-//RS                 .map(|repair| StatusValue::from(repair.as_str())),
-//RS         );
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", row.kind.as_str())
-//RS                 .with("code", row.code.as_str())
-//RS                 .with("source", row.source.as_str())
-//RS                 .with("span_start", row.span_start)
-//RS                 .with("span_end", row.span_end)
-//RS                 .with("byte_spans", row.byte_spans)
-//RS                 .with("scope", row.scope.as_str())
-//RS                 .with("provenance", row.provenance.as_str())
-//RS                 .with("detail", row.detail.as_str())
-//RS                 .with("repairs", repairs),
-//RS         )
-//RS     }));
-//RS     let memory = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("coverage", "exercised runs only")
-//RS             .with("witnesses", count)
-//RS             .with("rows", rows),
-//RS     );
-//RS     StatusEnvelope::new("audit.memory", true)
-//RS         .with_field("memory", memory)
-//RS         .json()
-//RS }
-//RS 
-//RS fn write_atomic(path: &Path, source: &str) -> Result<(), String> {
-//RS     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-//RS     let name = path
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .unwrap_or("source");
-//RS     let temporary = parent.join(format!(".{name}.memory-fix-{}", std::process::id()));
-//RS     let metadata = std::fs::metadata(path)
-//RS         .map_err(|error| format!("cannot inspect source permissions: {error}"))?;
-//RS     std::fs::write(&temporary, source)
-//RS         .map_err(|error| format!("cannot write temporary repair: {error}"))?;
-//RS     std::fs::set_permissions(&temporary, metadata.permissions())
-//RS         .map_err(|error| format!("cannot preserve source permissions: {error}"))?;
-//RS     std::fs::rename(&temporary, path)
-//RS         .map_err(|error| format!("cannot publish repaired source: {error}"))
-//RS }
-//RS 
-//RS fn fail(detail: String, mode: OutputMode) -> ! {
-//RS     let diagnostic =
-//RS         jet::Diagnostics::Diagnostic::from_row("E2112", &[("detail", detail.as_str())], None);
-//RS     if mode.json {
-//RS         print!(
-//RS             "{}",
-//RS             jet::render_all_json(
-//RS                 &jet::Diagnostics::ReportPath::from_process(""),
-//RS                 "",
-//RS                 &[diagnostic],
-//RS             )
-//RS         );
-//RS     } else {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored("", "", &[diagnostic], mode.color_stderr())
-//RS         );
-//RS     }
-//RS     exit(jet::ExitCodes::USER_ERROR)
-//RS }
-// END-PORT-PENDING 0696 Source/CmdMemory.rs:1-529
+// Rust: Source/CmdMemory.rs:1
+// Cross-run runtime-witness ledger and conservative repairs.
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue, DataTree, parse_json]
+use jet.[Loader, Diagnostics, ExitCodes, render_all_json, render_all_colored]
+use crate.[OutputMode]
+use std.[fs, env, process]
 
+// Rust: Source/CmdMemory.rs:13
+const LEDGER_SCHEMA: String = "jet.memory.ledger"
+// Rust: Source/CmdMemory.rs:14
+const LEDGER_VERSION: UInt64 = 1
+// Rust: Source/CmdMemory.rs:15
+const MAX_LEDGER_BYTES: UInt64 = 4 * 1024 * 1024
+// Rust: Source/CmdMemory.rs:16
+const MAX_LEDGER_ROWS: Int = 65_536
+// Rust: Source/CmdMemory.rs:17
+const MAX_FIELD_BYTES: Int = 4 * 1024
+
+// Rust: Source/CmdMemory.rs:19
+struct Row {
+    kind: String
+    code: String
+    source: String
+    span_start: UInt64
+    span_end: UInt64
+    byte_spans: Bool
+    scope: String
+    provenance: String
+    detail: String
+    expected: String?
+    repairs: [String]
+}
+
+// Rust: Source/CmdMemory.rs:34
+pub fn configure_ledger() -> {
+    // GATE #4494: native environment access.
+    if env.var_os("JET_MEMORY_LEDGER") == None {
+        root :: project_root()
+        env.set_var("JET_MEMORY_LEDGER", ledger_path(root))
+    }
+}
+// Rust: Source/CmdMemory.rs:41
+pub fn audit(args: &[String], mode: OutputMode) -> {
+    reject_arguments(args, "audit memory", mode)
+    rows :: load(mode)
+    if mode.json { println("{render_audit_json(rows)}") }
+    else { print("{render_audit_text(rows, mode.color_stderr())}") }
+}
+// Rust: Source/CmdMemory.rs:52
+pub fn fix(args: &[String], mode: OutputMode) -> {
+    reject_arguments(args, "fix memory", mode)
+    dry_run :: args.iter().any(argument -> argument == "--dry-run")
+    root :: project_root()
+    rows :: load(mode)
+    candidates := [OSPath:[&Row]]{}
+    options := [&Row]{}
+    loop row in &rows {
+        if row.byte_spans && row.expected != None && row.repairs.len() == 1 {
+            if repair_path(root, row.source) == {
+                Val(path) -> candidates.entry(path).or_default().push(row)
+                None -> options.push(row)
+            }
+        } else { options.push(row) }
+    }
+    applied := [(&Row, Bool)]{}
+    paths := candidates.keys().collect()
+    paths.sort()
+    loop path in paths {
+        edits := candidates.remove(path).unwrap()
+        // GATE #4494: native filesystem.
+        source := if fs.read_to_string(path) == {
+            Ok(text) -> text
+            Err(_) -> { options.extend(^edits); next }
+        }
+        edits.sort_by(left, right -> (right.span_start, right.span_end).cmp((left.span_start, left.span_end)))
+        last_start := UInt64.MAX
+        changed := false
+        loop row in edits {
+            start :: if Int.try_from(row.span_start) == {
+                Ok(value) -> value
+                Err(_) -> { options.push(row); next }
+            }
+            end :: if Int.try_from(row.span_end) == {
+                Ok(value) -> value
+                Err(_) -> { options.push(row); next }
+            }
+            expected :: row.expected.expect("candidate has expected text")
+            replacement :: &row.repairs[0]
+            if row.span_end > last_start { options.push(row); next }
+            replacement_end :: start.checked_add(replacement.len())
+            if start <= source.len() && source.is_char_boundary(start)
+                && replacement_end.is_some_and(stop -> stop <= source.len() && source.is_char_boundary(stop) && source[start..<stop] == replacement) {
+                applied.push((row, false))
+                last_start = row.span_start
+                next
+            }
+            if start > end || end > source.len() || !source.is_char_boundary(start)
+                || !source.is_char_boundary(end) || source[start..<end] != expected {
+                options.push(row)
+                next
+            }
+            source.replace_range(start..<end, replacement)
+            changed = true
+            applied.push((row, true))
+            last_start = row.span_start
+        }
+        if changed && !dry_run {
+            if write_atomic(path, source) == {
+                Ok(_) -> {}
+                Err(error) -> fail("cannot apply memory repair to `{path.display()}`: {error}", mode)
+            }
+        }
+    }
+    if mode.json {
+        values :: StatusValue.array(applied.iter().map(item -> {
+            (row, changed) :: item
+            StatusValue.object(StatusFields.new().with("source", row.source)
+                .with("span_start", row.span_start).with("span_end", row.span_end)
+                .with("repair", row.repairs[0]).with("changed", changed && !dry_run))
+        }))
+        memory :: StatusValue.object(StatusFields.new().with("dry_run", dry_run)
+            .with("applied", values).with("options", options.len()))
+        println("{StatusEnvelope.new(\"fix.memory\", true).with_field(\"memory\", memory).json()}")
+        return
+    }
+    println("jet fix memory")
+    println("coverage: exercised runs only")
+    if applied.is_empty() { println("applied: none") }
+    else {
+        loop (row, changed) in &applied {
+            action :: if dry_run && changed { "would apply" } else if changed { "applied" } else { "already applied" }
+            println("{action}: {row.source}:{row.span_start}..{row.span_end} -> {row.repairs[0]}")
+        }
+    }
+    loop row in options {
+        println("options: {row.source}:{row.span_start}..{row.span_end} {row.detail}")
+        if row.repairs.is_empty() { println("  - no safe automatic repair is known") }
+        else { loop repair in &row.repairs { println("  - {repair}") } }
+    }
+}
+// Rust: Source/CmdMemory.rs:201
+fn load(mode: OutputMode) -> [Row] {
+    root :: project_root()
+    // GATE #4494: native environment access.
+    path :: env.var_os("JET_MEMORY_LEDGER").map(value -> OSPath.from(value)) ?? ledger_path(root)
+    if read_rows(path) == { Ok(rows) -> rows; Err(error) -> fail(error, mode) }
+}
+// Rust: Source/CmdMemory.rs:209
+fn reject_arguments(args: &[String], command: String, mode: OutputMode) -> {
+    loop argument in args {
+        if !argument.starts_with("-") { fail("unexpected {command} argument `{argument}`", mode) }
+    }
+}
+// Rust: Source/CmdMemory.rs:216
+fn project_root() -> OSPath {
+    // GATE #4494: native working directory.
+    cwd :: env.current_dir().unwrap_or_else(_ -> OSPath.from("."))
+    Loader.selected_project_root(cwd) ?? cwd
+}
+// Rust: Source/CmdMemory.rs:221
+fn ledger_path(root: &OSPath) -> OSPath { root.join(".jet").join("memory").join("ledger-v1.jsonl") }
+// Rust: Source/CmdMemory.rs:224
+fn repair_path(root: &OSPath, source: String) -> OSPath? {
+    source_path :: OSPath.from(source)
+    joined :: if source_path.is_absolute() { source_path } else { root.join(source_path) }
+    // GATE #4494: no-follow metadata and canonical paths.
+    metadata :: fs.symlink_metadata(joined).ok()?
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() { return None }
+    canonical_root :: fs.canonicalize(root).ok()?
+    canonical_source :: fs.canonicalize(joined).ok()?
+    if canonical_source.starts_with(canonical_root) { Val(canonical_source) } else { None }
+}
+// Rust: Source/CmdMemory.rs:242
+fn read_rows(path: &OSPath) -> [Row] Err! {
+    // GATE #4494: native filesystem.
+    metadata :: fs.symlink_metadata(path).map_err(error -> {
+        if error.kind() == std.io.ErrorKind.NotFound { "no memory ledger exists at `{path.display()}`" }
+        else { "cannot inspect memory ledger `{path.display()}`: {error}" }
+    })?
+    if !metadata.file_type().is_file() { return Err("memory ledger `{path.display()}` is not a regular file") }
+    if metadata.len() > MAX_LEDGER_BYTES { return Err("memory ledger exceeds its 4 MiB safety limit") }
+    raw :: fs.read_to_string(path).map_err(error -> "cannot read memory ledger `{path.display()}`: {error}")?
+    rows := [Row]{}
+    index := 0
+    loop line in raw.lines() {
+        trimmed := line.trim() // #4303
+        if trimmed.is_empty() { next }
+        index += 1
+        if rows.len() >= MAX_LEDGER_ROWS { return Err("memory ledger has more than {MAX_LEDGER_ROWS} rows") }
+        value :: parse_json(line).map_err(_ -> "memory ledger row {index} is malformed")?
+        rows.push(parse_row(value, index)?)
+    }
+    rows.sort_by(left, right -> (left.source, left.span_start, left.span_end, left.kind, left.code, left.provenance, left.detail, left.repairs)
+        .cmp((right.source, right.span_start, right.span_end, right.kind, right.code, right.provenance, right.detail, right.repairs)))
+    Ok(rows)
+}
+// Rust: Source/CmdMemory.rs:300
+fn parse_row(value: &DataTree, line: Int) -> Row Err! {
+    object :: if value == { .Object(object) -> object; _ -> return Err("memory ledger row {line} is not an object") }
+    if string(object, "schema", line)? != LEDGER_SCHEMA || uint(object, "version", line)? != LEDGER_VERSION {
+        return Err("memory ledger row {line} has an incompatible schema")
+    }
+    span_start :: uint(object, "span_start", line)?
+    span_end :: uint(object, "span_end", line)?
+    if span_start > span_end { return Err("memory ledger row {line} has a reversed span") }
+    expected :: if object_field(object, "expected") == {
+        None -> None
+        Val(.Null) -> None
+        Val(value) -> {
+            text :: value.as_str().ok()
+            if text == {
+                Val(text) -> {
+                    if text.len() > MAX_FIELD_BYTES { return Err("memory ledger row {line} has invalid expected text") }
+                    Val(text.to_string())
+                }
+                None -> return Err("memory ledger row {line} has invalid expected text")
+            }
+        }
+    }
+    repairs := [String]{}
+    if object_field(object, "repairs") == {
+        Val(.Array(values)) -> {
+            if values.len() > 16 { return Err("memory ledger row {line} has invalid repairs") }
+            loop value in values {
+                text :: value.as_str().map_err(_ -> "memory ledger row {line} has an invalid repair")?
+                if text.is_empty() || text.len() > MAX_FIELD_BYTES { return Err("memory ledger row {line} has an invalid repair") }
+                repairs.push(text.to_string())
+            }
+        }
+        _ -> return Err("memory ledger row {line} has invalid repairs")
+    }
+    Ok(Row{kind: safe_string(object, "kind", line)?, code: safe_string(object, "code", line)?,
+        source: safe_string(object, "source", line)?, span_start: span_start, span_end: span_end,
+        byte_spans: boolean(object, "byte_spans", line)?, scope: safe_string(object, "scope", line)?,
+        provenance: safe_string(object, "provenance", line)?, detail: safe_string(object, "detail", line)?,
+        expected: expected, repairs: repairs})
+}
+// Rust: Source/CmdMemory.rs:357
+fn object_field(object: &[(String, DataTree)], name: String) -> &DataTree? {
+    loop (key, value) in object { if key == name { return Val(value) } }
+    None
+}
+// Rust: Source/CmdMemory.rs:361
+fn field(object: &[(String, DataTree)], name: String, line: Int) -> &DataTree Err! {
+    object_field(object, name).ok_or_else(() -> "memory ledger row {line} is missing `{name}`")
+}
+// Rust: Source/CmdMemory.rs:370
+fn string(object: &[(String, DataTree)], name: String, line: Int) -> String Err! {
+    field(object, name, line)?.as_str().map_err(_ -> "memory ledger row {line} `{name}` is not text")
+}
+// Rust: Source/CmdMemory.rs:380
+fn safe_string(object: &[(String, DataTree)], name: String, line: Int) -> String Err! {
+    value :: string(object, name, line)?
+    if value.is_empty() || value.len() > MAX_FIELD_BYTES || value.chars().any(ch -> ch.is_control()) {
+        return Err("memory ledger row {line} `{name}` is empty, unsafe, or too long")
+    }
+    Ok(value.to_string())
+}
+// Rust: Source/CmdMemory.rs:394
+fn uint(object: &[(String, DataTree)], name: String, line: Int) -> UInt64 Err! {
+    if field(object, name, line)? == {
+        .Int(value) -> {
+            if value < 0 { return Err("memory ledger row {line} `{name}` is not a non-negative integer") }
+            UInt64.try_from(value).map_err(_ -> "memory ledger row {line} `{name}` is not a non-negative integer")
+        }
+        _ -> Err("memory ledger row {line} `{name}` is not a non-negative integer")
+    }
+}
+// Rust: Source/CmdMemory.rs:409
+fn boolean(object: &[(String, DataTree)], name: String, line: Int) -> Bool Err! {
+    if field(object, name, line)? == { .Bool(value) -> Ok(value); _ -> Err("memory ledger row {line} `{name}` is not Bool") }
+}
+// Rust: Source/CmdMemory.rs:420
+fn render_audit_text(rows: &[Row], color: Bool) -> String {
+    title :: if color { "\x1b[1;36mjet audit memory\x1b[0m" } else { "jet audit memory" }
+    out := "{title}\ncoverage: exercised runs only\nwitnesses: {rows.len()}\n"
+    if rows.is_empty() { out.push_str("\nNo runtime memory witnesses recorded.\n"); return out }
+    loop row in rows {
+        out.push_str("\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {row.code}\n  scope: {row.scope}\n  provenance: {row.provenance}\n  witness: {row.detail}\n")
+        if row.repairs.len() == 1 && row.byte_spans && row.expected != None { out.push_str("  static repair: {row.repairs[0]}\n") }
+        else if row.repairs.is_empty() { out.push_str("  static repair: none known\n") }
+        else {
+            out.push_str("  static repair options:\n")
+            loop repair in &row.repairs { out.push_str("    - {repair}\n") }
+        }
+    }
+    out
+}
+// Rust: Source/CmdMemory.rs:460
+fn render_audit_json(rows: &[Row]) -> String {
+    count :: rows.len()
+    values :: StatusValue.array(rows.iter().map(row -> {
+        repairs :: StatusValue.array(row.repairs.iter().map(repair -> StatusValue.from(repair)))
+        StatusValue.object(StatusFields.new().with("kind", row.kind).with("code", row.code)
+            .with("source", row.source).with("span_start", row.span_start).with("span_end", row.span_end)
+            .with("byte_spans", row.byte_spans).with("scope", row.scope).with("provenance", row.provenance)
+            .with("detail", row.detail).with("repairs", repairs))
+    }))
+    memory :: StatusValue.object(StatusFields.new().with("coverage", "exercised runs only").with("witnesses", count).with("rows", values))
+    StatusEnvelope.new("audit.memory", true).with_field("memory", memory).json()
+}
+// Rust: Source/CmdMemory.rs:493
+fn write_atomic(path: &OSPath, source: String) -> Unit Err! {
+    parent :: path.parent() ?? OSPath.from(".")
+    name :: path.file_name().and_then(name -> name.to_str()) ?? "source"
+    // GATE #4494: process id and atomic native file publication, preserving permissions.
+    temporary :: parent.join(".{name}.memory-fix-{process.id()}")
+    metadata :: fs.metadata(path).map_err(error -> "cannot inspect source permissions: {error}")?
+    fs.write(temporary, source).map_err(error -> "cannot write temporary repair: {error}")?
+    fs.set_permissions(temporary, metadata.permissions()).map_err(error -> "cannot preserve source permissions: {error}")?
+    fs.rename(temporary, path).map_err(error -> "cannot publish repaired source: {error}")
+}
+// Rust: Source/CmdMemory.rs:510
+fn fail(detail: String, mode: OutputMode) -> Never {
+    diagnostic :: Diagnostics.Diagnostic.from_row("E2112", [("detail", detail)], None)
+    if mode.json { print("{render_all_json(Diagnostics.ReportPath.from_process(\"\"), \"\", [diagnostic])}") }
+    else { eprint("{render_all_colored(\"\", \"\", [diagnostic], mode.color_stderr())}") }
+    // GATE #4494: process exit.
+    process.exit(ExitCodes.USER_ERROR)
+}

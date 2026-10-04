@@ -1,0 +1,59 @@
+use Cli.Host.Facade.*
+use Diagnostics.Diagnostic
+use std.[fs, env, time, process]
+use std.os.unix.fs.symlink
+use core.sys.target
+
+// Rust: Source/lib.rs:1731-1802; faithful native control, no original inline test.
+#Test("generated_export_transaction_restores_original_bytes_and_removes_new_file") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet-generated-export-{process.id()}-{stamp}")
+    fs.create_dir_all(root.join(".jet/generated")).unwrap()
+    existing :: root.join(".jet/generated/existing.jet")
+    added :: root.join(".jet/generated/added.jet")
+    fs.write(existing, b"original\n").unwrap()
+    transaction :: GeneratedExportTransaction.new(root, [~existing, ~added, ~existing].into_iter()).unwrap()
+    assert_eq(transaction.files.len(), 2)
+    fs.write(existing, b"replacement\n").unwrap()
+    fs.write(added, b"new\n").unwrap()
+    drop(transaction)
+    assert_eq(fs.read(existing).unwrap(), b"original\n")
+    assert(!added.exists())
+    committed := GeneratedExportTransaction.new(root, [~existing].into_iter()).unwrap()
+    fs.write(existing, b"committed\n").unwrap()
+    committed.commit()
+    drop(committed)
+    assert_eq(fs.read(existing).unwrap(), b"committed\n")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: Source/lib.rs:1738-1764; faithful native refusal control.
+#Test("generated_export_transaction_rejects_symlink_without_mutating_victim") {
+    // GATE #4483/#4494: selected Unix test arm and actual native symlink.
+    if target.selected_family() == "unix" {
+        stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+        root :: env.temp_dir().join("jet-generated-symlink-{process.id()}-{stamp}")
+        fs.create_dir_all(root.join(".jet/generated")).unwrap()
+        victim :: root.join("victim.jet")
+        link :: root.join(".jet/generated/link.jet")
+        fs.write(victim, b"victim\n").unwrap()
+        symlink(victim, link).unwrap()
+        error :: GeneratedExportTransaction.new(root, [~link].into_iter()).unwrap_err()
+        assert_eq(error.kind(), .PermissionDenied)
+        assert_eq(fs.read(victim).unwrap(), b"victim\n")
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/lib.rs:1701-1721; preserve package error identity and workspace contract.
+#Test("workspace_build_root_diagnostic_preserves_package_manifest_error") {
+    diagnostic :: Diagnostic.error("E1221", "manifest rejected", "manifest detail", "fix manifest", None)
+    result :: workspace_build_root_diagnostic(OSPath.from("workspace.jet"), &diagnostic)
+    assert_eq(result.code, "E1221")
+    assert_eq(result.why, "manifest detail")
+    unavailable :: Diagnostic.error("E3501", "build rejected", "missing effect", "grant effect", None)
+    wrapped :: workspace_build_root_diagnostic(OSPath.from("workspace.jet"), &unavailable)
+    assert_eq(wrapped.code, "E3503")
+    assert(wrapped.why.contains("workspace.jet"))
+    assert(wrapped.why.contains("missing effect"))
+}

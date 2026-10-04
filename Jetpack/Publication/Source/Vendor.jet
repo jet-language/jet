@@ -1,221 +1,117 @@
-// PORT-PENDING 0827 source-publish-vendor: Source/Publish/Vendor.rs:1-217
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Lock::LockFile;
-//RS use crate::Store;
-//RS use std::ffi::OsStr;
-//RS use std::io;
-//RS use std::path::{Component, Path, PathBuf};
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // `jet registry vendor` — copy resolved deps into vendor/
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// Copy all resolved dependency store entries into `<vendor_dir>/<name>/`.
-//RS /// `vendor_dir` is `<project_root>/vendor` by default (D-SUPPLY1 `--vendor-dir`
-//RS /// relocates it). After vendoring, `--locked` builds can run offline by reading
-//RS /// from the vendor tree.
-//RS ///
-//RS /// Also writes `<vendor_dir>/manifest.json` recording each dependency's name,
-//RS /// version, and tree-hash fingerprint, so an offline build can verify the copy
-//RS /// against the lockfile before trusting it (Tier B integrity floor).
-//RS pub fn vendor(
-//RS     project_root: &Path,
-//RS     lock: &LockFile,
-//RS     dep_dirs: &std::collections::HashMap<String, PathBuf>,
-//RS     vendor_dir: &Path,
-//RS ) -> Result<Vec<String>, Diagnostic> {
-//RS     let _ = project_root; // resolved by the caller into `vendor_dir`
-//RS     let vendor = Store::ensure_directory_authority(vendor_dir)
-//RS         .map_err(|error| vendor_io_error("creating vendor directory", vendor_dir, error))?;
-//RS 
-//RS     let mut copied = Vec::new();
-//RS     for (name, src_dir) in dep_dirs {
-//RS         if !safe_component(name) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E2604",
-//RS                 format!("dependency `{name}` cannot be written to the vendor tree"),
-//RS                 "dependency names must be one safe path component".into(),
-//RS                 "use a dependency name without `/`, `\\`, `:`, or `..`".into(),
-//RS                 None,
-//RS             ));
-//RS         }
-//RS 
-//RS         let source = Store::open_directory_authority(src_dir)
-//RS             .map_err(|error| vendor_io_error("inspecting dependency source", src_dir, error))?;
-//RS         let source_hash = Store::hash_directory_authority(&source, true)
-//RS             .map_err(|error| vendor_io_error("hashing dependency source", src_dir, error))?;
-//RS         let destination_name = OsStr::new(name);
-//RS 
-//RS         match vendor.open_child_directory(destination_name) {
-//RS             Ok(existing) => {
-//RS                 let existing_hash =
-//RS                     Store::hash_directory_authority(&existing, false).map_err(|error| {
-//RS                         vendor_io_error(
-//RS                             "checking existing vendor copy",
-//RS                             &vendor_dir.join(name),
-//RS                             error,
-//RS                         )
-//RS                     })?;
-//RS                 if existing_hash == source_hash {
-//RS                     copied.push(name.clone());
-//RS                     continue;
-//RS                 }
-//RS                 drop(existing);
-//RS                 vendor
-//RS                     .remove_child_tree(destination_name)
-//RS                     .map_err(|error| {
-//RS                         vendor_io_error("removing stale vendor copy", &vendor_dir.join(name), error)
-//RS                     })?;
-//RS             }
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS             Err(error) => {
-//RS                 return Err(vendor_io_error(
-//RS                     "checking vendor destination",
-//RS                     &vendor_dir.join(name),
-//RS                     error,
-//RS                 ))
-//RS             }
-//RS         }
-//RS 
-//RS         let (staging_name, staging) = vendor.create_private_child("vendor").map_err(|error| {
-//RS             vendor_io_error("creating vendor staging directory", vendor_dir, error)
-//RS         })?;
-//RS         let result = (|| {
-//RS             Store::copy_directory_authority(&source, &staging, true).map_err(|error| {
-//RS                 vendor_io_error("copying dependency into vendor tree", src_dir, error)
-//RS             })?;
-//RS             let staging_hash =
-//RS                 Store::hash_directory_authority(&staging, false).map_err(|error| {
-//RS                     vendor_io_error("checking staged vendor copy", &vendor_dir.join(name), error)
-//RS                 })?;
-//RS             if staging_hash != source_hash {
-//RS                 return Err(vendor_io_error(
-//RS                     "checking staged vendor copy",
-//RS                     &vendor_dir.join(name),
-//RS                     io::Error::new(
-//RS                         io::ErrorKind::InvalidData,
-//RS                         "staged vendor copy does not match the source tree",
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             match Store::publish_directory(&vendor, &staging_name, &vendor, destination_name) {
-//RS                 Ok(()) => Ok(()),
-//RS                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-//RS                     let winner =
-//RS                         vendor
-//RS                             .open_child_directory(destination_name)
-//RS                             .map_err(|error| {
-//RS                                 vendor_io_error(
-//RS                                     "opening concurrent vendor copy",
-//RS                                     &vendor_dir.join(name),
-//RS                                     error,
-//RS                                 )
-//RS                             })?;
-//RS                     let winner_hash =
-//RS                         Store::hash_directory_authority(&winner, false).map_err(|error| {
-//RS                             vendor_io_error(
-//RS                                 "checking concurrent vendor copy",
-//RS                                 &vendor_dir.join(name),
-//RS                                 error,
-//RS                             )
-//RS                         })?;
-//RS                     if winner_hash == source_hash {
-//RS                         Ok(())
-//RS                     } else {
-//RS                         Err(vendor_io_error(
-//RS                             "publishing vendor copy",
-//RS                             &vendor_dir.join(name),
-//RS                             io::Error::new(
-//RS                                 io::ErrorKind::AlreadyExists,
-//RS                                 "concurrent vendor copy has different contents",
-//RS                             ),
-//RS                         ))
-//RS                     }
-//RS                 }
-//RS                 Err(error) => Err(vendor_io_error(
-//RS                     "publishing vendor copy",
-//RS                     &vendor_dir.join(name),
-//RS                     error,
-//RS                 )),
-//RS             }
-//RS         })();
-//RS         let _ = vendor.remove_child_tree(&staging_name);
-//RS         result?;
-//RS         copied.push(name.clone());
-//RS     }
-//RS     copied.sort();
-//RS 
-//RS     let manifest = vendor_manifest_json(lock, &copied);
-//RS     vendor
-//RS         .write_child_file(OsStr::new("manifest.json"), manifest.as_bytes())
-//RS         .map_err(|error| {
-//RS             vendor_io_error(
-//RS                 "writing vendor manifest",
-//RS                 &vendor_dir.join("manifest.json"),
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS 
-//RS     Ok(copied)
-//RS }
-//RS 
-//RS /// Build the `vendor/manifest.json` body — a small JSON object listing every
-//RS /// vendored package with its locked version and tree-hash fingerprint.
-//RS fn vendor_manifest_json(lock: &LockFile, copied: &[String]) -> String {
-//RS     let mut entries = Vec::new();
-//RS     for name in copied {
-//RS         if let Some(pkg) = lock.packages.iter().find(|p| &p.name == name) {
-//RS             entries.push(format!(
-//RS                 "    {{ \"name\": {}, \"version\": {}, \"fingerprint\": {} }}",
-//RS                 json_str(&pkg.name),
-//RS                 json_str(&pkg.version),
-//RS                 json_str(&pkg.fingerprint),
-//RS             ));
-//RS         }
-//RS     }
-//RS     format!(
-//RS         "{{\n  \"vendor_format\": 1,\n  \"packages\": [\n{}\n  ]\n}}\n",
-//RS         entries.join(",\n")
-//RS     )
-//RS }
-//RS 
-//RS fn json_str(s: &str) -> String {
-//RS     let mut out = String::from("\"");
-//RS     for c in s.chars() {
-//RS         match c {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             _ => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS fn vendor_io_error(action: &str, path: &Path, error: io::Error) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E2604",
-//RS         format!("couldn't {} `{}`: {}", action, path.display(), error),
-//RS         "vendored dependency trees must contain real files and directories.".into(),
-//RS         "check the dependency source and vendor directory permissions.".into(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn safe_component(value: &str) -> bool {
-//RS     !value.is_empty()
-//RS         && value != "."
-//RS         && value != ".."
-//RS         && !value.contains(['/', '\\', ':'])
-//RS         && !value.chars().any(char::is_control)
-//RS         && matches!(
-//RS             Path::new(value).components().next(),
-//RS             Some(Component::Normal(_))
-//RS         )
-//RS         && Path::new(value).components().nth(1).is_none()
-//RS }
-// END-PORT-PENDING 0827 Source/Publish/Vendor.rs:1-217
-
+// Rust: Source/Publish/Vendor.rs:1
+use jet.Diagnostics.Diagnostic
+use jet.Lock.LockFile
+use jet.Store
+use std.ffi.OsStr
+use std.io
+use std.path.Component
+// GATE #4494: Store retained-directory operations and native OS strings.
+// GATE #4409: preserve NotFound, InvalidData and AlreadyExists error kinds.
+// Rust: Source/Publish/Vendor.rs:20
+// Copy resolved dependency entries to vendor_dir and write locked integrity metadata.
+pub fn vendor(project_root: OSPath, lock: LockFile, dep_dirs: [String:OSPath], vendor_dir: OSPath) -> [String] Diagnostic! {
+    _ :: project_root
+    destination :: Store.ensure_directory_authority(vendor_dir)
+        .map_err(error -> vendor_io_error("creating vendor directory", vendor_dir, error))?
+    copied := []
+    loop (name, src_dir) in dep_dirs {
+        if !safe_component(name) {
+            return Err(Diagnostic.error("E2604", "dependency `{name}` cannot be written to the vendor tree",
+                "dependency names must be one safe path component", "use a dependency name without `/`, `\\`, `:`, or `..`", None))
+        }
+        source :: Store.open_directory_authority(src_dir)
+            .map_err(error -> vendor_io_error("inspecting dependency source", src_dir, error))?
+        source_hash :: Store.hash_directory_authority(source, true)
+            .map_err(error -> vendor_io_error("hashing dependency source", src_dir, error))?
+        destination_name :: OsStr.new(name)
+        if destination.open_child_directory(destination_name) == {
+            Ok(existing) -> {
+                existing_hash :: Store.hash_directory_authority(existing, false)
+                    .map_err(error -> vendor_io_error("checking existing vendor copy", vendor_dir.join(name), error))?
+                if existing_hash == source_hash {
+                    &copied.push(name.clone())
+                    continue
+                }
+                drop(^existing)
+                destination.remove_child_tree(destination_name)
+                    .map_err(error -> vendor_io_error("removing stale vendor copy", vendor_dir.join(name), error))?
+            }
+            Err(error) -> {
+                if error.kind() != io.ErrorKind.NotFound -> return Err(vendor_io_error("checking vendor destination", vendor_dir.join(name), error))
+            }
+        }
+        (staging_name, staging) :: destination.create_private_child("vendor")
+            .map_err(error -> vendor_io_error("creating vendor staging directory", vendor_dir, error))?
+        result :: (() -> {
+            Store.copy_directory_authority(source, staging, true)
+                .map_err(error -> vendor_io_error("copying dependency into vendor tree", src_dir, error))?
+            staging_hash :: Store.hash_directory_authority(staging, false)
+                .map_err(error -> vendor_io_error("checking staged vendor copy", vendor_dir.join(name), error))?
+            if staging_hash != source_hash {
+                return Err(vendor_io_error("checking staged vendor copy", vendor_dir.join(name),
+                    io.Error.new(.InvalidData, "staged vendor copy does not match the source tree")))
+            }
+            if Store.publish_directory(destination, staging_name, destination, destination_name) == {
+                Ok(()) -> Ok(())
+                Err(error) -> {
+                    if error.kind() == .AlreadyExists {
+                        winner :: destination.open_child_directory(destination_name)
+                            .map_err(error -> vendor_io_error("opening concurrent vendor copy", vendor_dir.join(name), error))?
+                        winner_hash :: Store.hash_directory_authority(winner, false)
+                            .map_err(error -> vendor_io_error("checking concurrent vendor copy", vendor_dir.join(name), error))?
+                        if winner_hash == source_hash { Ok(()) } else {
+                            Err(vendor_io_error("publishing vendor copy", vendor_dir.join(name),
+                                io.Error.new(.AlreadyExists, "concurrent vendor copy has different contents")))
+                        }
+                    } else { Err(vendor_io_error("publishing vendor copy", vendor_dir.join(name), error)) }
+                }
+            }
+        })()
+        _ :: destination.remove_child_tree(staging_name)
+        result?
+        &copied.push(name.clone())
+    }
+    &copied.sort()
+    manifest :: vendor_manifest_json(lock, copied)
+    destination.write_child_file(OsStr.new("manifest.json"), manifest.as_bytes())
+        .map_err(error -> vendor_io_error("writing vendor manifest", vendor_dir.join("manifest.json"), error))?
+    Ok(copied)
+}
+// Rust: Source/Publish/Vendor.rs:163
+fn vendor_manifest_json(lock: LockFile, copied: [String]) -> String {
+    entries := []
+    loop name in copied {
+        if lock.packages.iter().find(package -> package.name == name) is package {
+            &entries.push("    {{ \"name\": {json_str(package.name)}, \"version\": {json_str(package.version)}, \"fingerprint\": {json_str(package.fingerprint)} }}")
+        }
+    }
+    "{{\n  \"vendor_format\": 1,\n  \"packages\": [\n{entries.join(",\n")}\n  ]\n}}\n"
+}
+// Rust: Source/Publish/Vendor.rs:181
+fn json_str(s: String) -> String {
+    out := "\""
+    loop c in s.chars() {
+        if c == {
+            '"' -> &out.push_str("\\\"")
+            '\\' -> &out.push_str("\\\\")
+            '\n' -> &out.push_str("\\n")
+            '\r' -> &out.push_str("\\r")
+            else -> &out.push(c)
+        }
+    }
+    &out.push('"')
+    out
+}
+// Rust: Source/Publish/Vendor.rs:196
+fn vendor_io_error(action: String, path: OSPath, error: io.Error) -> Diagnostic {
+    Diagnostic.error("E2604", "couldn't {action} `{path.display()}`: {error}",
+        "vendored dependency trees must contain real files and directories.",
+        "check the dependency source and vendor directory permissions.", None)
+}
+// Rust: Source/Publish/Vendor.rs:206
+fn safe_component(value: String) -> Bool {
+    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\', ':'])
+        && !value.chars().any(ch -> ch.is_control())
+        && OSPath.new(value).components().next().is_some_and(component -> component is Component.Normal(_))
+        && OSPath.new(value).components().nth(1).is_none()
+}

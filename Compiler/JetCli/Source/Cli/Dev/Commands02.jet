@@ -1,1822 +1,826 @@
-// PORT-PENDING 0680 source-cmddevtools-slice-1847: Source/CmdDevTools.rs:1847-3664
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn sync_persist_bindings(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     store: &mut jet_devserver::PersistStore,
-//RS ) {
-//RS     let prep = jet_foundation::Persist::prepare_bundle(bundle);
-//RS     for msg in &prep.messages {
-//RS         eprintln!("{msg}");
-//RS     }
-//RS     if let Some(error) = prep.error {
-//RS         eprintln!("[persist] transaction rejected: {error}");
-//RS     }
-//RS     *store = jet_foundation::Persist::shared_clone();
-//RS }
-//RS fn live_lineage_for_file(file: &str) -> (String, String, String, String) {
-//RS     let source_id = file.to_string();
-//RS     let revision = fs::read(file)
-//RS         .map(|bytes| format!("sha256-{}", jet::SHA256::sha256_hex(&bytes)))
-//RS         .unwrap_or_default();
-//RS     let build_id = revision.clone();
-//RS     let world_id = format!("world-{}", jet::SHA256::sha256_hex(source_id.as_bytes()));
-//RS     (source_id, build_id, revision, world_id)
-//RS }
-//RS fn provision_live_lineage_env(
-//RS     local_rail: bool,
-//RS     session_id: &str,
-//RS     source_id: &str,
-//RS     build_id: &str,
-//RS     revision: &str,
-//RS     world_id: &str,
-//RS ) {
-//RS     const SESSION: &str = "JET_DEVTOOLS_RELAY_SESSION_ID";
-//RS     const SOURCE: &str = "JET_DEVTOOLS_RELAY_SOURCE_ID";
-//RS     const BUILD: &str = "JET_DEVTOOLS_RELAY_BUILD_ID";
-//RS     const REVISION: &str = "JET_DEVTOOLS_RELAY_REVISION";
-//RS     const WORLD: &str = "JET_DEVTOOLS_RELAY_WORLD_ID";
-//RS     const COMMANDS: &str = "JET_DEVTOOLS_COMMAND_RELAY_PATH";
-//RS     let command_directory =
-//RS         std::env::temp_dir().join(format!("jet-devtools-commands-{}", std::process::id()));
-//RS     let command_directory = command_directory.to_string_lossy().into_owned();
-//RS     if !local_rail {
-//RS         for key in [SESSION, SOURCE, BUILD, REVISION, WORLD, COMMANDS] {
-//RS             std::env::remove_var(key);
-//RS         }
-//RS         return;
-//RS     }
-//RS     for (key, value) in [
-//RS         (SESSION, session_id),
-//RS         (SOURCE, source_id),
-//RS         (BUILD, build_id),
-//RS         (REVISION, revision),
-//RS         (WORLD, world_id),
-//RS         (COMMANDS, command_directory.as_str()),
-//RS     ] {
-//RS         std::env::set_var(key, value);
-//RS     }
-//RS }
-//RS 
-//RS /// Return the next timer wake needed by scheduled dev jobs. File changes
-//RS /// continue to wake through the native watcher; a timer is only needed when a
-//RS /// checked `#Every(…)` schedule is present.
-//RS fn next_dev_job_wake(snapshot: Option<&jet::CheckedMirSnapshot>) -> Option<Duration> {
-//RS     let snapshot = snapshot?;
-//RS     let jobs = jet::Interpreter::scheduled_jobs(&snapshot.bundle);
-//RS     if jobs.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let now_secs = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_secs();
-//RS     let second_of_day = now_secs % 86_400;
-//RS     jobs.into_iter()
-//RS         .map(|(_, schedule)| match schedule {
-//RS             jet::AST::EverySchedule::Duration { nanos } => {
-//RS                 Duration::from_nanos(nanos.max(1) as u64)
-//RS             }
-//RS             jet::AST::EverySchedule::WallClockTime { hour, minute } => {
-//RS                 let target = hour as u64 * 3_600 + minute as u64 * 60;
-//RS                 let seconds = if second_of_day >= target && second_of_day < target + 60 {
-//RS                     1
-//RS                 } else if second_of_day < target {
-//RS                     target - second_of_day
-//RS                 } else {
-//RS                     86_400 - second_of_day + target
-//RS                 };
-//RS                 Duration::from_secs(seconds.max(1))
-//RS             }
-//RS         })
-//RS         .min()
-//RS }
-//RS 
-//RS /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
-//RS /// schedule-as-code — check every `#Job #Every(…)` fn in `snapshot.bundle`
-//RS /// against `clock`, and run whichever are due through the same interpreter tier
-//RS /// the rest of the dev loop uses (`jet::Interpreter::run_named_job`). This is
-//RS /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
-//RS /// jetos timer projection are the production/OS consumers of the identical
-//RS /// `#Every(…)` declaration — see the D-SCHEDULE1 row in
-//RS /// Docs/spec/syntax-decisions.md for the full three-consumer law.
-//RS fn run_due_jobs(
-//RS     snapshot: &jet::CheckedMirSnapshot,
-//RS     file: &str,
-//RS     try_anyway: bool,
-//RS     use_interpreter: bool,
-//RS     mode: OutputMode,
-//RS     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
-//RS     clock: &mut JobClock,
-//RS     resident_session: &jet_devserver::ResidentDevSession,
-//RS ) {
-//RS     let jobs = jet::Interpreter::scheduled_jobs(&snapshot.bundle);
-//RS     if jobs.is_empty() {
-//RS         return;
-//RS     }
-//RS     for name in clock.due(&jobs) {
-//RS         if !mode.quiet {
-//RS             println!("\n— due job `{}` —", name);
-//RS         }
-//RS         let invocation = if use_interpreter {
-//RS             jet::Interpreter::InterpreterInvocation::DevInterpret
-//RS         } else {
-//RS             jet::Interpreter::InterpreterInvocation::DevDefault
-//RS         };
-//RS         let job_id = format!("{name}#{}", NEXT_DEV_JOB_ID.fetch_add(1, Ordering::Relaxed));
-//RS         let queue = name.clone();
-//RS         let worker = if use_interpreter {
-//RS             "dev-interpreter"
-//RS         } else {
-//RS             "dev-cranelift"
-//RS         }
-//RS         .to_string();
-//RS         let enqueued_at_ms = dev_job_now_ms();
-//RS         publish_dev_job_fact(
-//RS             resident_session,
-//RS             dev_job_fact(
-//RS                 jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Enqueue,
-//RS                 jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Enqueued,
-//RS                 &job_id,
-//RS                 &name,
-//RS                 &queue,
-//RS                 0,
-//RS                 None,
-//RS                 None,
-//RS                 None,
-//RS                 enqueued_at_ms,
-//RS             ),
-//RS         );
-//RS         let started_at = Instant::now();
-//RS         let started_at_ms = dev_job_now_ms().max(enqueued_at_ms);
-//RS         publish_dev_job_fact(
-//RS             resident_session,
-//RS             dev_job_fact(
-//RS                 jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Start,
-//RS                 jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Started,
-//RS                 &job_id,
-//RS                 &name,
-//RS                 &queue,
-//RS                 1,
-//RS                 None,
-//RS                 Some(worker.clone()),
-//RS                 None,
-//RS                 started_at_ms,
-//RS             ),
-//RS         );
-//RS         match jet::Interpreter::run_checked_job_snapshot(
-//RS             snapshot,
-//RS             file,
-//RS             &name,
-//RS             &[],
-//RS             try_anyway,
-//RS             invocation,
-//RS             release_policy,
-//RS         ) {
-//RS             jet::Interpreter::RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => {
-//RS                 let finished_at_ms = dev_job_now_ms().max(started_at_ms);
-//RS                 let duration_ms = started_at
-//RS                     .elapsed()
-//RS                     .as_millis()
-//RS                     .try_into()
-//RS                     .unwrap_or(u64::MAX);
-//RS                 if exit_code == 0 {
-//RS                     publish_dev_job_fact(
-//RS                         resident_session,
-//RS                         dev_job_fact(
-//RS                             jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Complete,
-//RS                             jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Completed,
-//RS                             &job_id,
-//RS                             &name,
-//RS                             &queue,
-//RS                             1,
-//RS                             Some(duration_ms),
-//RS                             Some(worker),
-//RS                             None,
-//RS                             finished_at_ms,
-//RS                         ),
-//RS                     );
-//RS                 } else {
-//RS                     publish_dev_job_fact(
-//RS                         resident_session,
-//RS                         dev_job_fact(
-//RS                             jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Fail,
-//RS                             jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Failed,
-//RS                             &job_id,
-//RS                             &name,
-//RS                             &queue,
-//RS                             1,
-//RS                             Some(duration_ms),
-//RS                             Some(worker),
-//RS                             Some(jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind::Error),
-//RS                             finished_at_ms,
-//RS                         ),
-//RS                     );
-//RS                 }
-//RS                 emit_run_output(&stdout, &stderr);
-//RS                 if exit_code != 0 {
-//RS                     eprintln!("job `{name}` exited with code {exit_code}");
-//RS                 }
-//RS             }
-//RS             jet::Interpreter::RunOutcome::Problems(diags) => {
-//RS                 let finished_at_ms = dev_job_now_ms().max(started_at_ms);
-//RS                 let duration_ms = started_at
-//RS                     .elapsed()
-//RS                     .as_millis()
-//RS                     .try_into()
-//RS                     .unwrap_or(u64::MAX);
-//RS                 publish_dev_job_fact(
-//RS                     resident_session,
-//RS                     dev_job_fact(
-//RS                         jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Fail,
-//RS                         jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Failed,
-//RS                         &job_id,
-//RS                         &name,
-//RS                         &queue,
-//RS                         1,
-//RS                         Some(duration_ms),
-//RS                         Some(worker),
-//RS                         Some(jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind::Error),
-//RS                         finished_at_ms,
-//RS                     ),
-//RS                 );
-//RS                 exit_if_internal_fault(&diags);
-//RS                 let src = fs::read_to_string(file).unwrap_or_default();
-//RS                 report_problems(mode, file, &src, &diags);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS static NEXT_DEV_JOB_ID: AtomicU64 = AtomicU64::new(1);
-//RS const DEV_JOB_FACT_SOURCE: &str = "jet-dev.jobs";
-//RS 
-//RS fn dev_job_now_ms() -> u64 {
-//RS     SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_millis()
-//RS         .try_into()
-//RS         .unwrap_or(u64::MAX)
-//RS }
-//RS 
-//RS fn dev_job_fact(
-//RS     kind: jet_devserver::Devtools::JetDevtoolsJobPanelEventKind,
-//RS     state: jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState,
-//RS     job_id: &str,
-//RS     name: &str,
-//RS     queue: &str,
-//RS     attempts: u32,
-//RS     duration_ms: Option<u64>,
-//RS     worker: Option<String>,
-//RS     failure: Option<jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind>,
-//RS     timestamp_ms: u64,
-//RS ) -> jet_devserver::Devtools::JetDevtoolsJobPanelFact {
-//RS     jet_devserver::Devtools::JetDevtoolsJobPanelFact {
-//RS         sequence: 0,
-//RS         timestamp_ms,
-//RS         kind,
-//RS         state,
-//RS         job_id: job_id.to_string(),
-//RS         name: name.to_string(),
-//RS         labels: Vec::new(),
-//RS         queue: queue.to_string(),
-//RS         attempts,
-//RS         duration_ms,
-//RS         worker,
-//RS         request_id: None,
-//RS         failure,
-//RS     }
-//RS }
-//RS 
-//RS fn publish_dev_job_fact(
-//RS     resident_session: &jet_devserver::ResidentDevSession,
-//RS     fact: jet_devserver::Devtools::JetDevtoolsJobPanelFact,
-//RS ) {
-//RS     let _ = resident_session.publish_job_fact(&fact, DEV_JOB_FACT_SOURCE);
-//RS }
-//RS 
-//RS /// D-SCHEDULE1: per-job last-run bookkeeping for the due-job tick. A
-//RS /// `Duration` schedule tracks the `Instant` it last ran; a `WallClockTime`
-//RS /// schedule tracks the UTC day index (days since the Unix epoch) it last
-//RS /// ran, so it fires once inside its matching minute, not on every 120ms
-//RS /// tick within that minute. UTC only — D-SCHEDULE1's own law text carves
-//RS /// timezone-aware calendars out to "the runtime API or jetos timers"; this
-//RS /// is the lightweight dev-loop convenience tier, not that.
-//RS pub(crate) struct JobClock {
-//RS     inner: jet_jit::Job::JetJobClock,
-//RS }
-//RS 
-//RS impl JobClock {
-//RS     pub(crate) fn new() -> Self {
-//RS         JobClock {
-//RS             inner: jet_jit::Job::JetJobClock::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Which job names are due right now — records the firing so the same
-//RS     /// job doesn't fire again on the very next tick.
-//RS     pub(crate) fn due(&mut self, jobs: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
-//RS         let schedules = jobs
-//RS             .iter()
-//RS             .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
-//RS             .collect::<Vec<_>>();
-//RS         jet_jit::Job::jet_job_schedule_due(&mut self.inner, &schedules)
-//RS     }
-//RS 
-//RS     /// The testable core of `due`: `unix_secs` is injected so the day/window
-//RS     /// arithmetic can be checked without racing real wall-clock time.
-//RS     #[allow(dead_code)]
-//RS     fn due_at(
-//RS         &mut self,
-//RS         jobs: &[(String, jet::AST::EverySchedule)],
-//RS         unix_secs: u64,
-//RS     ) -> Vec<String> {
-//RS         let schedules = jobs
-//RS             .iter()
-//RS             .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
-//RS             .collect::<Vec<_>>();
-//RS         self.inner.due_at(&schedules, unix_secs)
-//RS     }
-//RS }
-//RS 
-//RS fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
-//RS     match schedule {
-//RS         jet::AST::EverySchedule::Duration { nanos } => {
-//RS             jet_jit::Job::JetJobSchedule::Duration { nanos }
-//RS         }
-//RS         jet::AST::EverySchedule::WallClockTime { hour, minute } => {
-//RS             jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
-//RS         }
-//RS     }
-//RS }
-//RS fn dev_artifact_request(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     target: jet_foundation::MIR::MirArtifactTarget,
-//RS     profile: &str,
-//RS ) -> jet_foundation::MIR::MirArtifactRequest {
-//RS     let build_mode =
-//RS         jet::Driver::mir_artifact_build_mode_for(bundle, jet::Sema::CompileMode::Run, profile);
-//RS     let kind = match build_mode {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Test
-//RS         | jet_foundation::MIR::MirArtifactBuildMode::Coverage => {
-//RS             jet_foundation::MIR::MirArtifactKind::TestExecutable
-//RS         }
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Fuzz => {
-//RS             jet_foundation::MIR::MirArtifactKind::FuzzExecutable
-//RS         }
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev
-//RS         | jet_foundation::MIR::MirArtifactBuildMode::Release => {
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable
-//RS         }
-//RS     };
-//RS     jet_foundation::MIR::MirArtifactRequest::new(target, kind, build_mode)
-//RS }
-//RS 
-//RS fn dev_incremental_reload_enabled(
-//RS     entry_fn: Option<&str>,
-//RS     profile: &str,
-//RS     gates: jet::Policy::GateSet,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> bool {
-//RS     entry_fn.is_none() && profile == "dev" && gates.is_empty() && setting_overrides.is_empty()
-//RS }
-//RS 
-//RS 
-//RS fn load_and_check_dev_change(
-//RS     file: &str,
-//RS     entry_fn: Option<&str>,
-//RS     gates: jet::Policy::GateSet,
-//RS     mode: OutputMode,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
-//RS     let mut new_bundle = match jet::Loader::load_entry(file) {
-//RS         Ok(mut b) => {
-//RS             if let Err(diags) =
-//RS                 jet::Driver::seed_build_facts(&mut b, profile, false, setting_overrides)
-//RS             {
-//RS                 let src = fs::read_to_string(file).unwrap_or_default();
-//RS                 println!("\n— {} changed —", file);
-//RS                 report_problems(mode, file, &src, &diags);
-//RS                 return None;
-//RS             }
-//RS             b
-//RS         }
-//RS         Err(diags) => {
-//RS             let src = fs::read_to_string(file).unwrap_or_default();
-//RS             println!("\n— {} changed —", file);
-//RS             report_problems(mode, file, &src, &diags);
-//RS             return None;
-//RS         }
-//RS     };
-//RS 
-//RS     if let Some(entry_fn) = entry_fn {
-//RS         jet::Driver::swap_entry_point(&mut new_bundle, entry_fn);
-//RS     }
-//RS 
-//RS     let (diags, effect_facts) = jet::Sema::check_bundle_gates_with_effect_facts(
-//RS         &mut new_bundle,
-//RS         jet::Sema::CompileMode::Run,
-//RS         gates,
-//RS     );
-//RS     let errs: Vec<_> = diags
-//RS         .iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .cloned()
-//RS         .collect();
-//RS     if !errs.is_empty() {
-//RS         let src = fs::read_to_string(file).unwrap_or_default();
-//RS         println!("\n— {} changed —", file);
-//RS         report_problems(mode, file, &src, &errs);
-//RS         return None;
-//RS     }
-//RS     render_dev_lints(file, mode, &diags);
-//RS     Some((new_bundle, effect_facts))
-//RS }
-//RS 
-//RS /// Handle one detected file change: pick swap vs rerun vs restart and render.
-//RS /// Returns the freshly checked snapshot (or `None` if it failed to load) for
-//RS /// the next watch iteration.
-//RS fn render_dev_change(
-//RS     file: &str,
-//RS     entry_fn: Option<&str>,
-//RS     program_args: &[&String],
-//RS     try_anyway: bool,
-//RS     policy: WatchPolicy,
-//RS     prev: Option<&jet::CheckedMirSnapshot>,
-//RS     gates: jet::Policy::GateSet,
-//RS     mode: OutputMode,
-//RS     use_interpreter: bool,
-//RS     profile: &str,
-//RS     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     incremental_cache: &mut jet::Sema::IncrementalSemaCache,
-//RS     game_entries: &[jet_devserver::DevWatchEntry],
-//RS     game_facts_out: &mut Vec<jet_foundation::Game::JetGameChangeFact>,
-//RS     devtools_host: Option<&jet_devserver::WebHost::WebHost>,
-//RS ) -> Option<jet::CheckedMirSnapshot> {
-//RS     if !game_entries.is_empty() {
-//RS         match game_change_facts(game_entries, None) {
-//RS             Ok(facts) => *game_facts_out = facts,
-//RS             Err(reason) => {
-//RS                 eprintln!("[hot-swap] checked game facts rejected: {reason}");
-//RS                 return None;
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut incremental_decision = None;
-//RS     let incrementally_checked = if prev.is_some()
-//RS         && dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides)
-//RS     {
-//RS         let old = prev.expect("incremental reload requires a baseline");
-//RS         let module_name = old
-//RS             .bundle
-//RS             .modules
-//RS             .get(old.bundle.entry)
-//RS             .map(|module| module.display.clone())
-//RS             .unwrap_or_else(|| file.to_string());
-//RS         let source = fs::read_to_string(file).unwrap_or_default();
-//RS         let (diags, bundle, facts, decision) = jet::Driver::check_file_with_hot_swap_incremental(
-//RS             &old.bundle,
-//RS             file,
-//RS             Some((Path::new(file), source.as_str())),
-//RS             false,
-//RS             &module_name,
-//RS             incremental_cache,
-//RS         );
-//RS         let errs: Vec<_> = diags
-//RS             .iter()
-//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS             .cloned()
-//RS             .collect();
-//RS         if !errs.is_empty() {
-//RS             println!("\n— {} changed —", file);
-//RS             report_problems(mode, file, &source, &errs);
-//RS             return None;
-//RS         }
-//RS         let safe_for_run = bundle.as_ref().is_some_and(|bundle| {
-//RS             let has_run = bundle
-//RS                 .modules
-//RS                 .get(bundle.entry)
-//RS                 .is_some_and(|module| {
-//RS                     module.items.iter().any(|item| {
-//RS                         matches!(item, jet::AST::Item::Func(function) if function.name == "run")
-//RS                     })
-//RS                 });
-//RS             let has_build = bundle.modules.iter().any(|module| {
-//RS                 module.items.iter().any(|item| {
-//RS                     matches!(
-//RS                         item,
-//RS                         jet::AST::Item::Func(function) if jet::Sema::is_build_entry(function)
-//RS                     )
-//RS                 })
-//RS             });
-//RS             has_run && !has_build
-//RS         });
-//RS         if safe_for_run {
-//RS             render_dev_lints(file, mode, &diags);
-//RS             incremental_decision = decision;
-//RS             bundle.map(|bundle| (bundle, facts))
-//RS         } else {
-//RS             incremental_cache.clear();
-//RS             None
-//RS         }
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let (new_bundle, effect_facts) = match incrementally_checked {
-//RS         Some(checked) => checked,
-//RS         None => load_and_check_dev_change(
-//RS             file,
-//RS             entry_fn,
-//RS             gates,
-//RS             mode,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )?,
-//RS     };
-//RS 
-//RS     // Decide whether this save uses the swap path for the selected callable.
-//RS     let resident = match policy {
-//RS         WatchPolicy::Swap => true,
-//RS         WatchPolicy::Restart => false,
-//RS         WatchPolicy::Once => false, // unreachable here (handled in run_dev)
-//RS         WatchPolicy::Auto => true,
-//RS     };
-//RS 
-//RS     let artifact_target = if use_interpreter {
-//RS         jet_foundation::MIR::MirArtifactTarget::Interpreter
-//RS     } else {
-//RS         jet_foundation::MIR::MirArtifactTarget::Cranelift
-//RS     };
-//RS     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
-//RS         &new_bundle,
-//RS         dev_artifact_request(&new_bundle, artifact_target, profile),
-//RS     );
-//RS 
-//RS     if resident {
-//RS         // The hot-reload unit is the entry module (D-HOTSWAP1).
-//RS         let module_name = new_bundle
-//RS             .modules
-//RS             .get(new_bundle.entry)
-//RS             .map(|m| m.display.clone())
-//RS             .unwrap_or_else(|| file.to_string());
-//RS         match prev {
-//RS             Some(old) => {
-//RS                 let decision_result = match incremental_decision.take() {
-//RS                     Some(decision) => Ok(decision),
-//RS                     None => jet::Sema::HotSwap::type_stable_decision(
-//RS                         &old.bundle,
-//RS                         &new_bundle,
-//RS                         &module_name,
-//RS                     ),
-//RS                 };
-//RS                 match decision_result {
-//RS                     Ok(decision) => {
-//RS                         let facts = match game_change_facts(game_entries, Some(&decision)) {
-//RS                             Ok(facts) => facts,
-//RS                             Err(reason) => {
-//RS                                 eprintln!("[hot-swap] checked game facts rejected: {reason}");
-//RS                                 return None;
-//RS                             }
-//RS                         };
-//RS                         *game_facts_out = facts.clone();
-//RS                         let decision = decision.with_change_facts(facts);
-//RS                         let reuse_current = !use_interpreter
-//RS                             && decision.is_compatible()
-//RS                             && decision.changed.is_empty()
-//RS                             && decision.changed_functions.is_empty()
-//RS                             && decision.rechecked().is_empty()
-//RS                             && decision.schema_migrations().is_empty()
-//RS                             && decision.change_facts().is_empty();
-//RS                         if let Some(host) = devtools_host {
-//RS                             let _ = host.publish_hot_swap_decision(&decision);
-//RS                         }
-//RS                         let persist_before_migration = (!use_interpreter
-//RS                             && !decision.schema_migrations().is_empty())
-//RS                         .then(jet_foundation::Persist::shared_clone);
-//RS                         let migrated_in_place = if decision.is_compatible() {
-//RS                             if !use_interpreter {
-//RS                                 if let Err(reason) = jet_jit::apply_hot_swap(&decision) {
-//RS                                     if !mode.json {
-//RS                                         eprintln!(
-//RS                                             "[hot-swap] {} — adapter preparation failed: {}",
-//RS                                             module_name, reason
-//RS                                         );
-//RS                                     }
-//RS                                     return None;
-//RS                                 }
-//RS                             }
-//RS                             false
-//RS                         } else if !use_interpreter && !decision.schema_migrations().is_empty() {
-//RS                             match jet_jit::apply_hot_swap_with_program(
-//RS                                 &mir,
-//RS                                 artifact,
-//RS                                 &decision,
-//RS                                 release_policy,
-//RS                             ) {
-//RS                                 Ok(receipts) => {
-//RS                                     if !receipts.is_empty() && !mode.quiet && !mode.json {
-//RS                                         let migrated = receipts
-//RS                                             .iter()
-//RS                                             .filter(|receipt| !receipt.migrated.is_empty())
-//RS                                             .count();
-//RS                                         println!(
-//RS                                             "[hot-swap] migrated {} published-schema value(s)",
-//RS                                             migrated
-//RS                                         );
-//RS                                     }
-//RS                                     true
-//RS                                 }
-//RS                                 Err(reason) => {
-//RS                                     if !mode.json {
-//RS                                         eprintln!(
-//RS                                             "[hot-swap] {} — schema migration rejected: {}",
-//RS                                             module_name, reason
-//RS                                         );
-//RS                                     }
-//RS                                     return None;
-//RS                                 }
-//RS                             }
-//RS                         } else {
-//RS                             false
-//RS                         };
-//RS                         let swap_ok = if decision.is_compatible() || migrated_in_place {
-//RS                             run_resident_swap(
-//RS                                 &mir,
-//RS                                 artifact,
-//RS                                 try_anyway,
-//RS                                 &module_name,
-//RS                                 file,
-//RS                                 mode,
-//RS                                 use_interpreter,
-//RS                                 reuse_current,
-//RS                                 release_policy,
-//RS                             )
-//RS                         } else {
-//RS                             run_resident_restart(
-//RS                                 &mir,
-//RS                                 artifact,
-//RS                                 try_anyway,
-//RS                                 file,
-//RS                                 mode,
-//RS                                 use_interpreter,
-//RS                                 release_policy,
-//RS                             )
-//RS                         };
-//RS                         if !swap_ok {
-//RS                             if let Some(store) = persist_before_migration {
-//RS                                 jet_foundation::Persist::shared_replace(store);
-//RS                                 jet_jit::discard_hot_swap_plan();
-//RS                             }
-//RS                             return None;
-//RS                         }
-//RS                         render_hot_swap_decision(&decision, mode, migrated_in_place);
-//RS                     }
-//RS                     Err(diags) => {
-//RS                         let src = fs::read_to_string(file).unwrap_or_default();
-//RS                         report_problems(mode, file, &src, &diags);
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             None => {
-//RS                 // No baseline yet (first run after an error): a clean restart.
-//RS                 if !mode.quiet && !mode.json {
-//RS                     println!("\n[restart] {} — first run", module_name);
-//RS                 }
-//RS                 if !run_resident_restart(
-//RS                     &mir,
-//RS                     artifact,
-//RS                     try_anyway,
-//RS                     file,
-//RS                     mode,
-//RS                     use_interpreter,
-//RS                     release_policy,
-//RS                 ) {
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS         }
-//RS     } else {
-//RS         // Run-to-completion (default / `--restart`): run the already-checked
-//RS         // optimized MIR instead of checking and lowering the edit a second
-//RS         // time.
-//RS         if !mode.quiet {
-//RS             println!("\n— {} changed, re-running —", file);
-//RS         }
-//RS         let jobs = jet::Interpreter::scheduled_jobs(&new_bundle);
-//RS         let requested = program_args
-//RS             .first()
-//RS             .map(|arg| arg.as_str())
-//RS             .filter(|arg| !arg.starts_with('-'));
-//RS         let selected = requested.filter(|name| jobs.iter().any(|(job, _)| job.as_str() == *name));
-//RS         let runtime_args = if selected.is_some() {
-//RS             &program_args[1..]
-//RS         } else {
-//RS             program_args
-//RS         };
-//RS         let mut args = Vec::with_capacity(runtime_args.len() + 1);
-//RS         args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
-//RS         args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-//RS         let outcome = jet_jit::with_program_args(&args, || {
-//RS             jet::Interpreter::dev_run_snapshot(
-//RS                 &mir,
-//RS                 artifact,
-//RS                 try_anyway,
-//RS                 if use_interpreter {
-//RS                     jet::Interpreter::InterpreterInvocation::DevInterpret
-//RS                 } else {
-//RS                     jet::Interpreter::InterpreterInvocation::DevDefault
-//RS                 },
-//RS                 release_policy,
-//RS             )
-//RS         });
-//RS         render_dev_outcome(&outcome, file, mode);
-//RS         if !matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. }) {
-//RS             return None;
-//RS         }
-//RS     }
-//RS 
-//RS     Some(jet::CheckedMirSnapshot {
-//RS         bundle: new_bundle,
-//RS         facts: effect_facts,
-//RS         mir,
-//RS         artifact,
-//RS     })
-//RS }
-//RS 
-//RS fn game_change_facts(
-//RS     entries: &[jet_devserver::DevWatchEntry],
-//RS     decision: Option<&jet_foundation::HotSwap::HotSwapDecision>,
-//RS ) -> Result<Vec<jet_foundation::Game::JetGameChangeFact>, String> {
-//RS     entries
-//RS         .iter()
-//RS         .map(|entry| {
-//RS             let (migration, reason) = match entry.game_kind {
-//RS                 jet_foundation::Game::JetGameChangeKind::Asset => (
-//RS                     jet_foundation::Game::JetGameMigrationDecision::Preserve,
-//RS                     format!("checked asset watch change `{}`", entry.change_kind),
-//RS                 ),
-//RS                 jet_foundation::Game::JetGameChangeKind::Script
-//RS                 | jet_foundation::Game::JetGameChangeKind::World => {
-//RS                     if decision.map_or(false, |decision| decision.is_compatible()) {
-//RS                         (
-//RS                             jet_foundation::Game::JetGameMigrationDecision::Preserve,
-//RS                             "checked type-stable reload".to_string(),
-//RS                         )
-//RS                     } else {
-//RS                         (
-//RS                             jet_foundation::Game::JetGameMigrationDecision::Reject,
-//RS                             decision
-//RS                                 .and_then(|decision| decision.compatibility.reason())
-//RS                                 .unwrap_or("checked restart or incompatible reload")
-//RS                                 .to_string(),
-//RS                         )
-//RS                     }
-//RS                 }
-//RS             };
-//RS             jet_foundation::Game::JetGameChangeFact::new(
-//RS                 entry.path.display().to_string(),
-//RS                 entry.game_kind,
-//RS                 entry.old_schema_id.clone(),
-//RS                 entry.new_schema_id.clone(),
-//RS                 migration,
-//RS                 reason,
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn publish_game_asset_watch_events(
-//RS     file: &str,
-//RS     entries: &[jet_devserver::DevWatchEntry],
-//RS     timestamp_ms: u64,
-//RS ) -> Result<(), String> {
-//RS     let asset_entries = entries
-//RS         .iter()
-//RS         .filter(|entry| entry.game_kind == jet_foundation::Game::JetGameChangeKind::Asset)
-//RS         .collect::<Vec<_>>();
-//RS     if asset_entries.is_empty() {
-//RS         return Ok(());
-//RS     }
-//RS     let asset_root = fs::canonicalize(
-//RS         Path::new(file)
-//RS             .parent()
-//RS             .unwrap_or_else(|| Path::new("."))
-//RS             .join("assets"),
-//RS     )
-//RS     .unwrap_or_else(|_| {
-//RS         let parent = Path::new(file).parent().unwrap_or_else(|| Path::new("."));
-//RS         if parent.is_absolute() {
-//RS             parent.join("assets")
-//RS         } else {
-//RS             std::env::current_dir()
-//RS                 .unwrap_or_else(|_| PathBuf::from("."))
-//RS                 .join(parent)
-//RS                 .join("assets")
-//RS         }
-//RS     });
-//RS     let root = jet::Codegen::MIREval::game_dev_protocol::JetGameAssetRootIdentity::new("game", ".")
-//RS         .map_err(|error| error.to_string())?;
-//RS     let mut events = Vec::with_capacity(asset_entries.len());
-//RS     let mut skipped_count = 0usize;
-//RS     for entry in asset_entries {
-//RS         if entry.change_kind == "stale" {
-//RS             skipped_count = skipped_count.saturating_add(1);
-//RS             continue;
-//RS         }
-//RS         let relative = entry
-//RS             .path
-//RS             .strip_prefix(&asset_root)
-//RS             .map_err(|_| {
-//RS                 format!(
-//RS                     "asset watcher path `{}` is outside root `{}`",
-//RS                     entry.path.display(),
-//RS                     asset_root.display()
-//RS                 )
-//RS             })?
-//RS             .to_string_lossy()
-//RS             .replace('\\', "/");
-//RS         if relative.is_empty() {
-//RS             return Err(format!(
-//RS                 "asset watcher path `{}` is the asset root",
-//RS                 entry.path.display()
-//RS             ));
-//RS         }
-//RS         let logical_path = format!("assets/{relative}");
-//RS         let kind = match entry.change_kind {
-//RS             "created" => {
-//RS                 jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Created
-//RS             }
-//RS             "deleted" => {
-//RS                 jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Deleted
-//RS             }
-//RS             _ => jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Changed,
-//RS         };
-//RS         events.push(
-//RS             jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEvent::new(
-//RS                 root.clone(),
-//RS                 logical_path,
-//RS                 kind,
-//RS             )
-//RS             .map_err(|error| error.to_string())?,
-//RS         );
-//RS     }
-//RS     let roots = jet::Codegen::MIREval::game_dev_protocol::JetGameAssetRootSet::new(vec![root])
-//RS         .map_err(|error| error.to_string())?;
-//RS     let projected = jet::Codegen::MIREval::game_dev_protocol::project_asset_watch_import_events(
-//RS         timestamp_ms,
-//RS         file,
-//RS         roots,
-//RS         &events,
-//RS         skipped_count,
-//RS     )?;
-//RS     for event in projected {
-//RS         jet_foundation::Devtools::jet_devtools_publish_event(event);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn apply_game_watch_facts(
-//RS     session: &mut jet_foundation::Game::JetGameDevSession,
-//RS     facts: &[jet_foundation::Game::JetGameChangeFact],
-//RS     accepted: bool,
-//RS     reason: &str,
-//RS     timestamp_ms: u64,
-//RS     source: &str,
-//RS ) -> Result<(), String> {
-//RS     for fact in facts {
-//RS         let fact = if accepted {
-//RS             fact.clone()
-//RS         } else {
-//RS             fact.clone().with_migration(
-//RS                 jet_foundation::Game::JetGameMigrationDecision::Reject,
-//RS                 reason,
-//RS             )?
-//RS         };
-//RS         let outcome = match fact.kind {
-//RS             jet_foundation::Game::JetGameChangeKind::Asset => session.apply_asset_swap(fact)?,
-//RS             jet_foundation::Game::JetGameChangeKind::Script => session.apply_script_reload(fact)?,
-//RS             jet_foundation::Game::JetGameChangeKind::World => session.apply_world_reload(fact)?,
-//RS         };
-//RS         let body = jet_foundation::Devtools::JetDevtoolsEventBody::GameSwap {
-//RS             sequence: outcome.sequence,
-//RS             path: outcome.fact.path,
-//RS             kind: outcome.fact.kind.as_str().to_string(),
-//RS             status: outcome.status.as_str().to_string(),
-//RS             old_schema_id: outcome.fact.old_schema_id,
-//RS             new_schema_id: outcome.fact.new_schema_id,
-//RS             migration: outcome.fact.migration.as_str().to_string(),
-//RS             reason: outcome.fact.reason,
-//RS         };
-//RS         let event = jet_foundation::Devtools::JetDevtoolsEvent::try_new(
-//RS             timestamp_ms,
-//RS             source.to_string(),
-//RS             body,
-//RS         )?;
-//RS         jet_foundation::Devtools::jet_devtools_publish_event(event);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS fn publish_game_launch_profile(
-//RS     resident_session: &jet_devserver::ResidentDevSession,
-//RS     file: &str,
-//RS     profile: &jet::Codegen::MIREval::game_dev_protocol::GameDevLaunchProfile,
-//RS     timestamp_ms: u64,
-//RS ) -> Result<(), String> {
-//RS     let body = jet_foundation::Devtools::JetDevtoolsEventBody::GameLaunchProfile {
-//RS         target: profile.target.clone(),
-//RS         run_mode: profile.run_mode.as_str().to_string(),
-//RS         headless_compatible: profile.headless_compatible,
-//RS         phases: profile
-//RS             .phases
-//RS             .iter()
-//RS             .map(|phase| {
-//RS                 jet_foundation::Devtools::JetDevtoolsGameLaunchPhase::new(
-//RS                     phase.phase.as_str(),
-//RS                     phase.status.as_str(),
-//RS                     phase.detail.clone(),
-//RS                 )
-//RS             })
-//RS             .collect(),
-//RS     };
-//RS     let event = jet_foundation::Devtools::JetDevtoolsEvent::try_new(timestamp_ms, "game", body)?;
-//RS     resident_session
-//RS         .publish_devtools_event_typed(event)
-//RS         .map(|_| ())
-//RS }
-//RS fn render_hot_swap_decision(
-//RS     decision: &jet_foundation::HotSwap::HotSwapDecision,
-//RS     mode: OutputMode,
-//RS     migrated_in_place: bool,
-//RS ) {
-//RS     if mode.quiet || mode.json {
-//RS         return;
-//RS     }
-//RS     let list = |preserved: bool| {
-//RS         let values = decision
-//RS             .state_facts()
-//RS             .iter()
-//RS             .filter(|fact| fact.is_preserved() == preserved)
-//RS             .map(|fact| fact.key.as_str())
-//RS             .collect::<Vec<_>>();
-//RS         if values.is_empty() {
-//RS             "—".to_string()
-//RS         } else {
-//RS             values.join(", ")
-//RS         }
-//RS     };
-//RS     let changed = if decision.changed_functions.is_empty() {
-//RS         "—".to_string()
-//RS     } else {
-//RS         decision.changed_functions.join(", ")
-//RS     };
-//RS     if decision.is_compatible() {
-//RS         println!(
-//RS             "saved {}  swapped {}  kept {}",
-//RS             decision.module,
-//RS             changed,
-//RS             list(true)
-//RS         );
-//RS     } else if migrated_in_place {
-//RS         println!(
-//RS             "saved {}  migrated in place  swapped {}  kept {}",
-//RS             decision.module,
-//RS             changed,
-//RS             list(true)
-//RS         );
-//RS     } else {
-//RS         let reason = decision
-//RS             .compatibility
-//RS             .reason()
-//RS             .unwrap_or("type surface changed");
-//RS         println!(
-//RS             "saved {}  restarting  kept {}  reset {}  reason {}",
-//RS             decision.module,
-//RS             list(true),
-//RS             list(false),
-//RS             reason
-//RS         );
-//RS     }
-//RS }
-//RS /// Hot-swap via the strict Cranelift backend (`--interpret` uses tier-0).
-//RS fn run_resident_swap(
-//RS     program: &jet_foundation::MIR::MirProgram,
-//RS     artifact: jet_foundation::MIR::MirArtifactId,
-//RS     try_anyway: bool,
-//RS     module_name: &str,
-//RS     file: &str,
-//RS     mode: OutputMode,
-//RS     use_interpreter: bool,
-//RS     reuse_current: bool,
-//RS     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
-//RS ) -> bool {
-//RS     use jet::JitBackend::{InterpreterBackend, JitBackend};
-//RS     use jet_jit::CraneliftBackend;
-//RS 
-//RS     let outcome = if reuse_current {
-//RS         jet_jit::run_resident_current().map_err(|reason| {
-//RS             vec![jet::Diagnostics::Diagnostic::runtime_host_fault(
-//RS                 String::new(),
-//RS                 reason,
-//RS             )]
-//RS         })
-//RS     } else if use_interpreter {
-//RS         let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-//RS         b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
-//RS     } else {
-//RS         let mut b = CraneliftBackend::new();
-//RS         b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
-//RS     };
-//RS     match outcome {
-//RS         Ok(o) => {
-//RS             render_outcome(o, file, mode);
-//RS             true
-//RS         }
-//RS         Err(diags) => {
-//RS             exit_if_internal_fault(&diags);
-//RS             let src = fs::read_to_string(file).unwrap_or_default();
-//RS             report_problems(mode, file, &src, &diags);
-//RS             false
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Clean restart via the strict Cranelift backend.
-//RS fn run_resident_restart(
-//RS     program: &jet_foundation::MIR::MirProgram,
-//RS     artifact: jet_foundation::MIR::MirArtifactId,
-//RS     try_anyway: bool,
-//RS     file: &str,
-//RS     mode: OutputMode,
-//RS     use_interpreter: bool,
-//RS     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
-//RS ) -> bool {
-//RS     use jet::JitBackend::{InterpreterBackend, JitBackend};
-//RS     use jet_jit::CraneliftBackend;
-//RS     let outcome = if use_interpreter {
-//RS         let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-//RS         b.restart(program, artifact, try_anyway, release_policy)
-//RS     } else {
-//RS         let mut b = CraneliftBackend::new();
-//RS         b.restart(program, artifact, try_anyway, release_policy)
-//RS     };
-//RS     let ok = matches!(&outcome, jet::Interpreter::RunOutcome::Ran { .. });
-//RS     render_outcome(outcome, file, mode);
-//RS     ok
-//RS }
-//RS 
-//RS /// `jet repl [<file>.jet]` — interactive REPL session (E2-M18, D-REPL3=A).
-//RS /// `project_dir` sets the base for `:load` paths and (eventually) import
-//RS /// context (D-REPL10=A sandbox; `--project <dir>` enables project mode).
-//RS ///
-//RS /// #2038: a positional `<file>.jet` is a session preload — its definitions
-//RS /// become available in turn 1 through the one ratified file-into-session
-//RS /// mechanism, `:load` (D-REPL15=B); `fn run` is NOT invoked, because running a
-//RS /// program is `jet run`. A path that isn't there is refused here, before the
-//RS /// banner, exactly the way `run_dev` above refuses one (E2105). Silently
-//RS /// starting an empty session was the bug.
-//RS pub(crate) fn run_repl(
-//RS     project_dir: Option<&str>,
-//RS     preload: Option<&str>,
-//RS     allow: &[String],
-//RS     deny: &[String],
-//RS     color: ColorChoice,
-//RS ) {
-//RS     let mut flags = jet::REPL::ReplFlags::new(allow, deny).with_color(color);
-//RS     if let Some(file) = preload {
-//RS         let resolved = crate::resolve_source_path(file);
-//RS         if !Path::new(&resolved).exists() {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         flags = flags.with_preload(resolved);
-//RS     }
-//RS     let code = jet::REPL::run(project_dir, flags);
-//RS     exit(code);
-//RS }
-//RS 
-//RS /// Run one dev iteration and render its outcome to the terminal in the active
-//RS /// output mode. Diagnostics use the SAME renderer as batch compilation
-//RS /// (D-DEV), so a problem looks identical whether seen via `jet check` or
-//RS /// `jet dev`.
-//RS fn render_dev_iteration(
-//RS     file: &str,
-//RS     entry_fn: Option<&str>,
-//RS     program_args: &[&String],
-//RS     try_anyway: bool,
-//RS     gates: jet::Policy::GateSet,
-//RS     mode: OutputMode,
-//RS     use_interpreter: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Option<jet::CheckedMirSnapshot> {
-//RS     let started = std::time::Instant::now();
-//RS     let mut run = run_dev_iteration_with_entry(
-//RS         file,
-//RS         entry_fn,
-//RS         program_args,
-//RS         try_anyway,
-//RS         use_interpreter,
-//RS         gates,
-//RS         profile,
-//RS         setting_overrides,
-//RS     );
-//RS     render_lints(file, mode, &run.lints);
-//RS     let snapshot = run.snapshot.take();
-//RS     let outcome = run.outcome;
-//RS     let elapsed = started.elapsed();
-//RS     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
-//RS     render_outcome_timed(outcome, file, Some(elapsed), mode);
-//RS     if ran_ok {
-//RS         if let Some(snapshot) = snapshot {
-//RS             run_dev_budget_refresh(file, &snapshot.bundle, mode);
-//RS             return Some(snapshot);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn render_dev_outcome(outcome: &jet::Interpreter::RunOutcome, file: &str, mode: OutputMode) {
-//RS     match outcome {
-//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
-//RS             emit_run_output(stdout, stderr);
-//RS         }
-//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
-//RS             exit_if_internal_fault(diags);
-//RS             let src = fs::read_to_string(file).unwrap_or_default();
-//RS             report_problems(mode, file, &src, diags);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn exit_dev_outcome(outcome: jet::Interpreter::RunOutcome) {
-//RS     match outcome {
-//RS         jet::Interpreter::RunOutcome::Ran { exit_code, .. } => exit(exit_code),
-//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
-//RS             exit_if_internal_fault(&diags);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn render_lints(
-//RS     file: &str,
-//RS     mode: OutputMode,
-//RS     diagnostics: &[jet::Diagnostics::Diagnostic],
-//RS ) {
-//RS     let lints = visible_lints(diagnostics);
-//RS     if !lints.is_empty() {
-//RS         let source = fs::read_to_string(file).unwrap_or_default();
-//RS         report_problems(mode, file, &source, &lints);
-//RS     }
-//RS }
-//RS 
-//RS fn render_dev_lints(file: &str, mode: OutputMode, diagnostics: &[jet::Diagnostics::Diagnostic]) {
-//RS     render_lints(file, mode, diagnostics);
-//RS }
-//RS 
-//RS /// After a successful dev iteration, collect ServiceProbe/SceneProbe evidence
-//RS /// for any active dev-owned budgets and trigger a report refresh.
-//RS fn run_dev_budget_refresh(file: &str, bundle: &jet::AST::ProgramBundle, mode: OutputMode) {
-//RS     let specs = match jet::Sema::collect_located_budget_specs_bundle(bundle) {
-//RS         Ok(specs) => specs,
-//RS         Err(_) => return,
-//RS     };
-//RS     let has_service = specs.iter().any(|s| {
-//RS         s.spec
-//RS             .provider
-//RS             .split_once('(')
-//RS             .map(|(k, _)| k)
-//RS             .unwrap_or(&s.spec.provider)
-//RS             == "ServiceProbe"
-//RS     });
-//RS     let has_scene = specs.iter().any(|s| {
-//RS         s.spec
-//RS             .provider
-//RS             .split_once('(')
-//RS             .map(|(k, _)| k)
-//RS             .unwrap_or(&s.spec.provider)
-//RS             == "SceneProbe"
-//RS     });
-//RS     if !has_service && !has_scene {
-//RS         return;
-//RS     }
-//RS     let root = Path::new(file)
-//RS         .canonicalize()
-//RS         .ok()
-//RS         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-//RS         .and_then(|d| jet::Loader::find_manifest_root(&d).or_else(|| Some(d)))
-//RS         .unwrap_or_else(|| std::path::PathBuf::from("."));
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => return,
-//RS     };
-//RS     let service_evidence = if has_service {
-//RS         collect_service_evidence(&root, &specs)
-//RS     } else {
-//RS         Vec::new()
-//RS     };
-//RS     let scene_evidence = if has_scene {
-//RS         collect_scene_evidence(file, &src, mode, &specs)
-//RS     } else {
-//RS         Vec::new()
-//RS     };
-//RS     let status = crate::CmdBudget::run_dev_refresh(file, &service_evidence, &scene_evidence);
-//RS     if status != 0 {
-//RS         eprintln!("budget: dev refresh failed with status {status}");
-//RS     }
-//RS }
-//RS 
-//RS /// Render a run outcome with no timing line (used for re-runs/swaps).
-//RS fn render_outcome(outcome: jet::Interpreter::RunOutcome, file: &str, mode: OutputMode) {
-//RS     render_outcome_timed(outcome, file, None, mode);
-//RS }
-//RS 
-//RS fn render_outcome_timed(
-//RS     outcome: jet::Interpreter::RunOutcome,
-//RS     file: &str,
-//RS     elapsed: Option<std::time::Duration>,
-//RS     mode: OutputMode,
-//RS ) {
-//RS     match outcome {
-//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
-//RS             emit_run_output(&stdout, &stderr);
-//RS             if let Some(e) = elapsed {
-//RS                 if !mode.quiet {
-//RS                     println!("✓ ran in {} ms", e.as_millis());
-//RS                 }
-//RS             }
-//RS         }
-//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
-//RS             exit_if_internal_fault(&diags);
-//RS             let src = fs::read_to_string(file).unwrap_or_default();
-//RS             report_problems(mode, file, &src, &diags);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `jet self completions SHELL [--for PROGRAM]` (D-DX4,
-//RS /// D-SHAPE-CLI-COMPLETE1=A). External schemas are read statically from the
-//RS /// executable; no application code runs.
-//RS pub(crate) fn run_completions(args: &[String]) {
-//RS     const USAGE: &str = "jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]";
-//RS     let shell = args.first().map(String::as_str);
-//RS     if !matches!(shell, Some("bash" | "zsh" | "fish" | "powershell"))
-//RS         || !matches!(args.len(), 1 | 3)
-//RS         || (args.len() == 3 && args[1] != jet::Syntax::CLI_COMPLETIONS_FOR)
-//RS     {
-//RS         eprintln!("Error [E2102]: Completions arguments don't match `{USAGE}`.");
-//RS         eprintln!(" Why: A completion script needs one supported shell and, optionally, one compiled Jet program.");
-//RS         eprintln!(" Fix: Run `{USAGE}`.");
-//RS         eprintln!("More: jet-lang.dev/e/E2102");
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let shell = shell.unwrap();
-//RS     let out = if args.len() == 1 {
-//RS         match shell {
-//RS             "bash" => jet::CLI::completions_bash(),
-//RS             "zsh" => jet::CLI::completions_zsh(),
-//RS             "fish" => jet::CLI::completions_fish(),
-//RS             "powershell" => jet::CLI::completions_powershell(),
-//RS             _ => unreachable!(),
-//RS         }
-//RS     } else {
-//RS         let program = &args[2];
-//RS         let command_name = jet::CLI::completion_command_name(program)
-//RS             .unwrap_or_else(|error| completion_metadata_error(program, error));
-//RS         let mut file = open_completion_program(program).unwrap_or_else(|error| {
-//RS             completion_metadata_error(
-//RS                 program,
-//RS                 &format!("the program could not be opened ({error})"),
-//RS             )
-//RS         });
-//RS         let metadata = file.metadata().unwrap_or_else(|error| {
-//RS             completion_metadata_error(
-//RS                 program,
-//RS                 &format!("the opened program could not be inspected ({error})"),
-//RS             )
-//RS         });
-//RS         if !metadata.file_type().is_file() {
-//RS             completion_metadata_error(program, "the program is not a regular file");
-//RS         }
-//RS         const MAX_PROGRAM_BYTES: u64 = 512 * 1024 * 1024;
-//RS         if metadata.len() > MAX_PROGRAM_BYTES {
-//RS             completion_metadata_error(
-//RS                 program,
-//RS                 "the program is larger than the 512 MiB metadata-reader limit",
-//RS             );
-//RS         }
-//RS         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-//RS         Read::by_ref(&mut file)
-//RS             .take(MAX_PROGRAM_BYTES + 1)
-//RS             .read_to_end(&mut bytes)
-//RS             .unwrap_or_else(|error| {
-//RS                 completion_metadata_error(
-//RS                     program,
-//RS                     &format!("the opened program could not be read ({error})"),
-//RS                 )
-//RS             });
-//RS         if bytes.len() as u64 > MAX_PROGRAM_BYTES {
-//RS             completion_metadata_error(
-//RS                 program,
-//RS                 "the program grew beyond the 512 MiB metadata-reader limit while being read",
-//RS             );
-//RS         }
-//RS         let schema = jet_foundation::CLISchema::read_executable(&bytes)
-//RS             .unwrap_or_else(|error| completion_metadata_error(program, &error.to_string()));
-//RS         jet::CLI::completions_for_program(shell, &command_name, &schema).unwrap()
-//RS     };
-//RS     print!("{}", out);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn open_completion_program(path: &str) -> std::io::Result<File> {
-//RS     use std::os::unix::fs::OpenOptionsExt;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const NONBLOCK: i32 = 0o4000;
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     const NONBLOCK: i32 = 0x0004;
-//RS     OpenOptions::new()
-//RS         .read(true)
-//RS         .custom_flags(NONBLOCK)
-//RS         .open(path)
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn open_completion_program(path: &str) -> std::io::Result<File> {
-//RS     OpenOptions::new().read(true).open(path)
-//RS }
-//RS 
-//RS fn completion_metadata_error(program: &str, why: &str) -> ! {
-//RS     let program = program
-//RS         .chars()
-//RS         .flat_map(char::escape_default)
-//RS         .collect::<String>();
-//RS     eprintln!("Error [E2103]: Couldn't read command metadata from `{program}`.");
-//RS     eprintln!(" Why: {why}.");
-//RS     eprintln!(" Fix: Rebuild the program with this Jet toolchain, then try again.");
-//RS     eprintln!("More: jet-lang.dev/e/E2103");
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS /// Every `jet self devtools` subcommand name, for the usage line and typo errors.
-//RS const DEVTOOLS_SUBCOMMANDS: &str =
-//RS     "grammars | reduce | ice-report | new-example | new-ui | check-fixture-paths | bless";
-//RS 
-//RS /// `jet self devtools grammars` — D-HL1 generated lexical base for editor grammars.
-//RS /// c450 (D-DEVTOOLS1=A): extended with maintainer-facing minimizer/scaffolding
-//RS /// tools, all under this same hidden namespace (never top-level commands).
-//RS pub(crate) fn run_devtools(args: &[&String], mode: OutputMode) {
-//RS     match args.first().map(|s| s.as_str()) {
-//RS         Some("grammars") => {
-//RS             write_generated_section(
-//RS                 "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
-//RS                 &jet::Syntax::render_vscode_generated_highlights(),
-//RS                 mode.quiet,
-//RS             );
-//RS             write_generated_section(
-//RS                 "Tools/editors/jet.tmGrammar",
-//RS                 &jet::Syntax::render_vscode_generated_highlights(),
-//RS                 mode.quiet,
-//RS             );
-//RS             write_generated_section(
-//RS                 "Tools/editors/tree-sitter/grammar.js",
-//RS                 &jet::Syntax::render_tree_sitter_generated_highlights(),
-//RS                 mode.quiet,
-//RS             );
-//RS             write_generated_section(
-//RS                 "Tools/editors/zed/languages/jet/highlights.scm",
-//RS                 &jet::Syntax::render_zed_generated_highlights(),
-//RS                 mode.quiet,
-//RS             );
-//RS             // #1659 criterion 3: the files were still written; `--quiet`
-//RS             // only mutes this confirmation line.
-//RS             if !mode.quiet {
-//RS                 println!("regenerated editor grammar sections");
-//RS             }
-//RS         }
-//RS         Some("reduce") => run_devtools_reduce(&args[1..]),
-//RS         Some("ice-report") => run_devtools_ice_report(&args[1..]),
-//RS         Some("new-example") => run_devtools_new_example(&args[1..]),
-//RS         Some("new-ui") => run_devtools_new_ui(&args[1..]),
-//RS         Some("check-fixture-paths") => run_devtools_check_fixture_paths(),
-//RS         Some("bless") => run_devtools_bless(&args[1..]),
-//RS         Some("probe") => run_devtools_probe(&args[1..]),
-//RS         Some(other) => {
-//RS             crate::cli_error!("E2101", "unknown `devtools` subcommand `{}`", other);
-//RS             eprintln!(
-//RS                 "usage: {} devtools <{}>",
-//RS                 jet::Syntax::BINARY_NAME,
-//RS                 DEVTOOLS_SUBCOMMANDS
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         None => {
-//RS             eprintln!(
-//RS                 "usage: {} devtools <{}>",
-//RS                 jet::Syntax::BINARY_NAME,
-//RS                 DEVTOOLS_SUBCOMMANDS
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // c450: `jet self devtools reduce` — delta-debugging minimizer.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// `jet self devtools reduce <file.jet> [--code EXXXX]`.
-//RS ///
-//RS /// Oracle (what makes a candidate "still interesting"):
-//RS ///   - default: the front end accepts the file AND rustc rejects the
-//RS ///     generated Rust (an I2 repro — invariant I2 says this must never
-//RS ///     happen in a shipped compiler, so a minimal repro is worth having);
-//RS ///   - `--code EXXXX`: the front end emits diagnostic `EXXXX` (from either
-//RS ///     an error result or a lint on a successful compile).
-//RS ///
-//RS /// Shrinks by removing line-chunks (a simplified Zeller ddmin: try removing
-//RS /// progressively smaller contiguous chunks, re-trying the whole file at a
-//RS /// finer granularity whenever a whole pass makes no progress) and writes the
-//RS /// smallest failing case to `<file>.reduced.<ext>`.
-//RS pub(crate) fn run_devtools_reduce(args: &[&String]) {
-//RS     if args.is_empty() {
-//RS         eprintln!(
-//RS             "usage: {} devtools reduce <file.{}> [--code EXXXX]",
-//RS             jet::Syntax::BINARY_NAME,
-//RS             jet::Syntax::FILE_EXT
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let file = args[0].as_str();
-//RS     let mut code_filter: Option<String> = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--code" => {
-//RS                 code_filter = args.get(i + 1).map(|s| s.to_string());
-//RS                 i += 2;
-//RS             }
-//RS             other => {
-//RS                 crate::cli_error!("E2102", "unknown `reduce` flag `{}`", other);
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let src = fs::read_to_string(file).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't read `{}`: {}", file, e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     // `compile_with_path` reads its *file* argument straight off disk (its
-//RS     // `src` parameter is display-only), so every candidate has to actually
-//RS     // exist on disk under the same extension before we can ask the oracle
-//RS     // about it. One scratch path, rewritten each try.
-//RS     let ext = Path::new(file)
-//RS         .extension()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or(jet::Syntax::FILE_EXT);
-//RS     let scratch = std::env::temp_dir().join(format!(
-//RS         "jet_devtools_reduce_{}.{}",
-//RS         std::process::id(),
-//RS         ext
-//RS     ));
-//RS     let interesting = |text: &str| reduce_oracle(&scratch, text, code_filter.as_deref());
-//RS 
-//RS     if !interesting(&src) {
-//RS         let why = code_filter.as_ref().map_or_else(
-//RS             || {
-//RS                 "either the front end already rejects it, or rustc accepts the generated Rust"
-//RS                     .to_string()
-//RS             },
-//RS             |code| format!("the front end never emits `{code}` for this file"),
-//RS         );
-//RS         crate::cli_error!(@full "E2104", format!("`{}` doesn't reproduce the target oracle as given", file), why, "confirm the case fails the way you expect, then reduce it");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     let lines: Vec<String> = src.lines().map(|s| s.to_string()).collect();
-//RS     println!("reduce: starting at {} line(s)", lines.len());
-//RS     let reduced = ddmin(lines, &interesting);
-//RS     println!("reduce: finished at {} line(s)", reduced.len());
-//RS 
-//RS     let mut out_text = reduced.join("\n");
-//RS     if !out_text.is_empty() {
-//RS         out_text.push('\n');
-//RS     }
-//RS     let out_path = reduced_path(file);
-//RS     fs::write(&out_path, &out_text).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't write `{}`: {}", out_path.display(), e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let _ = fs::remove_file(&scratch);
-//RS     println!("wrote {}", out_path.display());
-//RS }
-//RS 
-//RS /// Whether `src` still triggers the target oracle. `code`: `None` = default
-//RS /// I2 oracle (front end accepts, rustc rejects); `Some(code)` = the front end
-//RS /// emits that diagnostic code (error or lint). Writes `src` to `scratch`
-//RS /// first since `compile_with_path` reads its file argument off disk.
-//RS fn reduce_oracle(scratch: &Path, src: &str, code: Option<&str>) -> bool {
-//RS     if fs::write(scratch, src).is_err() {
-//RS         return false;
-//RS     }
-//RS     let shown = scratch.to_string_lossy().into_owned();
-//RS     match jet::compile_with_path(src, &shown) {
-//RS         Ok(out) => match code {
-//RS             Some(c) => out.lints.iter().any(|d| d.code == c),
-//RS             None => rustc_rejects(&out.rust),
-//RS         },
-//RS         Err(diags) => match code {
-//RS             Some(c) => diags.iter().any(|d| d.code == c),
-//RS             None => false, // default oracle needs the front end to accept
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// Simplified Zeller ddmin over line-chunks: repeatedly try removing a
-//RS /// contiguous chunk of the current granularity; on any removal that keeps the
-//RS /// oracle interesting, keep the shrunk version and tighten the granularity;
-//RS /// on a full pass with no progress, double the chunk count (finer chunks)
-//RS /// until we're at single-line granularity, then stop.
-//RS fn ddmin(lines: Vec<String>, interesting: &dyn Fn(&str) -> bool) -> Vec<String> {
-//RS     let mut current = lines;
-//RS     let mut n: usize = 2;
-//RS     loop {
-//RS         if current.len() < 2 {
-//RS             break;
-//RS         }
-//RS         let chunk_size = (current.len() + n - 1) / n;
-//RS         if chunk_size == 0 {
-//RS             break;
-//RS         }
-//RS         let mut made_progress = false;
-//RS         let mut start = 0;
-//RS         while start < current.len() {
-//RS             let end = (start + chunk_size).min(current.len());
-//RS             let mut candidate = current.clone();
-//RS             candidate.drain(start..end);
-//RS             if !candidate.is_empty() && interesting(&candidate.join("\n")) {
-//RS                 println!(
-//RS                     "reduce: dropped lines {}..{} -> {} line(s) left",
-//RS                     start + 1,
-//RS                     end,
-//RS                     candidate.len()
-//RS                 );
-//RS                 current = candidate;
-//RS                 n = if n > 2 { n - 1 } else { 2 };
-//RS                 made_progress = true;
-//RS                 break;
-//RS             }
-//RS             start = end;
-//RS         }
-//RS         if !made_progress {
-//RS             if n >= current.len() {
-//RS                 break;
-//RS             }
-//RS             n = (n * 2).min(current.len());
-//RS         }
-//RS     }
-//RS     current
-//RS }
-//RS 
-//RS /// `<file>.reduced.<ext>` sibling path for the reducer's output.
-//RS fn reduced_path(file: &str) -> PathBuf {
-//RS     let p = Path::new(file);
-//RS     let stem_name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("reduced");
-//RS     let ext = p
-//RS         .extension()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or(jet::Syntax::FILE_EXT);
-//RS     let name = format!("{}.reduced.{}", stem_name, ext);
-//RS     match p.parent() {
-//RS         Some(parent) if !parent.as_os_str().is_empty() => parent.join(name),
-//RS         _ => PathBuf::from(name),
-//RS     }
-//RS }
-//RS 
-//RS /// Run rustc over generated Rust source with no linking (`--emit=metadata`,
-//RS /// I2's oracle only cares whether rustc accepts the code, not whether it
-//RS /// links). Returns `(accepted, stderr)`; a rustc that can't even be invoked
-//RS /// counts as "accepted" so a missing toolchain never manufactures a false
-//RS /// I2 repro.
-//RS fn rustc_probe(rust_code: &str) -> (bool, String) {
-//RS     let tmp_dir = std::env::temp_dir().join(format!("jet_devtools_rustc_{}", std::process::id()));
-//RS     if fs::create_dir_all(&tmp_dir).is_err() {
-//RS         return (true, String::new());
-//RS     }
-//RS     let rs_path = tmp_dir.join("check.rs");
-//RS     if fs::write(&rs_path, rust_code).is_err() {
-//RS         let _ = fs::remove_dir_all(&tmp_dir);
-//RS         return (true, String::new());
-//RS     }
-//RS     let meta_path = tmp_dir.join("check.rmeta");
-//RS     let result = Command::new("rustc")
-//RS         .arg("--edition")
-//RS         .arg("2021")
-//RS         .arg("--crate-name")
-//RS         .arg("jet_devtools_check")
-//RS         .arg("--emit=metadata")
-//RS         .arg(&rs_path)
-//RS         .arg("-o")
-//RS         .arg(&meta_path)
-//RS         .output();
-//RS     let outcome = match result {
-//RS         Ok(o) => (
-//RS             o.status.success(),
-//RS             String::from_utf8_lossy(&o.stderr).into_owned(),
-//RS         ),
-//RS         Err(_) => (true, String::new()),
-//RS     };
-//RS     let _ = fs::remove_dir_all(&tmp_dir);
-//RS     outcome
-//RS }
-//RS 
-//RS fn rustc_rejects(rust_code: &str) -> bool {
-//RS     !rustc_probe(rust_code).0
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // c450: `jet self devtools ice-report` — bundle an I2 repro for a bug report.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// `jet self devtools ice-report <file.jet>` — bundles the source, generated Rust,
-//RS /// rustc's stderr, and both tool versions into one directory under
-//RS /// `.jet/ice-report/<stem>-<unix-time>/` so a bug report has everything
-//RS /// attached in one place. Prints the bundle path.
-//RS pub(crate) fn run_devtools_ice_report(args: &[&String]) {
-//RS     if args.is_empty() {
-//RS         eprintln!(
-//RS             "usage: {} devtools ice-report <file.{}>",
-//RS             jet::Syntax::BINARY_NAME,
-//RS             jet::Syntax::FILE_EXT
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let file = args[0].as_str();
-//RS     let src = fs::read_to_string(file).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't read `{}`: {}", file, e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     let out = match jet::compile_with_path(&src, file) {
-//RS         Ok(o) => o,
-//RS         Err(diags) => {
-//RS             crate::cli_error!(@full "E2105", format!("`{}` doesn't reach codegen — the front end already rejects it", file), "ice-report bundles a case that compiles to Rust (an I2 repro)", format!("fix the front-end errors first, or use `{} devtools reduce --code <CODE>` to shrink a front-end diagnostic instead", jet::Syntax::BINARY_NAME));
-//RS             eprint!("{}", jet::render_diagnostics(file, &src, &diags));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     let (accepted, rustc_stderr) = rustc_probe(&out.rust);
-//RS     if accepted {
-//RS         println!(
-//RS             "note: rustc accepted the generated Rust for `{}` — bundling anyway, but this isn't an I2 repro",
-//RS             file
-//RS         );
-//RS     }
-//RS 
-//RS     let rustc_version = Command::new("rustc")
-//RS         .arg("--version")
-//RS         .output()
-//RS         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-//RS         .unwrap_or_else(|_| "rustc: not found".to_string());
-//RS     let jet_version = env!("CARGO_PKG_VERSION");
-//RS 
-//RS     let ts = std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .map(|d| d.as_secs())
-//RS         .unwrap_or(0);
-//RS     let project_root = match jet::build_project_root(file) {
-//RS         Ok(root) => root,
-//RS         Err(diags) => {
-//RS             eprint!("{}", jet::render_diagnostics(file, &src, &diags));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let bundle_dir = project_root
-//RS         .join(".jet")
-//RS         .join("ice-report")
-//RS         .join(format!("{}-{}", stem(file), ts));
-//RS     fs::create_dir_all(&bundle_dir).unwrap_or_else(|e| {
-//RS         crate::cli_error!("E2105", "couldn't create `{}`: {}", bundle_dir.display(), e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     let write = |name: &str, content: &str| {
-//RS         fs::write(bundle_dir.join(name), content).unwrap_or_else(|e| {
-//RS             crate::cli_error!("E2105", "couldn't write `{}`: {}", name, e);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS     };
-//RS     write(&format!("source.{}", jet::Syntax::FILE_EXT), &src);
-//RS     write("generated.rs", &out.rust);
-//RS     write("rustc.stderr", &rustc_stderr);
-//RS     write(
-//RS         "versions.txt",
-//RS         &format!("jet {}\n{}\n", jet_version, rustc_version),
-//RS     );
-//RS 
-//RS     println!("wrote ICE report bundle to {}", bundle_dir.display());
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // c450: `jet self devtools new-example` / `new-ui` — scaffold I5/I4 fixtures.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// `jet self devtools new-example <topic>/<name>` — scaffolds
-//RS /// `Examples/features/<topic>/<name>.jet` and
-//RS /// `Examples/features/expected/<topic>/<name>.out`, matching the layout
-//RS /// `tests/golden.rs` walks exactly. The stub is a real, passing example (I5:
-//RS /// no example ships broken) that the author edits to demonstrate the feature.
-//RS pub(crate) fn run_devtools_new_example(args: &[&String]) {
-//RS     if args.is_empty() {
-//RS         eprintln!(
-//RS             "usage: {} devtools new-example <topic>/<name>",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let spec = args[0].as_str();
-//RS     let (topic, name) = match spec.split_once('/') {
-//RS         Some((t, n)) if !t.is_empty() && !n.is_empty() => (t, n),
-//RS         _ => {
-//RS             crate::cli_error!("E2104", "expected `<topic>/<name>`, got `{}`", spec);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     let ext = jet::Syntax::FILE_EXT;
-//RS     let example_dir = PathBuf::from("Examples/features").join(topic);
-//RS     let expected_dir = PathBuf::from("Examples/features/expected").join(topic);
-//RS     let example_path = example_dir.join(format!("{}.{}", name, ext));
-//RS     let expected_path = expected_dir.join(format!("{}.out", name));
-//RS 
-//RS     if example_path.exists() {
-//RS         crate::cli_error!("E2104", "`{}` already exists", example_path.display());
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     fs::create_dir_all(&example_dir).unwrap_or_else(|e| {
-//RS         crate::cli_error!(
-//RS             "E2105",
-//RS             "couldn't create `{}`: {}",
-//RS             example_dir.display(),
-//RS             e
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     fs::create_dir_all(&expected_dir).unwrap_or_else(|e| {
-//RS         crate::cli_error!(
-//RS             "E2105",
-//RS             "couldn't create `{}`: {}",
-//RS             expected_dir.display(),
-//RS             e
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     let greeting = format!("scaffold: {}/{}", topic, name);
-//RS     let src = format!(
-//RS         "// TODO: describe Examples/features/{}/{}.{}\nfn run() {{\n    print(\"{}\")\n}}\n",
-//RS         topic, name, ext, greeting
-//RS     );
-//RS     fs::write(&example_path, &src).unwrap_or_else(|e| {
-//RS         crate::cli_error!(
-//RS             "E2105",
-//RS             "couldn't write `{}`: {}",
-//RS             example_path.display(),
-//RS             e
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     fs::write(&expected_path, format!("{}\n", greeting)).unwrap_or_else(|e| {
-//RS         crate::cli_error!(
-//RS             "E2105",
-//RS             "couldn't write `{}`: {}",
-//RS             expected_path.display(),
-//RS             e
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS 
-//RS     println!("wrote {}", example_path.display());
-//RS     println!("wrote {}", expected_path.display());
-//RS }
-//RS 
-//RS /// `jet self devtools new-ui <name>` — scaffolds `tests/ui/<name>.jet` and its
-//RS /// `<name>.stderr` snapshot, matching the layout `tests/diagnostic_snapshots.rs`
-//RS /// walks exactly. The stub triggers a real (if generic) diagnostic and its
-//RS /// `.stderr` is computed with the SAME calls the harness uses, so the pair is
-//RS /// valid the moment it's written — edit the `.jet` to demonstrate the real
-//RS /// diagnostic, then re-bless with `jet self devtools bless diagnostic_snapshots`.
-// END-PORT-PENDING 0680 Source/CmdDevTools.rs:1847-3664
+use core.files as fs
+use core.process.[Command, exit]
+use core.term.[println, eprintln, print]
+use std.env
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet.AST.[ProgramBundle, EverySchedule, Item]
+use jet.CheckedMirSnapshot
+use jet.Interpreter as Interpreter
+use jet.Driver as Driver
+use jet.Sema as Sema
+use jet.Policy.GateSet
+use jet.Package.ReleaseDevtoolsPolicy
+use jet.SHA256.sha256_hex
+use jet_foundation.Persist
+use jet_foundation.MIR.[MirArtifactTarget, MirArtifactRequest, MirArtifactKind, MirArtifactBuildMode, MIRProgram]
+use jet_foundation.Game as Game
+use jet_foundation.HotSwap.HotSwapDecision
+use jet_devserver.[PersistStore, ResidentDevSession, DevWatchEntry]
+use jet_devserver.Devtools.[JetDevtoolsJobPanelEventKind, JetDevtoolsJobPanelLifecycleState, JetDevtoolsJobPanelFailureKind, JetDevtoolsJobPanelFact]
+use jet_devserver.WebHost.WebHost
+use jet_jit as resident_runtime
+
+// Rust: Source/CmdDevTools.rs:1847
+fn sync_persist_bindings(bundle: &ProgramBundle, store: &PersistStore) -> Void {
+    prep :: Persist.prepare_bundle(bundle)
+    loop msg in prep.messages -> eprintln("{msg}")
+    if prep.error == .Val(error) -> eprintln("[persist] transaction rejected: {error}")
+    store = Persist.shared_clone()
+}
+// Rust: Source/CmdDevTools.rs:1860
+fn live_lineage_for_file(file: String) -> (String, String, String, String) {
+    source_id :: file.to_string()
+    revision :: fs.read(file).map(fn(bytes) -> "sha256-{sha256_hex(bytes)}") ?? ""
+    build_id :: revision.clone()
+    world_id :: "world-{sha256_hex(source_id.bytes())}"
+    (source_id, build_id, revision, world_id)
+}
+// Rust: Source/CmdDevTools.rs:1869
+fn provision_live_lineage_env(local_rail: Bool, session_id: String, source_id: String, build_id: String, revision: String, world_id: String) -> Void {
+    // Rust: Source/CmdDevTools.rs:1877
+    SESSION :: "JET_DEVTOOLS_RELAY_SESSION_ID"
+    // Rust: Source/CmdDevTools.rs:1878
+    SOURCE :: "JET_DEVTOOLS_RELAY_SOURCE_ID"
+    // Rust: Source/CmdDevTools.rs:1879
+    BUILD :: "JET_DEVTOOLS_RELAY_BUILD_ID"
+    // Rust: Source/CmdDevTools.rs:1880
+    REVISION :: "JET_DEVTOOLS_RELAY_REVISION"
+    // Rust: Source/CmdDevTools.rs:1881
+    WORLD :: "JET_DEVTOOLS_RELAY_WORLD_ID"
+    // Rust: Source/CmdDevTools.rs:1882
+    COMMANDS :: "JET_DEVTOOLS_COMMAND_RELAY_PATH"
+    // GATE #4494: actual native environment mutation and process identity.
+    directory :: env.temp_dir().join("jet-devtools-commands-{std.process.id()}").to_string_lossy().into_owned()
+    if !local_rail {
+        loop key in [SESSION, SOURCE, BUILD, REVISION, WORLD, COMMANDS] -> env.remove_var(key)
+        return
+    }
+    loop (key, value) in [(SESSION, session_id), (SOURCE, source_id), (BUILD, build_id), (REVISION, revision), (WORLD, world_id), (COMMANDS, directory)] -> env.set_var(key, value)
+}
+// Rust: Source/CmdDevTools.rs:1907
+fn next_dev_job_wake(snapshot: &CheckedMirSnapshot?) -> Duration? {
+    snapshot :: snapshot ?? return None
+    jobs :: Interpreter.scheduled_jobs(snapshot.bundle)
+    if jobs.is_empty() -> return None
+    now_secs :: (SystemTime.now().duration_since(UNIX_EPOCH) ?? Duration.default()).as_secs()
+    second_of_day :: now_secs % 86400
+    wake := Duration?{None}
+    loop (_, schedule) in jobs {
+        duration :: if schedule == {
+            .Duration(nanos) -> Duration.from_nanos(nanos.max(1) as U64)
+            .WallClockTime(hour, minute) -> {
+                target :: (hour as U64) * 3600 + (minute as U64) * 60
+                seconds :: if second_of_day >= target && second_of_day < target + 60 -> 1 else if second_of_day < target -> target - second_of_day else -> 86400 - second_of_day + target
+                Duration.from_secs(seconds.max(1))
+            }
+        }
+        if wake.is_none() || duration < wake.unwrap() -> wake = .Val(duration)
+    }
+    wake
+}
+// Rust: Source/CmdDevTools.rs:1946
+fn run_due_jobs(snapshot: &CheckedMirSnapshot, file: String, try_anyway: Bool, use_interpreter: Bool, mode: OutputMode, release_policy: &ReleaseDevtoolsPolicy, clock: &JobClock, resident_session: &ResidentDevSession) -> Void {
+    jobs :: Interpreter.scheduled_jobs(snapshot.bundle)
+    if jobs.is_empty() -> return
+    loop name in clock.due(jobs) {
+        if !mode.quiet -> println("\n— due job `{name}` —")
+        invocation :: if use_interpreter -> Interpreter.InterpreterInvocation.DevInterpret else -> Interpreter.InterpreterInvocation.DevDefault
+        // GATE #4494: relaxed native atomic fetch-add.
+        job_id :: "{name}#{NEXT_DEV_JOB_ID.fetch_add(1, .Relaxed)}"
+        queue :: name.clone()
+        worker :: if use_interpreter -> "dev-interpreter" else -> "dev-cranelift"
+        enqueued_at_ms :: dev_job_now_ms()
+        publish_dev_job_fact(resident_session, dev_job_fact(.Enqueue, .Enqueued, job_id, name, queue, 0, None, None, None, enqueued_at_ms))
+        started_at :: Instant.now()
+        started_at_ms :: dev_job_now_ms().max(enqueued_at_ms)
+        publish_dev_job_fact(resident_session, dev_job_fact(.Start, .Started, job_id, name, queue, 1, None, .Val(worker.clone()), None, started_at_ms))
+        if Interpreter.run_checked_job_snapshot(snapshot, file, name, [], try_anyway, invocation, release_policy) == {
+            .Ran(stdout, stderr, exit_code) -> {
+                finished_at_ms :: dev_job_now_ms().max(started_at_ms)
+                duration_ms :: U64.try_from(started_at.elapsed().as_millis()) ?? U64.MAX
+                if exit_code == 0 -> publish_dev_job_fact(resident_session, dev_job_fact(.Complete, .Completed, job_id, name, queue, 1, .Val(duration_ms), .Val(worker), None, finished_at_ms))
+                else -> publish_dev_job_fact(resident_session, dev_job_fact(.Fail, .Failed, job_id, name, queue, 1, .Val(duration_ms), .Val(worker), .Val(.Error), finished_at_ms))
+                emit_run_output(stdout, stderr)
+                if exit_code != 0 -> eprintln("job `{name}` exited with code {exit_code}")
+            }
+            .Problems(diags) -> {
+                finished_at_ms :: dev_job_now_ms().max(started_at_ms)
+                duration_ms :: U64.try_from(started_at.elapsed().as_millis()) ?? U64.MAX
+                publish_dev_job_fact(resident_session, dev_job_fact(.Fail, .Failed, job_id, name, queue, 1, .Val(duration_ms), .Val(worker), .Val(.Error), finished_at_ms))
+                exit_if_internal_fault(diags)
+                src :: fs.read_to_string(file) ?? ""
+                report_problems(mode, file, src, diags)
+            }
+        }
+    }
+}
+// Rust: Source/CmdDevTools.rs:2098
+// GATE #4494: native atomic storage.
+NEXT_DEV_JOB_ID :: AtomicU64.new(1)
+// Rust: Source/CmdDevTools.rs:2099
+DEV_JOB_FACT_SOURCE :: "jet-dev.jobs"
+// Rust: Source/CmdDevTools.rs:2101
+fn dev_job_now_ms() -> U64 {
+    U64.try_from((SystemTime.now().duration_since(UNIX_EPOCH) ?? Duration.default()).as_millis()) ?? U64.MAX
+}
+// Rust: Source/CmdDevTools.rs:2110
+fn dev_job_fact(kind: JetDevtoolsJobPanelEventKind, state: JetDevtoolsJobPanelLifecycleState, job_id: String, name: String, queue: String, attempts: U32, duration_ms: U64?, worker: String?, failure: JetDevtoolsJobPanelFailureKind?, timestamp_ms: U64) -> JetDevtoolsJobPanelFact {
+    JetDevtoolsJobPanelFact{sequence: 0, timestamp_ms: timestamp_ms, kind: kind, state: state, job_id: job_id.to_string(), name: name.to_string(), labels: [], queue: queue.to_string(), attempts: attempts, duration_ms: duration_ms, worker: worker, request_id: None, failure: failure}
+}
+// Rust: Source/CmdDevTools.rs:2139
+fn publish_dev_job_fact(resident_session: &ResidentDevSession, fact: JetDevtoolsJobPanelFact) -> Void {
+    _ :: resident_session.publish_job_fact(fact, DEV_JOB_FACT_SOURCE)
+}
+// Rust: Source/CmdDevTools.rs:2153
+// UTC duration/day bookkeeping is shared with the canonical job scheduler.
+pub struct JobClock { inner: resident_runtime.Job.JetJobClock }
+// Rust: Source/CmdDevTools.rs:2158
+pub fn JobClock.new() -> JobClock { JobClock{inner: resident_runtime.Job.JetJobClock.new()} }
+// Rust: Source/CmdDevTools.rs:2166
+pub fn JobClock.due(self: &JobClock, jobs: &[(String, EverySchedule)]) -> [String] {
+    schedules :: jobs.iter().map(fn(pair) -> (pair.0, prelude_schedule(pair.1))).collect()
+    resident_runtime.Job.jet_job_schedule_due(&self.inner, schedules)
+}
+// Rust: Source/CmdDevTools.rs:2177
+fn JobClock.due_at(self: &JobClock, jobs: &[(String, EverySchedule)], unix_secs: U64) -> [String] {
+    schedules :: jobs.iter().map(fn(pair) -> (pair.0, prelude_schedule(pair.1))).collect()
+    self.inner.due_at(schedules, unix_secs)
+}
+// Rust: Source/CmdDevTools.rs:2190
+fn prelude_schedule(schedule: EverySchedule) -> resident_runtime.Job.JetJobSchedule {
+    if schedule == {
+        .Duration(nanos) -> .Duration(nanos: nanos)
+        .WallClockTime(hour, minute) -> .WallClockTime(hour: hour, minute: minute)
+    }
+}
+// Rust: Source/CmdDevTools.rs:2200
+fn dev_artifact_request(bundle: &ProgramBundle, target: MirArtifactTarget, profile: String) -> MirArtifactRequest {
+    build_mode :: Driver.mir_artifact_build_mode_for(bundle, .Run, profile)
+    kind :: if build_mode == {
+        .Test -> MirArtifactKind.TestExecutable
+        .Coverage -> MirArtifactKind.TestExecutable
+        .Fuzz -> MirArtifactKind.FuzzExecutable
+        .Dev -> MirArtifactKind.NativeExecutable
+        .Release -> MirArtifactKind.NativeExecutable
+    }
+    MirArtifactRequest.new(target, kind, build_mode)
+}
+// Rust: Source/CmdDevTools.rs:2223
+fn dev_incremental_reload_enabled(entry_fn: String?, profile: String, gates: GateSet, setting_overrides: &[String:String]) -> Bool {
+    entry_fn.is_none() && profile == "dev" && gates.is_empty() && setting_overrides.is_empty()
+}
+// Rust: Source/CmdDevTools.rs:2233
+fn load_and_check_dev_change(file: String, entry_fn: String?, gates: GateSet, mode: OutputMode, profile: String, setting_overrides: &[String:String]) -> (ProgramBundle, Sema.SemIndexEffectFacts)? {
+    new_bundle := jet.Loader.load_entry(file) ?? {
+        src :: fs.read_to_string(file) ?? ""
+        println("\n— {file} changed —")
+        report_problems(mode, file, src, err)
+        return None
+    }
+    Driver.seed_build_facts(&new_bundle, profile, false, setting_overrides) ?? {
+        src :: fs.read_to_string(file) ?? ""
+        println("\n— {file} changed —")
+        report_problems(mode, file, src, err)
+        return None
+    }
+    if entry_fn == .Val(name) -> Driver.swap_entry_point(&new_bundle, name)
+    (diags, effect_facts) :: Sema.check_bundle_gates_with_effect_facts(&new_bundle, .Run, gates)
+    errs :: diags.iter().filter(fn(d) -> d.severity == .Error).cloned().collect()
+    if !errs.is_empty() {
+        src :: fs.read_to_string(file) ?? ""
+        println("\n— {file} changed —")
+        report_problems(mode, file, src, errs)
+        return None
+    }
+    render_dev_lints(file, mode, diags)
+    .Val((^new_bundle, effect_facts))
+}
+
+// Rust: Source/CmdDevTools.rs:2288
+fn render_dev_change(file: String, entry_fn: String?, program_args: &[String], try_anyway: Bool, policy: WatchPolicy, prev: &CheckedMirSnapshot?, gates: GateSet, mode: OutputMode, use_interpreter: Bool, profile: String, release_policy: &ReleaseDevtoolsPolicy, setting_overrides: &[String:String], incremental_cache: &Sema.IncrementalSemaCache, game_entries: &[DevWatchEntry], game_facts_out: &[Game.JetGameChangeFact], devtools_host: &WebHost?) -> CheckedMirSnapshot? {
+    if !game_entries.is_empty() {
+        game_facts_out = game_change_facts(game_entries, None) ?? {
+            eprintln("[hot-swap] checked game facts rejected: {err}")
+            return None
+        }
+    }
+    incremental_decision := HotSwapDecision?{None}
+    incrementally_checked := (ProgramBundle, Sema.SemIndexEffectFacts)?{None}
+    if prev.is_some() && dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
+        old :: prev.expect("incremental reload requires a baseline")
+        module_name :: old.bundle.modules.get(old.bundle.entry).map(fn(module) -> module.display.clone()) ?? file.to_string()
+        source :: fs.read_to_string(file) ?? ""
+        (diags, bundle, facts, decision) :: Driver.check_file_with_hot_swap_incremental(old.bundle, file, .Val((OSPath.new(file), source)), false, module_name, incremental_cache)
+        errs :: diags.iter().filter(fn(d) -> d.severity == .Error).cloned().collect()
+        if !errs.is_empty() {
+            println("\n— {file} changed —")
+            report_problems(mode, file, source, errs)
+            return None
+        }
+        safe_for_run :: bundle.is_some_and(fn(bundle) -> {
+            has_run :: bundle.modules.get(bundle.entry).is_some_and(fn(module) -> module.items.iter().any(fn(item) -> {
+                if item == { .Func(function) -> function.name == "run"; _ -> false }
+            }))
+            has_build :: bundle.modules.iter().any(fn(module) -> module.items.iter().any(fn(item) -> {
+                if item == { .Func(function) -> Sema.is_build_entry(function); _ -> false }
+            }))
+            has_run && !has_build
+        })
+        if safe_for_run {
+            render_dev_lints(file, mode, diags)
+            incremental_decision = decision
+            incrementally_checked = bundle.map(fn(bundle) -> (bundle, facts))
+        } else -> incremental_cache.clear()
+    }
+    (new_bundle, effect_facts) :: incrementally_checked ?? (load_and_check_dev_change(file, entry_fn, gates, mode, profile, setting_overrides) ?? return None)
+    resident :: policy == .Swap || policy == .Auto
+    artifact_target :: if use_interpreter -> MirArtifactTarget.Interpreter else -> MirArtifactTarget.Cranelift
+    (mir, artifact) :: jet.lower_checked_semantic_mir_program_for(new_bundle, dev_artifact_request(new_bundle, artifact_target, profile))
+    if resident {
+        module_name :: new_bundle.modules.get(new_bundle.entry).map(fn(module) -> module.display.clone()) ?? file.to_string()
+        if prev == .Val(old) {
+            decision :: fn() -> HotSwapDecision [jet.Diagnostics.Diagnostic]! {
+                if incremental_decision.take() == .Val(decision) -> return decision
+                Sema.HotSwap.type_stable_decision(old.bundle, new_bundle, module_name)
+            }() ?? {
+                src :: fs.read_to_string(file) ?? ""
+                report_problems(mode, file, src, err)
+                return None
+            }
+            facts :: game_change_facts(game_entries, .Val(decision)) ?? {
+                eprintln("[hot-swap] checked game facts rejected: {err}")
+                return None
+            }
+            game_facts_out = facts.clone()
+            decision :: decision.with_change_facts(facts)
+            reuse_current :: !use_interpreter && decision.is_compatible() && decision.changed.is_empty() && decision.changed_functions.is_empty() && decision.rechecked().is_empty() && decision.schema_migrations().is_empty() && decision.change_facts().is_empty()
+            if devtools_host == .Val(host) -> _ :: host.publish_hot_swap_decision(decision)
+            persist_before_migration :: if !use_interpreter && !decision.schema_migrations().is_empty() -> .Val(Persist.shared_clone()) else -> None
+            migrated_in_place := false
+            if decision.is_compatible() {
+                if !use_interpreter {
+                    resident_runtime.apply_hot_swap(decision) ?? {
+                        if !mode.json -> eprintln("[hot-swap] {module_name} — adapter preparation failed: {err}")
+                        return None
+                    }
+                }
+            } else if !use_interpreter && !decision.schema_migrations().is_empty() {
+                receipts :: resident_runtime.apply_hot_swap_with_program(mir, artifact, decision, release_policy) ?? {
+                    if !mode.json -> eprintln("[hot-swap] {module_name} — schema migration rejected: {err}")
+                    return None
+                }
+                if !receipts.is_empty() && !mode.quiet && !mode.json {
+                    migrated :: receipts.iter().filter(fn(receipt) -> !receipt.migrated.is_empty()).count()
+                    println("[hot-swap] migrated {migrated} published-schema value(s)")
+                }
+                migrated_in_place = true
+            }
+            swap_ok :: if decision.is_compatible() || migrated_in_place -> run_resident_swap(mir, artifact, try_anyway, module_name, file, mode, use_interpreter, reuse_current, release_policy) else -> run_resident_restart(mir, artifact, try_anyway, file, mode, use_interpreter, release_policy)
+            if !swap_ok {
+                if persist_before_migration == .Val(store) {
+                    Persist.shared_replace(store)
+                    resident_runtime.discard_hot_swap_plan()
+                }
+                return None
+            }
+            render_hot_swap_decision(decision, mode, migrated_in_place)
+        } else {
+            if !mode.quiet && !mode.json -> println("\n[restart] {module_name} — first run")
+            if !run_resident_restart(mir, artifact, try_anyway, file, mode, use_interpreter, release_policy) -> return None
+        }
+    } else {
+        if !mode.quiet -> println("\n— {file} changed, re-running —")
+        jobs :: Interpreter.scheduled_jobs(new_bundle)
+        requested :: program_args.first().filter(fn(arg) -> !arg.starts_with("-"))
+        selected :: requested.filter(fn(name) -> jobs.iter().any(fn(pair) -> pair.0 == name))
+        runtime_args :: if selected.is_some() -> program_args.slice(1..<program_args.len()) else -> program_args
+        args := [String].with_capacity(runtime_args.len() + 1)
+        &args.push(selected.map(fn(name) -> "{file} {name}") ?? file.to_string())
+        &args.extend(runtime_args.iter().map(fn(arg) -> arg.to_string()))
+        outcome :: resident_runtime.with_program_args(args, fn() -> Interpreter.dev_run_snapshot(mir, artifact, try_anyway, if use_interpreter -> Interpreter.InterpreterInvocation.DevInterpret else -> Interpreter.InterpreterInvocation.DevDefault, release_policy))
+        render_dev_outcome(outcome, file, mode)
+        if outcome == { .Ran(_, _, _) -> {}; _ -> return None }
+    }
+    .Val(CheckedMirSnapshot{bundle: new_bundle, facts: effect_facts, mir: mir, artifact: artifact})
+}
+// Rust: Source/CmdDevTools.rs:2597
+fn game_change_facts(entries: &[DevWatchEntry], decision: &HotSwapDecision?) -> [Game.JetGameChangeFact] Err! {
+    facts := [Game.JetGameChangeFact].with_capacity(entries.len())
+    loop entry in entries {
+        (migration, reason) :: if entry.game_kind == {
+            .Asset -> (Game.JetGameMigrationDecision.Preserve, "checked asset watch change `{entry.change_kind}`")
+            .Script -> {
+                if decision.is_some_and(fn(decision) -> decision.is_compatible()) -> (.Preserve, "checked type-stable reload")
+                else -> (.Reject, decision.and_then(fn(decision) -> decision.compatibility.reason()) ?? "checked restart or incompatible reload")
+            }
+            .World -> {
+                if decision.is_some_and(fn(decision) -> decision.is_compatible()) -> (.Preserve, "checked type-stable reload")
+                else -> (.Reject, decision.and_then(fn(decision) -> decision.compatibility.reason()) ?? "checked restart or incompatible reload")
+            }
+        }
+        &facts.push(Game.JetGameChangeFact.new(entry.path.display().to_string(), entry.game_kind, entry.old_schema_id.clone(), entry.new_schema_id.clone(), migration, reason)?)
+    }
+    facts
+}
+// Rust: Source/CmdDevTools.rs:2639
+fn publish_game_asset_watch_events(file: String, entries: &[DevWatchEntry], timestamp_ms: U64) -> Void Err! {
+    asset_entries :: entries.iter().filter(fn(entry) -> entry.game_kind == .Asset).collect()
+    if asset_entries.is_empty() -> return
+    parent :: OSPath.new(file).parent() ?? OSPath.new(".")
+    asset_root :: fs.canonicalize(parent.join("assets")) ?? {
+        if parent.is_absolute() -> parent.join("assets")
+        else -> (env.current_dir() ?? OSPath.new(".")).join(parent).join("assets")
+    }
+    root :: jet.Codegen.MIREval.game_dev_protocol.JetGameAssetRootIdentity.new("game", ".") ?? return Err(err.to_string())
+    events := [jet.Codegen.MIREval.game_dev_protocol.JetGameAssetWatchEvent].with_capacity(asset_entries.len())
+    skipped_count := 0
+    loop entry in asset_entries {
+        if entry.change_kind == "stale" {
+            skipped_count = skipped_count.saturating_add(1)
+            next
+        }
+        relative :: (entry.path.strip_prefix(asset_root) ?? return Err("asset watcher path `{entry.path.display()}` is outside root `{asset_root.display()}`")).to_string_lossy().replace("\\", "/")
+        if relative.is_empty() -> return Err("asset watcher path `{entry.path.display()}` is the asset root")
+        logical_path :: "assets/{relative}"
+        kind :: if entry.change_kind == "created" -> jet.Codegen.MIREval.game_dev_protocol.JetGameAssetWatchEventKind.Created else if entry.change_kind == "deleted" -> jet.Codegen.MIREval.game_dev_protocol.JetGameAssetWatchEventKind.Deleted else -> jet.Codegen.MIREval.game_dev_protocol.JetGameAssetWatchEventKind.Changed
+        &events.push(jet.Codegen.MIREval.game_dev_protocol.JetGameAssetWatchEvent.new(root.clone(), logical_path, kind) ?? return Err(err.to_string()))
+    }
+    roots :: jet.Codegen.MIREval.game_dev_protocol.JetGameAssetRootSet.new([root]) ?? return Err(err.to_string())
+    projected :: jet.Codegen.MIREval.game_dev_protocol.project_asset_watch_import_events(timestamp_ms, file, roots, events, skipped_count)?
+    loop event in projected -> jet_foundation.Devtools.jet_devtools_publish_event(event)
+}
+// Rust: Source/CmdDevTools.rs:2729
+fn apply_game_watch_facts(session: &Game.JetGameDevSession, facts: &[Game.JetGameChangeFact], accepted: Bool, reason: String, timestamp_ms: U64, source: String) -> Void Err! {
+    loop original in facts {
+        fact :: if accepted -> original.clone() else -> original.clone().with_migration(.Reject, reason)?
+        outcome :: if fact.kind == {
+            .Asset -> session.apply_asset_swap(fact)?
+            .Script -> session.apply_script_reload(fact)?
+            .World -> session.apply_world_reload(fact)?
+        }
+        body :: jet_foundation.Devtools.JetDevtoolsEventBody.GameSwap(
+            sequence: outcome.sequence, path: outcome.fact.path, kind: outcome.fact.kind.as_str().to_string(),
+            status: outcome.status.as_str().to_string(), old_schema_id: outcome.fact.old_schema_id,
+            new_schema_id: outcome.fact.new_schema_id, migration: outcome.fact.migration.as_str().to_string(), reason: outcome.fact.reason,
+        )
+        event :: jet_foundation.Devtools.JetDevtoolsEvent.try_new(timestamp_ms, source.to_string(), body)?
+        jet_foundation.Devtools.jet_devtools_publish_event(event)
+    }
+}
+// Rust: Source/CmdDevTools.rs:2770
+fn publish_game_launch_profile(resident_session: &ResidentDevSession, file: String, profile: &jet.Codegen.MIREval.game_dev_protocol.GameDevLaunchProfile, timestamp_ms: U64) -> Void Err! {
+    body :: jet_foundation.Devtools.JetDevtoolsEventBody.GameLaunchProfile(
+        target: profile.target.clone(), run_mode: profile.run_mode.as_str().to_string(), headless_compatible: profile.headless_compatible,
+        phases: profile.phases.iter().map(fn(phase) -> jet_foundation.Devtools.JetDevtoolsGameLaunchPhase.new(phase.phase.as_str(), phase.status.as_str(), phase.detail.clone())).collect(),
+    )
+    event :: jet_foundation.Devtools.JetDevtoolsEvent.try_new(timestamp_ms, "game", body)?
+    _ :: resident_session.publish_devtools_event_typed(event)?
+}
+// Rust: Source/CmdDevTools.rs:2797
+fn render_hot_swap_decision(decision: &HotSwapDecision, mode: OutputMode, migrated_in_place: Bool) -> Void {
+    if mode.quiet || mode.json -> return
+    list :: fn(preserved: Bool) -> {
+        values :: decision.state_facts().iter().filter(fn(fact) -> fact.is_preserved() == preserved).map(fn(fact) -> fact.key).collect()
+        if values.is_empty() -> "—" else -> values.join(", ")
+    }
+    changed :: if decision.changed_functions.is_empty() -> "—" else -> decision.changed_functions.join(", ")
+    if decision.is_compatible() -> println("saved {decision.module}  swapped {changed}  kept {list(true)}")
+    else if migrated_in_place -> println("saved {decision.module}  migrated in place  swapped {changed}  kept {list(true)}")
+    else {
+        reason :: decision.compatibility.reason() ?? "type surface changed"
+        println("saved {decision.module}  restarting  kept {list(true)}  reset {list(false)}  reason {reason}")
+    }
+}
+// Rust: Source/CmdDevTools.rs:2852
+fn run_resident_swap(program: &MIRProgram, artifact: jet_foundation.MIR.MirArtifactId, try_anyway: Bool, module_name: String, file: String, mode: OutputMode, use_interpreter: Bool, reuse_current: Bool, release_policy: &ReleaseDevtoolsPolicy) -> Bool {
+    outcome :: fn() -> Interpreter.RunOutcome [jet.Diagnostics.Diagnostic]! {
+        if reuse_current -> return resident_runtime.run_resident_current() ?? return Err([jet.Diagnostics.Diagnostic.runtime_host_fault("", err)])
+        if use_interpreter {
+            backend := jet.JitBackend.InterpreterBackend.new(.DevInterpret)
+            return backend.hot_swap(module_name, program, artifact, try_anyway, release_policy)
+        }
+        backend := resident_runtime.CraneliftBackend.new()
+        backend.hot_swap(module_name, program, artifact, try_anyway, release_policy)
+    }() ?? {
+        exit_if_internal_fault(err)
+        src :: fs.read_to_string(file) ?? ""
+        report_problems(mode, file, src, err)
+        return false
+    }
+    render_outcome(outcome, file, mode)
+    true
+}
+// Rust: Source/CmdDevTools.rs:2896
+fn run_resident_restart(program: &MIRProgram, artifact: jet_foundation.MIR.MirArtifactId, try_anyway: Bool, file: String, mode: OutputMode, use_interpreter: Bool, release_policy: &ReleaseDevtoolsPolicy) -> Bool {
+    outcome :: if use_interpreter -> {
+        backend := jet.JitBackend.InterpreterBackend.new(.DevInterpret)
+        backend.restart(program, artifact, try_anyway, release_policy)
+    } else -> {
+        backend := resident_runtime.CraneliftBackend.new()
+        backend.restart(program, artifact, try_anyway, release_policy)
+    }
+    ok :: if outcome == { .Ran(_, _, _) -> true; _ -> false }
+    render_outcome(outcome, file, mode)
+    ok
+}
+// Rust: Source/CmdDevTools.rs:2929
+pub fn run_repl(project_dir: String?, preload: String?, allow: &[String], deny: &[String], color: ColorChoice) -> Void {
+    flags := jet.REPL.ReplFlags.new(allow, deny).with_color(color)
+    if preload == .Val(file) {
+        resolved :: resolve_source_path(file)
+        if !OSPath.new(resolved).exists() {
+            cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {jet.Syntax.BINARY_NAME} from the folder that contains it")
+            exit(ExitCodes.USER_ERROR)
+        }
+        flags = flags.with_preload(resolved)
+    }
+    code :: jet.REPL.run(project_dir, flags)
+    exit(code)
+}
+// Rust: Source/CmdDevTools.rs:2953
+fn render_dev_iteration(file: String, entry_fn: String?, program_args: &[String], try_anyway: Bool, gates: GateSet, mode: OutputMode, use_interpreter: Bool, profile: String, setting_overrides: &[String:String]) -> CheckedMirSnapshot? {
+    started :: Instant.now()
+    run := run_dev_iteration_with_entry(file, entry_fn, program_args, try_anyway, use_interpreter, gates, profile, setting_overrides)
+    render_lints(file, mode, run.lints)
+    snapshot :: run.snapshot.take()
+    outcome :: run.outcome
+    elapsed :: started.elapsed()
+    ran_ok :: if outcome == { .Ran(_, _, _) -> true; _ -> false }
+    render_outcome_timed(outcome, file, .Val(elapsed), mode)
+    if ran_ok {
+        if snapshot == .Val(snapshot) {
+            run_dev_budget_refresh(file, snapshot.bundle, mode)
+            return .Val(snapshot)
+        }
+    }
+    None
+}
+// Rust: Source/CmdDevTools.rs:2990
+fn render_dev_outcome(outcome: &Interpreter.RunOutcome, file: String, mode: OutputMode) -> Void {
+    if outcome == {
+        .Ran(stdout, stderr, _) -> emit_run_output(stdout, stderr)
+        .Problems(diags) -> {
+            exit_if_internal_fault(diags)
+            src :: fs.read_to_string(file) ?? ""
+            report_problems(mode, file, src, diags)
+        }
+    }
+}
+// Rust: Source/CmdDevTools.rs:3003
+fn exit_dev_outcome(outcome: Interpreter.RunOutcome) -> Void {
+    if outcome == {
+        .Ran(_, _, exit_code) -> exit(exit_code)
+        .Problems(diags) -> { exit_if_internal_fault(diags); exit(ExitCodes.USER_ERROR) }
+    }
+}
+// Rust: Source/CmdDevTools.rs:3013
+pub fn render_lints(file: String, mode: OutputMode, diagnostics: &[jet.Diagnostics.Diagnostic]) -> Void {
+    lints :: visible_lints(diagnostics)
+    if !lints.is_empty() {
+        source :: fs.read_to_string(file) ?? ""
+        report_problems(mode, file, source, lints)
+    }
+}
+// Rust: Source/CmdDevTools.rs:3025
+fn render_dev_lints(file: String, mode: OutputMode, diagnostics: &[jet.Diagnostics.Diagnostic]) -> Void { render_lints(file, mode, diagnostics) }
+// Rust: Source/CmdDevTools.rs:3031
+fn run_dev_budget_refresh(file: String, bundle: &ProgramBundle, mode: OutputMode) -> Void {
+    specs :: Sema.collect_located_budget_specs_bundle(bundle) ?? return
+    has_service :: specs.iter().any(fn(s) -> (s.spec.provider.split_once("(").map(fn(pair) -> pair.0) ?? s.spec.provider) == "ServiceProbe")
+    has_scene :: specs.iter().any(fn(s) -> (s.spec.provider.split_once("(").map(fn(pair) -> pair.0) ?? s.spec.provider) == "SceneProbe")
+    if !has_service && !has_scene -> return
+    root :: OSPath.new(file).canonicalize().ok().and_then(fn(p) -> p.parent().map(fn(d) -> d.to_path_buf())).and_then(fn(d) -> .Val(jet.Loader.find_manifest_root(d) ?? d)) ?? OSPath.new(".")
+    src :: fs.read_to_string(file) ?? return
+    service_evidence :: if has_service -> collect_service_evidence(root, specs) else -> []
+    scene_evidence :: if has_scene -> collect_scene_evidence(file, src, mode, specs) else -> []
+    status :: CmdBudget.run_dev_refresh(file, service_evidence, scene_evidence)
+    if status != 0 -> eprintln("budget: dev refresh failed with status {status}")
+}
+// Rust: Source/CmdDevTools.rs:3082
+fn render_outcome(outcome: Interpreter.RunOutcome, file: String, mode: OutputMode) -> Void { render_outcome_timed(outcome, file, None, mode) }
+// Rust: Source/CmdDevTools.rs:3086
+fn render_outcome_timed(outcome: Interpreter.RunOutcome, file: String, elapsed: Duration?, mode: OutputMode) -> Void {
+    if outcome == {
+        .Ran(stdout, stderr, _) -> {
+            emit_run_output(stdout, stderr)
+            if elapsed == .Val(e) {
+                if !mode.quiet -> println("✓ ran in {e.as_millis()} ms")
+            }
+        }
+        .Problems(diags) -> {
+            exit_if_internal_fault(diags)
+            src :: fs.read_to_string(file) ?? ""
+            report_problems(mode, file, src, diags)
+        }
+    }
+}
+// Rust: Source/CmdDevTools.rs:3112
+// External completion schemas are read statically; application code never runs.
+pub fn run_completions(args: &[String]) -> Void {
+    // Rust: Source/CmdDevTools.rs:3113
+    USAGE :: "jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]"
+    shell :: args.first()
+    if !shell.is_some_and(fn(value) -> ["bash", "zsh", "fish", "powershell"].contains(value)) || (args.len() != 1 && args.len() != 3) || (args.len() == 3 && args[1] != jet.Syntax.CLI_COMPLETIONS_FOR) {
+        eprintln("Error [E2102]: Completions arguments don't match `{USAGE}`.")
+        eprintln(" Why: A completion script needs one supported shell and, optionally, one compiled Jet program.")
+        eprintln(" Fix: Run `{USAGE}`.")
+        eprintln("More: jet-lang.dev/e/E2102")
+        exit(ExitCodes.USAGE)
+    }
+    shell :: shell.unwrap()
+    out :: if args.len() == 1 -> {
+        if shell == {
+            "bash" -> jet.CLI.completions_bash()
+            "zsh" -> jet.CLI.completions_zsh()
+            "fish" -> jet.CLI.completions_fish()
+            "powershell" -> jet.CLI.completions_powershell()
+            _ -> unreachable()
+        }
+    } else -> {
+        program :: args[2]
+        command_name :: jet.CLI.completion_command_name(program) ?? completion_metadata_error(program, err)
+        file := open_completion_program(program) ?? completion_metadata_error(program, "the program could not be opened ({err})")
+        metadata :: file.metadata() ?? completion_metadata_error(program, "the opened program could not be inspected ({err})")
+        if !metadata.file_type().is_file() -> completion_metadata_error(program, "the program is not a regular file")
+        // Rust: Source/CmdDevTools.rs:3153
+        MAX_PROGRAM_BYTES :: 512 * 1024 * 1024
+        if metadata.len() > MAX_PROGRAM_BYTES -> completion_metadata_error(program, "the program is larger than the 512 MiB metadata-reader limit")
+        bytes := [U8].with_capacity(metadata.len() as USize)
+        file.by_ref().take(MAX_PROGRAM_BYTES + 1).read_to_end(&bytes) ?? completion_metadata_error(program, "the opened program could not be read ({err})")
+        if (bytes.len() as U64) > MAX_PROGRAM_BYTES -> completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read")
+        schema :: jet_foundation.CLISchema.read_executable(bytes) ?? completion_metadata_error(program, err.to_string())
+        jet.CLI.completions_for_program(shell, command_name, schema).unwrap()
+    }
+    print("{out}")
+}
+// Rust: Source/CmdDevTools.rs:3184
+// Rust: Source/CmdDevTools.rs:3197
+fn open_completion_program(path: String) -> fs.File std.io.Error! {
+    // GATE #4483: select the platform's nonblocking flag, not the host's.
+    // GATE #4494: nonblocking native open refuses to hang on FIFOs.
+    options := fs.OpenOptions.new().read(true)
+    if core.sys.target.selected_family() == "unix" {
+        os :: core.sys.target.selected_os()
+        NONBLOCK :: if os == "linux" || os == "android" -> 2048 else -> 4
+        &options.custom_flags(NONBLOCK)
+    }
+    options.open(path)
+}
+// Rust: Source/CmdDevTools.rs:3201
+fn completion_metadata_error(program: String, why: String) -> Never {
+    // GATE #4494: canonical character escape_default iterator.
+    program :: program.chars().flat_map(fn(character) -> character.escape_default()).collect()
+    eprintln("Error [E2103]: Couldn't read command metadata from `{program}`.")
+    eprintln(" Why: {why}.")
+    eprintln(" Fix: Rebuild the program with this Jet toolchain, then try again.")
+    eprintln("More: jet-lang.dev/e/E2103")
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdDevTools.rs:3214
+DEVTOOLS_SUBCOMMANDS :: "grammars | reduce | ice-report | new-example | new-ui | check-fixture-paths | bless"
+// Rust: Source/CmdDevTools.rs:3220
+pub fn run_devtools(args: &[String], mode: OutputMode) -> Void {
+    if args.first() == {
+        .Val("grammars") -> {
+            write_generated_section("Tools/editors/vscode/syntaxes/jet.tmLanguage.json", jet.Syntax.render_vscode_generated_highlights(), mode.quiet)
+            write_generated_section("Tools/editors/jet.tmGrammar", jet.Syntax.render_vscode_generated_highlights(), mode.quiet)
+            write_generated_section("Tools/editors/tree-sitter/grammar.js", jet.Syntax.render_tree_sitter_generated_highlights(), mode.quiet)
+            write_generated_section("Tools/editors/zed/languages/jet/highlights.scm", jet.Syntax.render_zed_generated_highlights(), mode.quiet)
+            if !mode.quiet -> println("regenerated editor grammar sections")
+        }
+        .Val("reduce") -> run_devtools_reduce(args.slice(1..<args.len()))
+        .Val("ice-report") -> run_devtools_ice_report(args.slice(1..<args.len()))
+        .Val("new-example") -> run_devtools_new_example(args.slice(1..<args.len()))
+        .Val("new-ui") -> run_devtools_new_ui(args.slice(1..<args.len()))
+        .Val("check-fixture-paths") -> run_devtools_check_fixture_paths()
+        .Val("bless") -> run_devtools_bless(args.slice(1..<args.len()))
+        .Val("probe") -> run_devtools_probe(args.slice(1..<args.len()))
+        .Val(other) -> {
+            cli_error("E2101", "unknown `devtools` subcommand `{other}`")
+            eprintln("usage: {jet.Syntax.BINARY_NAME} devtools <{DEVTOOLS_SUBCOMMANDS}>")
+            exit(ExitCodes.USAGE)
+        }
+        None -> {
+            eprintln("usage: {jet.Syntax.BINARY_NAME} devtools <{DEVTOOLS_SUBCOMMANDS}>")
+            exit(ExitCodes.USAGE)
+        }
+    }
+}
+// Rust: Source/CmdDevTools.rs:3293
+// Default oracle: the front end accepts and rustc rejects. --code selects
+// a front-end diagnostic instead. Each candidate is actually written to disk.
+pub fn run_devtools_reduce(args: &[String]) -> Void {
+    if args.is_empty() {
+        eprintln("usage: {jet.Syntax.BINARY_NAME} devtools reduce <file.{jet.Syntax.FILE_EXT}> [--code EXXXX]")
+        exit(ExitCodes.USAGE)
+    }
+    file :: args[0]
+    code_filter := String?{None}
+    i := 1
+    loop i < args.len() {
+        if args[i] == "--code" {
+            code_filter = args.get(i + 1).map(fn(s) -> s.to_string())
+            i += 2
+        } else {
+            cli_error("E2102", "unknown `reduce` flag `{args[i]}`")
+            exit(ExitCodes.USAGE)
+        }
+    }
+    src :: fs.read_to_string(file) ?? {
+        cli_error("E2105", "couldn't read `{file}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    ext :: OSPath.new(file).extension().and_then(fn(s) -> s.to_str()) ?? jet.Syntax.FILE_EXT
+    scratch :: env.temp_dir().join("jet_devtools_reduce_{std.process.id()}.{ext}")
+    interesting :: fn(text: String) -> reduce_oracle(scratch, text, code_filter)
+    if !interesting(src) {
+        why :: code_filter.map(fn(code) -> "the front end never emits `{code}` for this file") ?? "either the front end already rejects it, or rustc accepts the generated Rust"
+        cli_error_full("E2104", "`{file}` doesn't reproduce the target oracle as given", why, "confirm the case fails the way you expect, then reduce it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    lines :: src.lines().map(fn(s) -> s.to_string()).collect()
+    println("reduce: starting at {lines.len()} line(s)")
+    reduced :: ddmin(lines, interesting)
+    println("reduce: finished at {reduced.len()} line(s)")
+    out_text := reduced.join("\n")
+    if !out_text.is_empty() -> &out_text.push('\n')
+    out_path :: reduced_path(file)
+    fs.write(out_path, out_text) ?? {
+        cli_error("E2105", "couldn't write `{out_path.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    _ :: fs.remove_file(scratch)
+    println("wrote {out_path.display()}")
+}
+// Rust: Source/CmdDevTools.rs:3372
+fn reduce_oracle(scratch: &OSPath, src: String, code: String?) -> Bool {
+    if fs.write(scratch, src).is_err() -> return false
+    shown :: scratch.to_string_lossy().into_owned()
+    if jet.compile_with_path(src, shown) == {
+        .Ok(out) -> {
+            if code == .Val(c) -> out.lints.iter().any(fn(d) -> d.code == c)
+            else -> rustc_rejects(out.rust)
+        }
+        .Err(diags) -> {
+            if code == .Val(c) -> diags.iter().any(fn(d) -> d.code == c)
+            else -> false
+        }
+    }
+}
+// Rust: Source/CmdDevTools.rs:3394
+fn ddmin(lines: [String], interesting: fn(String) -> Bool) -> [String] {
+    current := ^lines
+    n := 2
+    loop {
+        if current.len() < 2 -> break
+        chunk_size :: (current.len() + n - 1) / n
+        if chunk_size == 0 -> break
+        made_progress := false
+        start := 0
+        loop start < current.len() {
+            end :: (start + chunk_size).min(current.len())
+            candidate := current.clone()
+            _ :: &candidate.drain(start..<end)
+            if !candidate.is_empty() && interesting(candidate.join("\n")) {
+                println("reduce: dropped lines {start + 1}..{end} -> {candidate.len()} line(s) left")
+                current = ^candidate
+                n = if n > 2 -> n - 1 else -> 2
+                made_progress = true
+                break
+            }
+            start = end
+        }
+        if !made_progress {
+            if n >= current.len() -> break
+            n = (n * 2).min(current.len())
+        }
+    }
+    current
+}
+// Rust: Source/CmdDevTools.rs:3436
+fn reduced_path(file: String) -> OSPath {
+    p :: OSPath.new(file)
+    stem_name :: p.file_stem().and_then(fn(s) -> s.to_str()) ?? "reduced"
+    ext :: p.extension().and_then(fn(s) -> s.to_str()) ?? jet.Syntax.FILE_EXT
+    name :: "{stem_name}.reduced.{ext}"
+    if p.parent().filter(fn(parent) -> !parent.as_os_str().is_empty()) == .Val(parent) -> parent.join(name)
+    else -> OSPath.new(name)
+}
+// Rust: Source/CmdDevTools.rs:3455
+// Missing rustc is not a rejection: never manufacture a false I2 repro.
+fn rustc_probe(rust_code: String) -> (Bool, String) {
+    tmp_dir :: env.temp_dir().join("jet_devtools_rustc_{std.process.id()}")
+    if fs.create_dir_all(tmp_dir).is_err() -> return (true, "")
+    rs_path :: tmp_dir.join("check.rs")
+    if fs.write(rs_path, rust_code).is_err() {
+        _ :: fs.remove_dir_all(tmp_dir)
+        return (true, "")
+    }
+    meta_path :: tmp_dir.join("check.rmeta")
+    // GATE #4494: real rustc subprocess, not a bridge into the old compiler.
+    result :: Command.new("rustc").arg("--edition").arg("2021").arg("--crate-name").arg("jet_devtools_check").arg("--emit=metadata").arg(rs_path).arg("-o").arg(meta_path).output()
+    outcome :: if result == {
+        .Ok(o) -> (o.status.success(), String.from_utf8_lossy(o.stderr).into_owned())
+        .Err(_) -> (true, "")
+    }
+    _ :: fs.remove_dir_all(tmp_dir)
+    outcome
+}
+// Rust: Source/CmdDevTools.rs:3487
+fn rustc_rejects(rust_code: String) -> Bool { !rustc_probe(rust_code).0 }
+// Rust: Source/CmdDevTools.rs:3499
+pub fn run_devtools_ice_report(args: &[String]) -> Void {
+    if args.is_empty() {
+        eprintln("usage: {jet.Syntax.BINARY_NAME} devtools ice-report <file.{jet.Syntax.FILE_EXT}>")
+        exit(ExitCodes.USAGE)
+    }
+    file :: args[0]
+    src :: fs.read_to_string(file) ?? {
+        cli_error("E2105", "couldn't read `{file}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    out :: jet.compile_with_path(src, file) ?? {
+        cli_error_full("E2105", "`{file}` doesn't reach codegen — the front end already rejects it", "ice-report bundles a case that compiles to Rust (an I2 repro)", "fix the front-end errors first, or use `{jet.Syntax.BINARY_NAME} devtools reduce --code <CODE>` to shrink a front-end diagnostic instead")
+        core.term.eprint(jet.render_diagnostics(file, src, err))
+        exit(ExitCodes.USER_ERROR)
+    }
+    (accepted, rustc_stderr) :: rustc_probe(out.rust)
+    if accepted -> println("note: rustc accepted the generated Rust for `{file}` — bundling anyway, but this isn't an I2 repro")
+    rustc_version :: Command.new("rustc").arg("--version").output().map(fn(o) -> {
+        version := String.from_utf8_lossy(o.stdout).trim() // #4303
+        version.to_string()
+    }) ?? "rustc: not found"
+    jet_version :: jet.VERSION
+    ts :: SystemTime.now().duration_since(UNIX_EPOCH).map(fn(d) -> d.as_secs()) ?? 0
+    project_root :: jet.build_project_root(file) ?? {
+        core.term.eprint(jet.render_diagnostics(file, src, err))
+        exit(ExitCodes.USER_ERROR)
+    }
+    bundle_dir :: project_root.join(".jet").join("ice-report").join("{stem(file)}-{ts}")
+    fs.create_dir_all(bundle_dir) ?? {
+        cli_error("E2105", "couldn't create `{bundle_dir.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    write :: fn(name: String, content: String) -> {
+        fs.write(bundle_dir.join(name), content) ?? {
+            cli_error("E2105", "couldn't write `{name}`: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    write("source.{jet.Syntax.FILE_EXT}", src)
+    write("generated.rs", out.rust)
+    write("rustc.stderr", rustc_stderr)
+    write("versions.txt", "jet {jet_version}\n{rustc_version}\n")
+    println("wrote ICE report bundle to {bundle_dir.display()}")
+}
+// Rust: Source/CmdDevTools.rs:3584
+pub fn run_devtools_new_example(args: &[String]) -> Void {
+    if args.is_empty() {
+        eprintln("usage: {jet.Syntax.BINARY_NAME} devtools new-example <topic>/<name>")
+        exit(ExitCodes.USAGE)
+    }
+    spec :: args[0]
+    (topic, name) :: spec.split_once("/") ?? {
+        cli_error("E2104", "expected `<topic>/<name>`, got `{spec}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    if topic.is_empty() || name.is_empty() {
+        cli_error("E2104", "expected `<topic>/<name>`, got `{spec}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    ext :: jet.Syntax.FILE_EXT
+    example_dir :: OSPath.new("Examples/features").join(topic)
+    expected_dir :: OSPath.new("Examples/features/expected").join(topic)
+    example_path :: example_dir.join("{name}.{ext}")
+    expected_path :: expected_dir.join("{name}.out")
+    if example_path.exists() {
+        cli_error("E2104", "`{example_path.display()}` already exists")
+        exit(ExitCodes.USER_ERROR)
+    }
+    fs.create_dir_all(example_dir) ?? {
+        cli_error("E2105", "couldn't create `{example_dir.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    fs.create_dir_all(expected_dir) ?? {
+        cli_error("E2105", "couldn't create `{expected_dir.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    greeting :: "scaffold: {topic}/{name}"
+    src :: "// TODO: describe Examples/features/{topic}/{name}.{ext}\nfn run() {{\n    print(\"{greeting}\")\n}}\n"
+    fs.write(example_path, src) ?? {
+        cli_error("E2105", "couldn't write `{example_path.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    fs.write(expected_path, "{greeting}\n") ?? {
+        cli_error("E2105", "couldn't write `{expected_path.display()}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    println("wrote {example_path.display()}")
+    println("wrote {expected_path.display()}")
+}
+// Rust: Source/CmdDevTools.rs:3659
+// The next fragment's new-ui command writes a real diagnostic fixture and
+// computes its stderr through the same calls as diagnostic_snapshots; blessing
+// uses jet self devtools bless diagnostic_snapshots.
 

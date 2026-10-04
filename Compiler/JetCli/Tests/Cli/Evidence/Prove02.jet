@@ -1,0 +1,65 @@
+use jet_cli.Cli.Evidence.Prove.[read_test_report_bytes, supervise_child, ChildOutcome]
+use jet_foundation.Evidence.[EVIDENCE_REPORT_MAGIC, EVIDENCE_REPORT_VERSION]
+use core.files as fs
+use core.process.Command
+use core.time.Duration
+use core.thread
+
+// Rust: Source/CmdProve.rs:3335
+#Test("hostile_protocol_shapes_fail_closed") {
+    assert(read_test_report_bytes("BADMAGIC".as_bytes()).is_err())
+    header := EVIDENCE_REPORT_MAGIC.to_vec()
+    header.extend_from_slice(EVIDENCE_REPORT_VERSION.to_be_bytes())
+    assert(read_test_report_bytes(header).is_ok())
+    trailing := header.clone()
+    trailing.push(0)
+    assert(read_test_report_bytes(trailing).is_err())
+    unknown_kind := header.clone()
+    unknown_kind.extend_from_slice([9, 0, 0, 0])
+    assert(read_test_report_bytes(unknown_kind).is_err())
+    unknown_outcome := header.clone()
+    unknown_outcome.extend_from_slice([0, 0, 9, 0])
+    assert(read_test_report_bytes(unknown_outcome).is_err())
+    oversized :: [UInt8].filled(16 * 1024 * 1024 + 1, 0)
+    assert(read_test_report_bytes(oversized).is_err())
+}
+
+// Rust: Source/CmdProve.rs:3371
+#Ignore
+#Test("child_helper") {
+    // GATE #4494: real subprocess fixture, never a production mock.
+    if core.env.var("JET_PROVE_CHILD_MODE") == {
+        .Ok("exit70") -> core.process.exit(jet_foundation.ExitCodes.RUNTIME_PANIC)
+        .Ok("crash") -> core.process.abort()
+        .Ok("timeout") -> {
+            thread.sleep(Duration.from_millis(300))
+            if core.env.var_os("JET_PROVE_CHILD_MARKER") == .Some(path) -> fs.write(path, "orphan survived".as_bytes()).unwrap()
+        }
+        _ -> {}
+    }
+}
+
+// Rust: Source/CmdProve.rs:3385
+fn helper(mode: String) -> Command {
+    command := Command.new(core.env.current_exe().unwrap())
+    command.args(["--exact", "child_helper", "--ignored"]).env("JET_PROVE_CHILD_MODE", mode)
+    command
+}
+
+// Rust: Source/CmdProve.rs:3398
+#Test("classifies_exit_crash_timeout_and_unavailable_without_orphan") {
+    exiting := helper("exit70")
+    assert(supervise_child(&exiting, Duration.from_secs(2)) == .Exited(.Some(70)))
+    crashing := helper("crash")
+    crash :: supervise_child(&crashing, Duration.from_secs(2))
+    assert(if crash == { .Exited(_) -> true; _ -> false })
+    marker :: OSPath.new("/tmp/jet-prove-supervision-{core.process.id()}-marker")
+    _ :: fs.remove_file(marker)
+    timeout := helper("timeout")
+    timeout.env("JET_PROVE_CHILD_MARKER", marker)
+    assert(supervise_child(&timeout, Duration.from_millis(20)) == .TimedOut)
+    thread.sleep(Duration.from_millis(350))
+    assert(!marker.exists(), "timed-out child survived kill+wait")
+    missing := Command.new("/tmp/jet-prove-missing-executable-{core.process.id()}")
+    assert(supervise_child(&missing, Duration.from_millis(20)) == .LaunchFailed)
+}

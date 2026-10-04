@@ -1,0 +1,15 @@
+use crate.resolve_target
+use std.[fs, process, SystemTime, UNIX_EPOCH]
+
+// Rust: Source/CmdProve.rs:4942
+#Test("canonical_package_marker_selects_package_and_enters_identity") {
+    // GATE #4494: actual filesystem and native process/time providers.
+    root :: OSPath.from("/tmp/jet-prove-target-{process.id()}-{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"demo\"\n").unwrap()
+    fs.write(root.join("main.jet"), "fn run() {}\n").unwrap()
+    target :: resolve_target(root.to_string_lossy()).unwrap()
+    assert_eq(target.kind, "package")
+    assert(target.identity_members.iter().any((path, _) -> path.ends_with("/package.jet")))
+    fs.remove_dir_all(root).unwrap()
+}

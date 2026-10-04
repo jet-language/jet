@@ -1,0 +1,60 @@
+use Cli.Host.Facade.*
+use std.[fs, env, time, process]
+use std.os.unix.fs.symlink
+use core.sys.target
+
+// Rust: Source/lib.rs:1982-2100; native behavioral controls, no original inline tests.
+#Test("generated_export_writes_exact_bytes_and_rejects_parent_components") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet-facade-export-{process.id()}-{stamp}")
+    fs.create_dir_all(root).unwrap()
+    destination :: root.join(".jet/generated/bytes.jet")
+    write_exported_generated_file(root, destination, b"fn run() -> {}\n").unwrap()
+    assert_eq(read_real_generated_file(root, destination).unwrap(), b"fn run() -> {}\n")
+    error :: ensure_real_directory(root.join("../escape")).unwrap_err()
+    assert_eq(error.kind(), .InvalidInput)
+    assert(error.to_string().contains("generated export path contains a parent component"))
+    assert(path_has_symlinked_component(root, root.join("../escape/file.jet")))
+    assert(path_has_symlinked_component(root, root.with_file_name("outside.jet")))
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: Source/lib.rs:1982-2059; native no-follow refusal control.
+#Test("generated_file_read_and_export_refuse_symlink_ancestors") {
+    // GATE #4483/#4494: selected Unix native filesystem arm.
+    if target.selected_family() == "unix" {
+        stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+        root :: env.temp_dir().join("jet-facade-links-{process.id()}-{stamp}")
+        outside :: root.with_file_name("jet-facade-links-outside-{process.id()}-{stamp}")
+        fs.create_dir_all(root).unwrap()
+        fs.create_dir_all(outside).unwrap()
+        fs.write(outside.join("victim.jet"), b"victim\n").unwrap()
+        symlink(outside, root.join("generated")).unwrap()
+        selected :: root.join("generated/victim.jet")
+        assert(path_has_symlinked_component(root, selected))
+        assert_eq(read_real_generated_file(root, selected).unwrap_err().kind(), .PermissionDenied)
+        assert_eq(write_exported_generated_file(root, selected, b"replacement\n").unwrap_err().kind(), .PermissionDenied)
+        assert_eq(fs.read(outside.join("victim.jet")).unwrap(), b"victim\n")
+        fs.remove_dir_all(root).unwrap()
+        fs.remove_dir_all(outside).unwrap()
+    }
+}
+
+// Rust: Source/lib.rs:2814-2873; load failures must reach the ordinary producer.
+#Test("test_discovery_surfaces_loader_failure_instead_of_skipping") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    missing :: env.temp_dir().join("jet-facade-missing-{process.id()}-{stamp}.jet").to_string_lossy().into_owned()
+    assert(!has_entry_fn(missing, "run"))
+    assert(has_test_blocks(missing))
+    assert(has_test_contracts(missing))
+}
+
+// Rust: Source/lib.rs:3074-3131; original stdout-only convenience semantics.
+#Test("pure_stdout_convenience_retains_boolean_number_and_escaped_text") {
+    assert_eq(eval_pure_program("fn run() -[]> { print(true) }", "input.jet").unwrap(), "true")
+    assert_eq(eval_pure_program("fn run() -[]> { print(42) }", "input.jet").unwrap(), "42")
+    assert_eq(eval_pure_program("fn run() -[]> { print(\"hello\") }", "input.jet").unwrap(), "\"hello\"")
+    assert_eq(eval_pure_program("fn run() -[]> {}", "input.jet").unwrap(), "null")
+    diagnostics :: eval_pure_program("fn other() -[]> {}", "input.jet").unwrap_err()
+    assert_eq(diagnostics[0].code, "E3401")
+}

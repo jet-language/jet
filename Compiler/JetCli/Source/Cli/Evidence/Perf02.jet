@@ -1,2275 +1,972 @@
-// PORT-PENDING 0702 source-cmdperf-slice-1805: Source/CmdPerf.rs:1805-4075
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn split_json_objects(inner: &str, limit: usize) -> (Vec<&str>, bool) {
-//RS     let mut out = Vec::new();
-//RS     let bytes = inner.as_bytes();
-//RS     let mut i = 0usize;
-//RS     while i < bytes.len() {
-//RS         while i < bytes.len() && (bytes[i] == b',' || bytes[i].is_ascii_whitespace()) {
-//RS             i += 1;
-//RS         }
-//RS         if i >= bytes.len() {
-//RS             break;
-//RS         }
-//RS         if out.len() == limit {
-//RS             return (out, true);
-//RS         }
-//RS         if bytes[i] != b'{' {
-//RS             break;
-//RS         }
-//RS         let start = i;
-//RS         let mut depth = 0usize;
-//RS         while i < bytes.len() {
-//RS             match bytes[i] {
-//RS                 b'{' => depth += 1,
-//RS                 b'}' => {
-//RS                     depth -= 1;
-//RS                     if depth == 0 {
-//RS                         out.push(&inner[start..=i]);
-//RS                         i += 1;
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 b'"' => {
-//RS                     i += 1;
-//RS                     while i < bytes.len() {
-//RS                         if bytes[i] == b'\\' {
-//RS                             i += 2;
-//RS                             continue;
-//RS                         }
-//RS                         if bytes[i] == b'"' {
-//RS                             break;
-//RS                         }
-//RS                         i += 1;
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             i += 1;
-//RS         }
-//RS     }
-//RS     (out, false)
-//RS }
-//RS 
-//RS fn json_string(object: &str, key: &str) -> Option<String> {
-//RS     let tail = object.split_once(&format!("\"{key}\":\""))?.1;
-//RS     let mut out = String::new();
-//RS     let mut chars = tail.chars();
-//RS     while let Some(ch) = chars.next() {
-//RS         match ch {
-//RS             '\\' => match chars.next()? {
-//RS                 '"' => out.push('"'),
-//RS                 '\\' => out.push('\\'),
-//RS                 'n' => out.push('\n'),
-//RS                 'r' => out.push('\r'),
-//RS                 't' => out.push('\t'),
-//RS                 other => out.push(other),
-//RS             },
-//RS             '"' => return Some(out),
-//RS             other => out.push(other),
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// `jet run` hosts compile then exec; observe publishes under the program PID.
-//RS struct PolledSnapshot {
-//RS     process_id: u32,
-//RS     process_cpu_ns: Option<u64>,
-//RS     tasks: ObservedTasks,
-//RS     text: String,
-//RS }
-//RS 
-//RS fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
-//RS     let mut stack = vec![root_pid];
-//RS     let mut seen = std::collections::BTreeSet::new();
-//RS     let mut best = None;
-//RS     let mut best_score = 0u64;
-//RS     while let Some(pid) = stack.pop() {
-//RS         if !seen.insert(pid) {
-//RS             continue;
-//RS         }
-//RS         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
-//RS             let (count, bytes) = observe_arena_resources(&snapshot);
-//RS             let tasks = observe_tasks(&snapshot, pid);
-//RS             let locks = observe_locks(&snapshot);
-//RS             let io = observe_io(&tasks.rows);
-//RS             let child_tasks = tasks.rows.iter().filter(|task| task.parent > 0).count() as u64;
-//RS             let contended = locks.len() as u64;
-//RS             let io_n = io.len() as u64;
-//RS             let score = (if count > 0 || bytes > 0 { 100 } else { 0 })
-//RS                 + child_tasks.saturating_mul(10)
-//RS                 + contended.saturating_mul(20)
-//RS                 + io_n.saturating_mul(20)
-//RS                 + tasks.rows.len() as u64;
-//RS             if score > best_score {
-//RS                 best_score = score;
-//RS                 best = Some(PolledSnapshot {
-//RS                     process_id: pid,
-//RS                     process_cpu_ns: process_times(pid).map(|(_, cpu_ns)| cpu_ns),
-//RS                     tasks,
-//RS                     text: snapshot,
-//RS                 });
-//RS             }
-//RS             // Prefer a snapshot that already shows alloc + spawned child + contention + I/O.
-//RS             if (count > 0 || bytes > 0) && child_tasks > 0 && contended > 0 && io_n > 0 {
-//RS                 return best;
-//RS             }
-//RS         }
-//RS         stack.extend(process_children(pid));
-//RS     }
-//RS     best
-//RS }
-//RS 
-//RS /// Whether the direct child has exited. On Linux this does not reap it: the
-//RS /// zombie keeps its `/proc` identity, so the runtime's exit snapshot stays
-//RS /// readable under the child's pid until `wait` reaps it.
-//RS fn child_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     if let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", child.id())) {
-//RS         return Ok(stat
-//RS             .rsplit_once(") ")
-//RS             .is_some_and(|(_, tail)| tail.starts_with(['Z', 'X'])));
-//RS     }
-//RS     child.try_wait().map(|status| status.is_some())
-//RS }
-//RS 
-//RS fn process_children(pid: u32) -> Vec<u32> {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         let mut kids = std::collections::BTreeSet::new();
-//RS         let mut children_readable = false;
-//RS         if let Ok(entries) = fs::read_dir(format!("/proc/{pid}/task")) {
-//RS             for entry in entries.flatten() {
-//RS                 if let Ok(text) = fs::read_to_string(entry.path().join("children")) {
-//RS                     children_readable = true;
-//RS                     for value in text.split_whitespace() {
-//RS                         if let Ok(child) = value.parse::<u32>() {
-//RS                             kids.insert(child);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // An empty `children` file means no children. Only a kernel without
-//RS         // CONFIG_PROC_CHILDREN falls back to scanning every process's parent.
-//RS         if children_readable {
-//RS             return kids.into_iter().collect();
-//RS         }
-//RS         let Ok(entries) = fs::read_dir("/proc") else {
-//RS             return Vec::new();
-//RS         };
-//RS         for entry in entries.flatten() {
-//RS             let name = entry.file_name();
-//RS             let Some(child) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
-//RS                 continue;
-//RS             };
-//RS             let Ok(stat) = fs::read_to_string(format!("/proc/{child}/stat")) else {
-//RS                 continue;
-//RS             };
-//RS             let Some(fields) = stat.rsplit_once(") ").map(|(_, tail)| tail) else {
-//RS                 continue;
-//RS             };
-//RS             let mut parts = fields.split_whitespace();
-//RS             let _state = parts.next();
-//RS             let Some(ppid) = parts.next().and_then(|v| v.parse::<u32>().ok()) else {
-//RS                 continue;
-//RS             };
-//RS             if ppid == pid {
-//RS                 kids.insert(child);
-//RS             }
-//RS         }
-//RS         kids.into_iter().collect()
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     {
-//RS         let _ = pid;
-//RS         Vec::new()
-//RS     }
-//RS }
-//RS 
-//RS fn json_u64(object: &str, key: &str) -> Option<u64> {
-//RS     let tail = object.split_once(&format!("\"{key}\":"))?.1;
-//RS     let digits: String = tail.chars().take_while(|ch| ch.is_ascii_digit()).collect();
-//RS     digits.parse().ok()
-//RS }
-//RS 
-//RS fn process_times(pid: u32) -> Option<(u64, u64)> {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         let ticks_per_second = proc_clock_ticks_per_second()?;
-//RS         let uptime = fs::read_to_string("/proc/uptime").ok()?;
-//RS         let now_ticks = uptime_ticks(&uptime, ticks_per_second)?;
-//RS         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-//RS         let fields = stat.rsplit_once(") ")?.1;
-//RS         let fields: Vec<&str> = fields.split_whitespace().collect();
-//RS         let utime: u64 = fields.get(11)?.parse().ok()?;
-//RS         let stime: u64 = fields.get(12)?.parse().ok()?;
-//RS         let starttime: u64 = fields.get(19)?.parse().ok()?;
-//RS         let wall_ns = ticks_to_ns(now_ticks.checked_sub(starttime)?, ticks_per_second)?;
-//RS         let cpu_ns = ticks_to_ns(utime.checked_add(stime)?, ticks_per_second)?;
-//RS         Some((wall_ns, cpu_ns))
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     {
-//RS         let _ = pid;
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS fn proc_clock_ticks_per_second() -> Option<u64> {
-//RS     let auxv = fs::read("/proc/self/auxv").ok()?;
-//RS     clock_ticks_per_second_from_auxv(&auxv)
-//RS }
-//RS 
-//RS fn clock_ticks_per_second_from_auxv(auxv: &[u8]) -> Option<u64> {
-//RS     const AT_CLKTCK: u64 = 17;
-//RS     for pair in auxv.chunks_exact(std::mem::size_of::<usize>() * 2) {
-//RS         let (tag, value) = pair.split_at(std::mem::size_of::<usize>());
-//RS         let tag = native_word(tag)?;
-//RS         if tag == 0 {
-//RS             break;
-//RS         }
-//RS         if tag == AT_CLKTCK {
-//RS             return match native_word(value)? {
-//RS                 0 => None,
-//RS                 ticks => Some(ticks),
-//RS             };
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn native_word(bytes: &[u8]) -> Option<u64> {
-//RS     let word: [u8; std::mem::size_of::<usize>()] = bytes.try_into().ok()?;
-//RS     u64::try_from(usize::from_ne_bytes(word)).ok()
-//RS }
-//RS 
-//RS fn uptime_ticks(uptime: &str, ticks_per_second: u64) -> Option<u64> {
-//RS     if ticks_per_second == 0 {
-//RS         return None;
-//RS     }
-//RS     let uptime = uptime.split_whitespace().next()?;
-//RS     let (seconds, fraction) = uptime.split_once('.').unwrap_or((uptime, ""));
-//RS     let seconds: u128 = seconds.parse().ok()?;
-//RS     let mut ticks = seconds.checked_mul(ticks_per_second as u128)?;
-//RS     if !fraction.is_empty() {
-//RS         let scale = 10u128.checked_pow(fraction.len() as u32)?;
-//RS         let fraction: u128 = fraction.parse().ok()?;
-//RS         ticks = ticks.checked_add(
-//RS             fraction
-//RS                 .checked_mul(ticks_per_second as u128)?
-//RS                 .checked_div(scale)?,
-//RS         )?;
-//RS     }
-//RS     u64::try_from(ticks).ok()
-//RS }
-//RS 
-//RS fn ticks_to_ns(ticks: u64, ticks_per_second: u64) -> Option<u64> {
-//RS     if ticks_per_second == 0 {
-//RS         return None;
-//RS     }
-//RS     let nanos = (ticks as u128)
-//RS         .checked_mul(1_000_000_000)?
-//RS         .checked_div(ticks_per_second as u128)?;
-//RS     u64::try_from(nanos).ok()
-//RS }
-//RS 
-//RS fn view(args: &[String]) -> i32 {
-//RS     let mut path = None;
-//RS     let mut mode = ViewMode::Text;
-//RS     let mut frames = FramesMode::Jet;
-//RS     let mut i = 0usize;
-//RS     while i < args.len() {
-//RS         let arg = args[i].as_str();
-//RS         if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
-//RS             mode = ViewMode::JSON;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if arg == "--html" {
-//RS             mode = ViewMode::HTML;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if let Some(value) = arg.strip_prefix("--frames=") {
-//RS             frames = match value {
-//RS                 "jet" => FramesMode::Jet,
-//RS                 "all" => FramesMode::All,
-//RS                 _ => {
-//RS                     perf_error("`--frames` accepts only `jet` or `all`");
-//RS                     return ExitCodes::USAGE;
-//RS                 }
-//RS             };
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if arg == "--frames" {
-//RS             let Some(value) = args.get(i + 1) else {
-//RS                 perf_error("`--frames` needs `jet` or `all`");
-//RS                 return ExitCodes::USAGE;
-//RS             };
-//RS             frames = match value.as_str() {
-//RS                 "jet" => FramesMode::Jet,
-//RS                 "all" => FramesMode::All,
-//RS                 _ => {
-//RS                     perf_error("`--frames` accepts only `jet` or `all`");
-//RS                     return ExitCodes::USAGE;
-//RS                 }
-//RS             };
-//RS             i += 2;
-//RS             continue;
-//RS         }
-//RS         if arg.starts_with('-') {
-//RS             perf_error_with_fix(
-//RS                 format!("unknown `jet perf view` flag `{arg}`"),
-//RS                 format!("run `jet perf view <path{ARTIFACT_EXT_TRACE}> [--json|--html] [--frames=jet|all]`"),
-//RS             );
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS         if path.is_some() {
-//RS             perf_error("`jet perf view` takes one trace path");
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS         path = Some(arg.to_string());
-//RS         i += 1;
-//RS     }
-//RS     let Some(path) = path else {
-//RS         perf_error(format!("`jet perf view` needs a {ARTIFACT_EXT_TRACE} path"));
-//RS         return ExitCodes::USAGE;
-//RS     };
-//RS     let trace = match read_verified(&path) {
-//RS         Ok(trace) => trace,
-//RS         Err(message) => {
-//RS             perf_error(message);
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS     };
-//RS     match mode {
-//RS         ViewMode::Text => {
-//RS             render_view_text(&trace, frames, use_color());
-//RS             ExitCodes::OK
-//RS         }
-//RS         ViewMode::JSON => {
-//RS             print!(
-//RS                 "{}",
-//RS                 render_perf_json("perf.view", view_json(&trace, frames))
-//RS             );
-//RS             ExitCodes::OK
-//RS         }
-//RS         ViewMode::HTML => {
-//RS             print!("{}", view_html(&trace, frames));
-//RS             ExitCodes::OK
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS enum ViewMode {
-//RS     Text,
-//RS     JSON,
-//RS     HTML,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS enum FramesMode {
-//RS     Jet,
-//RS     All,
-//RS }
-//RS 
-//RS fn use_color() -> bool {
-//RS     if std::env::var_os("NO_COLOR").is_some() {
-//RS         return false;
-//RS     }
-//RS     if std::env::var_os("JET_FORCE_COLOR").is_some() {
-//RS         return true;
-//RS     }
-//RS     std::io::IsTerminal::is_terminal(&std::io::stdout())
-//RS }
-//RS 
-//RS fn render_view_text(trace: &CanonicalJson, frames: FramesMode, color: bool) {
-//RS     let id = trace_id(trace).unwrap_or("unknown");
-//RS     let command = content_command(trace).unwrap_or("unknown");
-//RS     let bold = if color { "\u{1b}[1m" } else { "" };
-//RS     let reset = if color { "\u{1b}[0m" } else { "" };
-//RS     println!("{bold}schema{reset} {TRACE_SCHEMA} v{TRACE_VERSION}");
-//RS     println!("{bold}trace{reset} {id}");
-//RS     println!("{bold}command{reset} {command}");
-//RS     println!(
-//RS         "{bold}frames{reset} {}",
-//RS         match frames {
-//RS             FramesMode::Jet => "jet",
-//RS             FramesMode::All => "all",
-//RS         }
-//RS     );
-//RS     if let Some((domain, ns, symbol)) = first_sample(trace) {
-//RS         println!("sample {domain} {ns}ns · {symbol}");
-//RS     }
-//RS     if let Some(summary) = profile_summary(trace) {
-//RS         println!("{summary}");
-//RS     }
-//RS     if let Some((count, bytes, symbol)) = first_allocation(trace) {
-//RS         println!("alloc count={count} bytes={bytes} · {symbol}");
-//RS     }
-//RS     if let Some((n, symbol)) = browser_summary(trace) {
-//RS         println!("browser count={n} · {symbol}");
-//RS     }
-//RS     if let Some((n, child_n, symbol)) = task_summary(trace) {
-//RS         println!("tasks count={n} children={child_n} · {symbol}");
-//RS     }
-//RS     if let Some((n, waiters, symbol)) = lock_summary(trace) {
-//RS         println!("locks count={n} waiters={waiters} · {symbol}");
-//RS     }
-//RS     if let Some((n, symbol)) = io_summary(trace) {
-//RS         println!("io count={n} · {symbol}");
-//RS     }
-//RS     if let Some(summary) = native_summary(trace) {
-//RS         println!("{summary}");
-//RS     }
-//RS     if let Some(summary) = span_summary(trace) {
-//RS         println!("{summary}");
-//RS     }
-//RS     if frames_show_generated(frames) {
-//RS         println!("generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)");
-//RS     }
-//RS     let flame = ascii_flame(trace);
-//RS     if !flame.is_empty() {
-//RS         println!("{bold}flamegraph{reset}");
-//RS         for line in flame {
-//RS             println!("{line}");
-//RS         }
-//RS     }
-//RS     let timeline = ascii_timeline(trace);
-//RS     if !timeline.is_empty() {
-//RS         println!("{bold}timeline{reset}");
-//RS         for line in timeline {
-//RS             println!("{line}");
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn frames_show_generated(frames: FramesMode) -> bool {
-//RS     matches!(frames, FramesMode::All)
-//RS }
-//RS 
-//RS fn ascii_flame(trace: &CanonicalJson) -> Vec<String> {
-//RS     let mut rows = Vec::new();
-//RS     if let Some((domain, ns, symbol)) = first_sample(trace) {
-//RS         let width = ((ns.parse::<u64>().unwrap_or(1).min(40)) as usize).max(1);
-//RS         rows.push(format!("{symbol} {domain} {}", "#".repeat(width)));
-//RS     }
-//RS     if let Some(CanonicalJson::Object(profile)) =
-//RS         content_object(trace).and_then(|content| content.get("profile"))
-//RS     {
-//RS         if let Some(CanonicalJson::Array(profile_rows)) = profile.get("rows") {
-//RS             for row in profile_rows.iter().take(8) {
-//RS                 let CanonicalJson::Object(fields) = row else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(symbol) = fields.get("symbol").and_then(symbol_label) else {
-//RS                     continue;
-//RS                 };
-//RS                 let clock = match fields.get("clock") {
-//RS                     Some(CanonicalJson::String(clock)) => clock,
-//RS                     _ => continue,
-//RS                 };
-//RS                 let weight = match fields.get("sample_weight") {
-//RS                     Some(CanonicalJson::Integer(weight)) => weight,
-//RS                     _ => continue,
-//RS                 };
-//RS                 rows.push(format!("{symbol} profile:{clock} samples={weight}"));
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some((n, symbol)) = browser_summary(trace) {
-//RS         let width = n.min(40).max(1);
-//RS         rows.push(format!("{symbol} browser {}", "#".repeat(width)));
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn ascii_timeline(trace: &CanonicalJson) -> Vec<String> {
-//RS     let mut rows = Vec::new();
-//RS     if let Some(items) = content_array(trace, "browser") {
-//RS         for item in items.iter().take(8) {
-//RS             let CanonicalJson::Object(fields) = item else {
-//RS                 continue;
-//RS             };
-//RS             let start = match fields.get("start_ns") {
-//RS                 Some(CanonicalJson::Integer(text)) => text.clone(),
-//RS                 _ => continue,
-//RS             };
-//RS             let dur = match fields.get("duration_ns") {
-//RS                 Some(CanonicalJson::Integer(text)) => text.clone(),
-//RS                 _ => continue,
-//RS             };
-//RS             let name = match fields.get("symbol").and_then(symbol_label) {
-//RS                 Some(name) => name,
-//RS                 None => "browser".into(),
-//RS             };
-//RS             rows.push(format!("[{start}+{dur}] {name}"));
-//RS         }
-//RS     }
-//RS     if let Some(items) = content_array(trace, "spans") {
-//RS         for item in items.iter().take(8) {
-//RS             let CanonicalJson::Object(fields) = item else {
-//RS                 continue;
-//RS             };
-//RS             if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
-//RS                 continue;
-//RS             }
-//RS             let start = match fields.get("start_ns") {
-//RS                 Some(CanonicalJson::Integer(text)) => text.clone(),
-//RS                 _ => continue,
-//RS             };
-//RS             let end = match fields.get("end_ns") {
-//RS                 Some(CanonicalJson::Integer(text)) => text.clone(),
-//RS                 _ => continue,
-//RS             };
-//RS             let name = match fields.get("symbol").and_then(symbol_label) {
-//RS                 Some(name) => name,
-//RS                 None => "span".into(),
-//RS             };
-//RS             rows.push(format!("[{start}..{end}] {name}"));
-//RS         }
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         (
-//RS             "flamegraph".into(),
-//RS             CanonicalJson::Array(
-//RS                 ascii_flame(trace)
-//RS                     .into_iter()
-//RS                     .map(CanonicalJson::String)
-//RS                     .collect(),
-//RS             ),
-//RS         ),
-//RS         (
-//RS             "frames".into(),
-//RS             CanonicalJson::String(
-//RS                 match frames {
-//RS                     FramesMode::Jet => "jet",
-//RS                     FramesMode::All => "all",
-//RS                 }
-//RS                 .into(),
-//RS             ),
-//RS         ),
-//RS         (
-//RS             "kind".into(),
-//RS             CanonicalJson::String("jet.trace.view".into()),
-//RS         ),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         (
-//RS             "timeline".into(),
-//RS             CanonicalJson::Array(
-//RS                 ascii_timeline(trace)
-//RS                     .into_iter()
-//RS                     .map(CanonicalJson::String)
-//RS                     .collect(),
-//RS             ),
-//RS         ),
-//RS         ("trace".into(), trace.clone()),
-//RS         (
-//RS             "version".into(),
-//RS             CanonicalJson::Integer(TRACE_VERSION.to_string()),
-//RS         ),
-//RS     ])
-//RS     .expect("view json keys are unique")
-//RS }
-//RS 
-//RS fn render_perf_json(action: &str, value: CanonicalJson) -> String {
-//RS     StatusEnvelope::new(action, true)
-//RS         .with_field("perf", status_value(&value))
-//RS         .json()
-//RS }
-//RS 
-//RS fn status_value(value: &CanonicalJson) -> StatusValue {
-//RS     match value {
-//RS         CanonicalJson::Null => StatusValue::Null,
-//RS         CanonicalJson::Bool(value) => StatusValue::Bool(*value),
-//RS         CanonicalJson::Integer(value) => StatusValue::Integer(
-//RS             value
-//RS                 .parse()
-//RS                 .expect("canonical perf integer must fit status integer"),
-//RS         ),
-//RS         CanonicalJson::String(value) => StatusValue::String(value.clone()),
-//RS         CanonicalJson::Array(values) => StatusValue::array(values.iter().map(status_value)),
-//RS         CanonicalJson::Object(values) => {
-//RS             let mut fields = StatusFields::new();
-//RS             for (name, value) in values {
-//RS                 fields = fields.with(name.as_str(), status_value(value));
-//RS             }
-//RS             StatusValue::object(fields)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn view_html(trace: &CanonicalJson, frames: FramesMode) -> String {
-//RS     let id = trace_id(trace).unwrap_or("unknown");
-//RS     let flame = ascii_flame(trace)
-//RS         .into_iter()
-//RS         .map(|line| format!("<li>{}</li>", html_escape(&line)))
-//RS         .collect::<Vec<_>>()
-//RS         .join("");
-//RS     let timeline = ascii_timeline(trace)
-//RS         .into_iter()
-//RS         .map(|line| format!("<li>{}</li>", html_escape(&line)))
-//RS         .collect::<Vec<_>>()
-//RS         .join("");
-//RS     let frames_label = match frames {
-//RS         FramesMode::Jet => "jet",
-//RS         FramesMode::All => "all",
-//RS     };
-//RS     format!(
-//RS         r#"<!doctype html>
-//RS <html lang="en"><head><meta charset="utf-8"><title>jettrace {id}</title>
-//RS <style>
-//RS body{{font:14px/1.4 ui-monospace,monospace;margin:1.5rem;background:#111;color:#eee}}
-//RS h1,h2{{font-weight:600}}
-//RS .bar{{display:inline-block;height:10px;background:#6cf;margin-left:.5rem}}
-//RS section{{margin:1rem 0}}
-//RS </style></head><body>
-//RS <h1>jettrace {id}</h1>
-//RS <p>schema {TRACE_SCHEMA} v{TRACE_VERSION} · frames={frames_label}</p>
-//RS <section><h2>flamegraph</h2><ul id="flame">{flame}</ul></section>
-//RS <section><h2>timeline</h2><ul id="timeline">{timeline}</ul></section>
-//RS <script>
-//RS const flame=document.getElementById('flame');
-//RS for (const li of flame.querySelectorAll('li')) {{
-//RS   const m=li.textContent.match(/#+/);
-//RS   if(!m) continue;
-//RS   const bar=document.createElement('span');
-//RS   bar.className='bar';
-//RS   bar.style.width=(m[0].length*4)+'px';
-//RS   li.appendChild(bar);
-//RS }}
-//RS </script>
-//RS </body></html>
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn html_escape(text: &str) -> String {
-//RS     text.replace('&', "&amp;")
-//RS         .replace('<', "&lt;")
-//RS         .replace('>', "&gt;")
-//RS         .replace('"', "&quot;")
-//RS }
-//RS 
-//RS fn compare(args: &[String]) -> i32 {
-//RS     let mut paths = Vec::new();
-//RS     let mut override_identity = false;
-//RS     let mut baseline_name = None;
-//RS     let mut i = 0usize;
-//RS     while i < args.len() {
-//RS         let arg = args[i].as_str();
-//RS         if arg == "--override-identity" {
-//RS             override_identity = true;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if let Some(value) = arg.strip_prefix("--baseline=") {
-//RS             baseline_name = Some(value.to_string());
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if arg == "--baseline" {
-//RS             let Some(value) = args.get(i + 1) else {
-//RS                 perf_error("`--baseline` needs a pinned baseline name");
-//RS                 return ExitCodes::USAGE;
-//RS             };
-//RS             baseline_name = Some(value.clone());
-//RS             i += 2;
-//RS             continue;
-//RS         }
-//RS         if arg.starts_with('-') {
-//RS             perf_error_with_fix(
-//RS                 format!("unknown `jet perf compare` flag `{arg}`"),
-//RS                 format!("run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]`"),
-//RS             );
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS         paths.push(arg.to_string());
-//RS         i += 1;
-//RS     }
-//RS     if paths.len() != 2 {
-//RS         perf_error_with_fix(
-//RS             format!("`jet perf compare` needs two {ARTIFACT_EXT_TRACE} paths"),
-//RS             format!("run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]`"),
-//RS         );
-//RS         return ExitCodes::USAGE;
-//RS     }
-//RS     let base = match read_verified(&paths[0]) {
-//RS         Ok(trace) => trace,
-//RS         Err(message) => {
-//RS             perf_error(format!("base trace: {message}"));
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS     };
-//RS     let head = match read_verified(&paths[1]) {
-//RS         Ok(trace) => trace,
-//RS         Err(message) => {
-//RS             perf_error(format!("head trace: {message}"));
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS     };
-//RS     let base_tool = toolchain_digest(&base);
-//RS     let head_tool = toolchain_digest(&head);
-//RS     let base_hw = hardware_fingerprint(&base);
-//RS     let head_hw = hardware_fingerprint(&head);
-//RS     let identity_mismatch = base_tool != head_tool || base_hw != head_hw;
-//RS     if identity_mismatch && !override_identity {
-//RS         if base_tool != head_tool {
-//RS             crate::emit_cli_report(
-//RS                 "E2102",
-//RS                 "toolchain identity mismatch between traces".to_string(),
-//RS                 "compare requires matching toolchain digests (D-PERFSESSION1)".to_string(),
-//RS                 "recapture both traces on the same machine/toolchain, or pass `--override-identity`".to_string(),
-//RS                 false,
-//RS             );
-//RS         } else {
-//RS             crate::emit_cli_report(
-//RS                 "E2102",
-//RS                 "hardware identity mismatch between traces".to_string(),
-//RS                 "compare requires matching hardware fingerprints (D-PERFSESSION1)".to_string(),
-//RS                 "recapture both traces on the same machine/toolchain, or pass `--override-identity`".to_string(),
-//RS                 false,
-//RS             );
-//RS         }
-//RS         return ExitCodes::USER_ERROR;
-//RS     }
-//RS     if let Some(name) = &baseline_name {
-//RS         if let Err(message) = require_pinned_baseline(name) {
-//RS             crate::emit_cli_report(
-//RS                 "E2102",
-//RS                 message,
-//RS                 "`--baseline` selects a D-PERFBUDGET-BASELINE1 pinned name".to_string(),
-//RS                 format!("create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`"),
-//RS                 false,
-//RS             );
-//RS             return ExitCodes::USER_ERROR;
-//RS         }
-//RS     }
-//RS     let deltas = compare_domain_deltas(&base, &head);
-//RS     let receipt_deltas = match compare_receipt_sections(&base, &head) {
-//RS         Ok(deltas) => deltas,
-//RS         Err(message) => {
-//RS             perf_error(format!("receipt sections: {message}"));
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS     };
-//RS     let budget_line = budget_compare_line(&base, &head, baseline_name.as_deref());
-//RS     let override_note = if identity_mismatch && override_identity {
-//RS         " · identity override"
-//RS     } else {
-//RS         ""
-//RS     };
-//RS     let baseline_note = baseline_name
-//RS         .as_ref()
-//RS         .map(|name| format!(" · baseline {name}"))
-//RS         .unwrap_or_default();
-//RS     println!(
-//RS         "compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {} · head {}{override_note}{baseline_note}",
-//RS         trace_id(&base).unwrap_or("unknown"),
-//RS         trace_id(&head).unwrap_or("unknown"),
-//RS     );
-//RS     if !deltas.is_empty() {
-//RS         println!("deltas: {}", deltas.join(" · "));
-//RS     }
-//RS     if !receipt_deltas.is_empty() {
-//RS         println!("receipt deltas: {}", receipt_deltas.join(" · "));
-//RS     }
-//RS     println!("{budget_line}");
-//RS     ExitCodes::OK
-//RS }
-//RS 
-//RS fn require_pinned_baseline(name: &str) -> Result<(), String> {
-//RS     if name.is_empty()
-//RS         || name.contains('.')
-//RS         || name.contains('\\')
-//RS         || name.starts_with('/')
-//RS         || name
-//RS             .split('/')
-//RS             .any(|part| part.is_empty() || part == "." || part == "..")
-//RS         || !name
-//RS             .bytes()
-//RS             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'/')
-//RS     {
-//RS         return Err(format!(
-//RS             "baseline name `{name}` is not a pinned BaselineName"
-//RS         ));
-//RS     }
-//RS     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
-//RS     let root = jet::Loader::selected_project_root(&cwd).unwrap_or(cwd);
-//RS     let path = root
-//RS         .join(".jet")
-//RS         .join("perf")
-//RS         .join("baselines")
-//RS         .join("names")
-//RS         .join(format!("{name}.json"));
-//RS     if !path.is_file() {
-//RS         return Err(format!(
-//RS             "pinned baseline `{name}` is missing at {}",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn hardware_fingerprint(trace: &CanonicalJson) -> Option<String> {
-//RS     content_object(trace)?
-//RS         .get("hardware")
-//RS         .and_then(|value| match value {
-//RS             CanonicalJson::Object(fields) => match fields.get("fingerprint") {
-//RS                 Some(CanonicalJson::String(text)) => Some(text.clone()),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         })
-//RS }
-//RS 
-//RS fn compare_domain_deltas(base: &CanonicalJson, head: &CanonicalJson) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     if let (Some(b), Some(h)) = (sample_duration(base, "wall"), sample_duration(head, "wall")) {
-//RS         out.push(format!("wall {b}->{h} ns"));
-//RS     }
-//RS     if let (Some(b), Some(h)) = (sample_duration(base, "cpu"), sample_duration(head, "cpu")) {
-//RS         out.push(format!("cpu {b}->{h} ns"));
-//RS     }
-//RS     if let (Some(b), Some(h)) = (allocation_bytes(base), allocation_bytes(head)) {
-//RS         out.push(format!("alloc {b}->{h} B"));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn sample_duration(trace: &CanonicalJson, domain: &str) -> Option<u64> {
-//RS     let samples = match content_object(trace)?.get("samples")? {
-//RS         CanonicalJson::Array(items) => items,
-//RS         _ => return None,
-//RS     };
-//RS     for sample in samples {
-//RS         let CanonicalJson::Object(fields) = sample else {
-//RS             continue;
-//RS         };
-//RS         if fields.get("domain") == Some(&CanonicalJson::String(domain.into())) {
-//RS             if let Some(CanonicalJson::Integer(text)) = fields.get("duration_ns") {
-//RS                 return text.parse().ok();
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn allocation_bytes(trace: &CanonicalJson) -> Option<u64> {
-//RS     let allocations = match content_object(trace)?.get("allocations")? {
-//RS         CanonicalJson::Array(items) => items,
-//RS         _ => return None,
-//RS     };
-//RS     let CanonicalJson::Object(fields) = allocations.first()? else {
-//RS         return None;
-//RS     };
-//RS     match fields.get("bytes")? {
-//RS         CanonicalJson::Integer(text) => text.parse().ok(),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn budget_compare_line(
-//RS     base: &CanonicalJson,
-//RS     head: &CanonicalJson,
-//RS     baseline: Option<&str>,
-//RS ) -> String {
-//RS     // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
-//RS     match (sample_duration(base, "wall"), sample_duration(head, "wall")) {
-//RS         (Some(base_ns), Some(head_ns)) if base_ns > 0 => {
-//RS             let bad = head_ns.saturating_sub(base_ns);
-//RS             let bp = (bad as u128).saturating_mul(10_000) / base_ns as u128;
-//RS             let name = baseline.unwrap_or("trace-baseline");
-//RS             format!(
-//RS                 "budgets: wall RelativeTo({name}) regression={bp}bp · base={base_ns}ns head={head_ns}ns"
-//RS             )
-//RS         }
-//RS         _ => "budgets: no comparable wall samples for #241 RelativeTo evaluation".into(),
-//RS     }
-//RS }
-//RS 
-//RS fn export(args: &[String]) -> i32 {
-//RS     let mut path = None;
-//RS     let mut mode = ExportMode::JSON;
-//RS     let mut i = 0usize;
-//RS     while i < args.len() {
-//RS         let arg = args[i].as_str();
-//RS         match arg {
-//RS             jet::CLI::MACHINE_OUTPUT_FLAG => {
-//RS                 mode = ExportMode::JSON;
-//RS                 i += 1;
-//RS                 continue;
-//RS             }
-//RS             "--pprof" => {
-//RS                 mode = ExportMode::Pprof;
-//RS                 i += 1;
-//RS                 continue;
-//RS             }
-//RS             "--otel" => {
-//RS                 mode = ExportMode::Otel;
-//RS                 i += 1;
-//RS                 continue;
-//RS             }
-//RS             "--chrome" => {
-//RS                 mode = ExportMode::Chrome;
-//RS                 i += 1;
-//RS                 continue;
-//RS             }
-//RS             "--emit-profile-map" => {
-//RS                 mode = ExportMode::ProfileMap;
-//RS                 i += 1;
-//RS                 continue;
-//RS             }
-//RS             _ if arg.starts_with('-') => {
-//RS                 perf_error_with_fix(
-//RS                     format!("unknown `jet perf export` flag `{arg}`"),
-//RS                     format!("run `jet perf export <path{ARTIFACT_EXT_TRACE}> [--json|--pprof|--otel|--chrome|--emit-profile-map]"),
-//RS                 );
-//RS                 return ExitCodes::USAGE;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         if path.is_some() {
-//RS             perf_error("`jet perf export` takes one trace path");
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS         path = Some(arg.to_string());
-//RS         i += 1;
-//RS     }
-//RS     let Some(path) = path else {
-//RS         perf_error(format!(
-//RS             "`jet perf export` needs a {ARTIFACT_EXT_TRACE} path"
-//RS         ));
-//RS         return ExitCodes::USAGE;
-//RS     };
-//RS     let trace = match read_verified(&path) {
-//RS         Ok(trace) => trace,
-//RS         Err(message) => {
-//RS             perf_error(message);
-//RS             return ExitCodes::USAGE;
-//RS         }
-//RS     };
-//RS     let machine_json = matches!(mode, ExportMode::JSON);
-//RS     let projection = match mode {
-//RS         ExportMode::JSON => export_json_envelope(&trace),
-//RS         ExportMode::Pprof => export_pprof_projection(&trace),
-//RS         ExportMode::Otel => export_otel_projection(&trace),
-//RS         ExportMode::Chrome => export_chrome_projection(&trace),
-//RS         ExportMode::ProfileMap => export_profile_map_projection(&trace),
-//RS     };
-//RS     if machine_json {
-//RS         print!("{}", render_perf_json("perf.export", projection));
-//RS     } else {
-//RS         print!("{}", String::from_utf8_lossy(&projection.bytes()));
-//RS     }
-//RS     ExitCodes::OK
-//RS }
-//RS 
-//RS enum ExportMode {
-//RS     JSON,
-//RS     Pprof,
-//RS     Otel,
-//RS     Chrome,
-//RS     ProfileMap,
-//RS }
-//RS 
-//RS fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
-//RS     let loss = if first_sample(trace).is_some()
-//RS         || profile_summary(trace).is_some()
-//RS         || first_allocation(trace).is_some()
-//RS         || browser_summary(trace).is_some()
-//RS         || task_summary(trace).is_some()
-//RS         || lock_summary(trace).is_some()
-//RS         || io_summary(trace).is_some()
-//RS         || native_summary(trace).is_some()
-//RS         || span_summary(trace).is_some()
-//RS     {
-//RS         "json-envelope; typed profile evidence and domains are retained in trace — standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
-//RS     } else {
-//RS         "json-envelope-only; standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
-//RS     };
-//RS     CanonicalJson::object([
-//RS         (
-//RS             "kind".into(),
-//RS             CanonicalJson::String("jet.trace.projection".into()),
-//RS         ),
-//RS         ("loss".into(), CanonicalJson::String(loss.into())),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         ("trace".into(), trace.clone()),
-//RS         (
-//RS             "version".into(),
-//RS             CanonicalJson::Integer(TRACE_VERSION.to_string()),
-//RS         ),
-//RS     ])
-//RS     .expect("projection keys are unique")
-//RS }
-//RS 
-//RS fn export_pprof_projection(trace: &CanonicalJson) -> CanonicalJson {
-//RS     let mut samples = Vec::new();
-//RS     if let Some(wall) = sample_duration(trace, "wall") {
-//RS         samples.push(
-//RS             CanonicalJson::object([
-//RS                 ("location".into(), CanonicalJson::String("wall".into())),
-//RS                 ("value".into(), CanonicalJson::Integer(wall.to_string())),
-//RS             ])
-//RS             .unwrap(),
-//RS         );
-//RS     }
-//RS     if let Some(cpu) = sample_duration(trace, "cpu") {
-//RS         samples.push(
-//RS             CanonicalJson::object([
-//RS                 ("location".into(), CanonicalJson::String("cpu".into())),
-//RS                 ("value".into(), CanonicalJson::Integer(cpu.to_string())),
-//RS             ])
-//RS             .unwrap(),
-//RS         );
-//RS     }
-//RS     CanonicalJson::object([
-//RS         ("kind".into(), CanonicalJson::String("jet.trace.pprof-projection".into())),
-//RS         (
-//RS             "loss".into(),
-//RS             CanonicalJson::String(
-//RS                 "pprof-json; samples are Jet wall/cpu only — no native stack frames, no gzip proto, no labels beyond domain"
-//RS                     .into(),
-//RS             ),
-//RS         ),
-//RS         ("samples".into(), CanonicalJson::Array(samples)),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-//RS         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
-//RS     ])
-//RS     .expect("pprof projection keys are unique")
-//RS }
-//RS 
-//RS fn export_otel_projection(trace: &CanonicalJson) -> CanonicalJson {
-//RS     let mut spans = Vec::new();
-//RS     if let Some(content) = content_object(trace) {
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("spans") {
-//RS             for item in items {
-//RS                 spans.push(item.clone());
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("browser") {
-//RS             for item in items {
-//RS                 spans.push(item.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     CanonicalJson::object([
-//RS         ("kind".into(), CanonicalJson::String("jet.trace.otel-projection".into())),
-//RS         (
-//RS             "loss".into(),
-//RS             CanonicalJson::String(
-//RS                 "otel-json; Jet spans/browser only — no resource attributes, no OTLP protobuf, no baggage/traceparent wire"
-//RS                     .into(),
-//RS             ),
-//RS         ),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         ("spans".into(), CanonicalJson::Array(spans)),
-//RS         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-//RS         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
-//RS     ])
-//RS     .expect("otel projection keys are unique")
-//RS }
-//RS 
-//RS fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
-//RS     let mut events = Vec::new();
-//RS     chrome_process_name(&mut events);
-//RS     for (tid, name) in [
-//RS         (1, "wall samples"),
-//RS         (2, "cpu samples"),
-//RS         (3, "browser"),
-//RS         (4, "lock contention"),
-//RS         (5, "native CPU"),
-//RS         (6, "allocations"),
-//RS     ] {
-//RS         chrome_thread_name(&mut events, tid, name);
-//RS     }
-//RS     if let Some(content) = content_object(trace) {
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("samples") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(domain) = fields.get("domain").and_then(chrome_string) else {
-//RS                     continue;
-//RS                 };
-//RS                 let tid = match domain {
-//RS                     "wall" => 1,
-//RS                     "cpu" => 2,
-//RS                     _ => continue,
-//RS                 };
-//RS                 chrome_symbol_event(&mut events, fields, 0, duration_ns, tid);
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("allocations") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 chrome_symbol_event(&mut events, fields, 0, 0, 6);
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("tasks") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(task_id) = chrome_integer(fields, "id") else {
-//RS                     continue;
-//RS                 };
-//RS                 chrome_thread_name(
-//RS                     &mut events,
-//RS                     chrome_task_tid(task_id),
-//RS                     &format!("task {task_id}"),
-//RS                 );
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("browser") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(start_ns) = chrome_integer(fields, "start_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 chrome_symbol_event(&mut events, fields, start_ns, duration_ns, 3);
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("spans") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
-//RS                     continue;
-//RS                 }
-//RS                 let Some(start_ns) = chrome_integer(fields, "start_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(end_ns) = chrome_integer(fields, "end_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(task_id) = chrome_integer(fields, "task_id") else {
-//RS                     continue;
-//RS                 };
-//RS                 let tid = chrome_task_tid(task_id);
-//RS                 chrome_symbol_event(
-//RS                     &mut events,
-//RS                     fields,
-//RS                     start_ns,
-//RS                     end_ns.saturating_sub(start_ns),
-//RS                     tid,
-//RS                 );
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("io") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(start_ns) = chrome_integer(fields, "start_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(end_ns) = chrome_integer(fields, "end_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(task_id) = chrome_integer(fields, "task_id") else {
-//RS                     continue;
-//RS                 };
-//RS                 let tid = chrome_task_tid(task_id);
-//RS                 chrome_symbol_event(
-//RS                     &mut events,
-//RS                     fields,
-//RS                     start_ns,
-//RS                     end_ns.saturating_sub(start_ns),
-//RS                     tid,
-//RS                 );
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("locks") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 chrome_symbol_event(&mut events, fields, 0, 0, 4);
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("native") {
-//RS             for item in items {
-//RS                 let CanonicalJson::Object(fields) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
-//RS                     continue;
-//RS                 }
-//RS                 let Some(start_ns) = chrome_integer(fields, "observed_at_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
-//RS                     continue;
-//RS                 };
-//RS                 let tid = fields
-//RS                     .get("task_id")
-//RS                     .and_then(chrome_value_integer)
-//RS                     .map(chrome_task_tid)
-//RS                     .unwrap_or(5);
-//RS                 chrome_symbol_event(&mut events, fields, start_ns, duration_ns, tid);
-//RS             }
-//RS         }
-//RS     }
-//RS     CanonicalJson::object([
-//RS         (
-//RS             "kind".into(),
-//RS             CanonicalJson::String("jet.trace.chrome-projection".into()),
-//RS         ),
-//RS         (
-//RS             "loss".into(),
-//RS             CanonicalJson::String(
-//RS                 "chrome-trace-json; captured X events cover wall/cpu/alloc/browser/task spans/io/locks/native and M lane metadata — unavailable states, async flow events, counter tracks, screenshots, and source-map events remain unprojected"
-//RS                     .into(),
-//RS             ),
-//RS         ),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         ("traceEvents".into(), CanonicalJson::Array(events)),
-//RS         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-//RS         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
-//RS     ])
-//RS     .expect("chrome projection keys are unique")
-//RS }
-//RS 
-//RS fn chrome_process_name(events: &mut Vec<CanonicalJson>) {
-//RS     events.push(
-//RS         CanonicalJson::object([
-//RS             (
-//RS                 "args".into(),
-//RS                 CanonicalJson::object([("name".into(), CanonicalJson::String("Jet perf".into()))])
-//RS                     .unwrap(),
-//RS             ),
-//RS             ("name".into(), CanonicalJson::String("process_name".into())),
-//RS             ("ph".into(), CanonicalJson::String("M".into())),
-//RS             ("pid".into(), CanonicalJson::Integer("1".into())),
-//RS         ])
-//RS         .unwrap(),
-//RS     );
-//RS }
-//RS 
-//RS fn chrome_thread_name(events: &mut Vec<CanonicalJson>, tid: u64, name: &str) {
-//RS     events.push(
-//RS         CanonicalJson::object([
-//RS             (
-//RS                 "args".into(),
-//RS                 CanonicalJson::object([("name".into(), CanonicalJson::String(name.into()))])
-//RS                     .unwrap(),
-//RS             ),
-//RS             ("name".into(), CanonicalJson::String("thread_name".into())),
-//RS             ("ph".into(), CanonicalJson::String("M".into())),
-//RS             ("pid".into(), CanonicalJson::Integer("1".into())),
-//RS             ("tid".into(), CanonicalJson::Integer(tid.to_string())),
-//RS         ])
-//RS         .unwrap(),
-//RS     );
-//RS }
-//RS 
-//RS fn chrome_symbol_event(
-//RS     events: &mut Vec<CanonicalJson>,
-//RS     fields: &BTreeMap<String, CanonicalJson>,
-//RS     start_ns: u64,
-//RS     duration_ns: u64,
-//RS     tid: u64,
-//RS ) {
-//RS     let Some(symbol) = fields.get("symbol") else {
-//RS         return;
-//RS     };
-//RS     let Some(name) = symbol_label(symbol) else {
-//RS         return;
-//RS     };
-//RS     let Some(args) = chrome_symbol_args(symbol) else {
-//RS         return;
-//RS     };
-//RS     events.push(
-//RS         CanonicalJson::object([
-//RS             ("args".into(), args),
-//RS             (
-//RS                 "dur".into(),
-//RS                 CanonicalJson::Integer((duration_ns / 1_000).to_string()),
-//RS             ),
-//RS             ("name".into(), CanonicalJson::String(name)),
-//RS             ("ph".into(), CanonicalJson::String("X".into())),
-//RS             ("pid".into(), CanonicalJson::Integer("1".into())),
-//RS             ("tid".into(), CanonicalJson::Integer(tid.to_string())),
-//RS             (
-//RS                 "ts".into(),
-//RS                 CanonicalJson::Integer((start_ns / 1_000).to_string()),
-//RS             ),
-//RS         ])
-//RS         .unwrap(),
-//RS     );
-//RS }
-//RS 
-//RS fn chrome_symbol_args(value: &CanonicalJson) -> Option<CanonicalJson> {
-//RS     let CanonicalJson::Object(fields) = value else {
-//RS         return None;
-//RS     };
-//RS     let CanonicalJson::String(path) = fields.get("path")? else {
-//RS         return None;
-//RS     };
-//RS     let CanonicalJson::String(name) = fields.get("name")? else {
-//RS         return None;
-//RS     };
-//RS     let mut args = BTreeMap::new();
-//RS     args.insert("file".into(), CanonicalJson::String(path.clone()));
-//RS     args.insert(
-//RS         "location".into(),
-//RS         CanonicalJson::String(format!("{path}:{name}")),
-//RS     );
-//RS     args.insert("symbol".into(), CanonicalJson::String(name.clone()));
-//RS     for key in [
-//RS         "bytes",
-//RS         "cancelled",
-//RS         "capacity",
-//RS         "class",
-//RS         "clock",
-//RS         "closed",
-//RS         "count",
-//RS         "depth",
-//RS         "domain",
-//RS         "id",
-//RS         "kind",
-//RS         "parent",
-//RS         "parent_task_id",
-//RS         "reason",
-//RS         "recv_waiters",
-//RS         "send_waiters",
-//RS         "state",
-//RS         "status",
-//RS         "target",
-//RS         "task_id",
-//RS         "wait",
-//RS     ] {
-//RS         if let Some(value) = fields.get(key) {
-//RS             args.insert(key.into(), value.clone());
-//RS         }
-//RS     }
-//RS     Some(CanonicalJson::Object(args))
-//RS }
-//RS 
-//RS fn chrome_integer(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Option<u64> {
-//RS     chrome_value_integer(fields.get(key)?)
-//RS }
-//RS 
-//RS fn chrome_value_integer(value: &CanonicalJson) -> Option<u64> {
-//RS     match value {
-//RS         CanonicalJson::Integer(value) => value.parse().ok(),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn chrome_string(value: &CanonicalJson) -> Option<&str> {
-//RS     match value {
-//RS         CanonicalJson::String(value) => Some(value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn chrome_task_tid(task_id: u64) -> u64 {
-//RS     1_000u64.saturating_add(task_id)
-//RS }
-//RS 
-//RS fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
-//RS     let mut symbols = Vec::new();
-//RS     let mut maps = Vec::new();
-//RS     let profile = content_object(trace)
-//RS         .and_then(|content| content.get("profile"))
-//RS         .cloned()
-//RS         .unwrap_or(CanonicalJson::Null);
-//RS     if let Some(content) = content_object(trace) {
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("source_identity") {
-//RS             for item in items {
-//RS                 symbols.push(item.clone());
-//RS             }
-//RS         }
-//RS         if let Some(CanonicalJson::Array(items)) = content.get("source_maps") {
-//RS             for item in items {
-//RS                 maps.push(item.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     CanonicalJson::object([
-//RS         (
-//RS             "kind".into(),
-//RS             CanonicalJson::String("jet.trace.profile-map-projection".into()),
-//RS         ),
-//RS         (
-//RS             "loss".into(),
-//RS             CanonicalJson::String(
-//RS                 "profile-map; source_identity+source_maps+typed profile evidence — no Rust/LLVM frames, no address ranges, no DWARF"
-//RS                     .into(),
-//RS             ),
-//RS         ),
-//RS         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-//RS         ("source_identity".into(), CanonicalJson::Array(symbols)),
-//RS         ("source_maps".into(), CanonicalJson::Array(maps)),
-//RS         ("profile".into(), profile),
-//RS         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-//RS         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
-//RS     ])
-//RS     .expect("profile-map projection keys are unique")
-//RS }
-//RS 
-//RS fn receipt_sections_for_command(
-//RS     command: &str,
-//RS     argv: &[String],
-//RS ) -> Result<Vec<TraceReceiptSection>, String> {
-//RS     let cwd = std::env::current_dir().map_err(|error| format!("cannot resolve cwd: {error}"))?;
-//RS     let root = jet::ReceiptStore::receipt_root_for(command, argv, &cwd);
-//RS     let store = jet::ReceiptStore::ReceiptStore::new(root);
-//RS     let inputs = jet::ReceiptStore::input_paths_for(command, argv, &cwd);
-//RS     let claim = store.claim(command, argv, &inputs)?;
-//RS     let Some(receipt) = store.lookup(&claim)? else {
-//RS         return Ok(Vec::new());
-//RS     };
-//RS     trace_receipt_sections_from_receipt(&receipt)
-//RS }
-//RS 
-//RS fn trace_receipt_sections_from_receipt(
-//RS     receipt: &jet::ReceiptStore::Receipt,
-//RS ) -> Result<Vec<TraceReceiptSection>, String> {
-//RS     receipt
-//RS         .sections
-//RS         .iter()
-//RS         .map(|section| {
-//RS             let value = section.value()?;
-//RS             Ok(TraceReceiptSection {
-//RS                 name: section.name.clone(),
-//RS                 type_name: section.type_name.clone(),
-//RS                 digest: value.sha256(),
-//RS                 value,
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn receipt_sections_for_compare(
-//RS     trace: &CanonicalJson,
-//RS ) -> Result<Vec<jet::ReceiptStore::ReceiptSection>, String> {
-//RS     let items = content_object(trace)
-//RS         .and_then(|content| content.get("receipt_sections"))
-//RS         .and_then(|value| match value {
-//RS             CanonicalJson::Array(items) => Some(items),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| "trace content.receipt_sections is missing or not an array".to_string())?;
-//RS     items
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, item)| {
-//RS             let section = TraceReceiptSection::from_json(item)
-//RS                 .map_err(|error| format!("content.receipt_sections[{index}]: {error}"))?;
-//RS             jet::ReceiptStore::ReceiptSection::from_json(
-//RS                 section.name,
-//RS                 section.type_name,
-//RS                 section.value,
-//RS             )
-//RS             .map_err(|error| format!("content.receipt_sections[{index}]: {error}"))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn compare_receipt_sections(
-//RS     base: &CanonicalJson,
-//RS     head: &CanonicalJson,
-//RS ) -> Result<Vec<String>, String> {
-//RS     let before = receipt_sections_for_compare(base)?;
-//RS     let after = receipt_sections_for_compare(head)?;
-//RS     jet::ReceiptStore::diff_sections(&before, &after)
-//RS         .map(|diffs| diffs.into_iter().map(|diff| diff.render()).collect())
-//RS }
-//RS 
-//RS fn write_session_trace(
-//RS     command: &str,
-//RS     argv: &[String],
-//RS     out: Option<&str>,
-//RS     mut capture: CaptureBundle,
-//RS     game_bodies: &[JetDevtoolsEventBody],
-//RS     capture_allowlist: &[String],
-//RS     receipt_sections: Vec<TraceReceiptSection>,
-//RS ) -> Result<PathBuf, String> {
-//RS     capture.add_game_devtools_bodies(game_bodies)?;
-//RS     let mut capture_policy = CapturePolicy::default_exclusions();
-//RS     capture_policy.allowlist = capture_allowlist.to_vec();
-//RS     capture_policy.io_rows_truncated = capture.io_rows_truncated;
-//RS     capture_policy.browser_rows_truncated = capture.browser_rows_truncated;
-//RS     capture_policy.native_rows_truncated = capture.native_rows_truncated;
-//RS     capture_policy.span_rows_truncated = capture.span_rows_truncated;
-//RS     capture_policy.task_rows_truncated = capture.task_rows_truncated;
-//RS     let skeleton = TraceSkeleton {
-//RS         command: command.into(),
-//RS         argv: argv.to_vec(),
-//RS         toolchain: current_toolchain(),
-//RS         hardware: TraceHardware::current(),
-//RS         capture_policy,
-//RS         samples: capture.samples,
-//RS         profile: capture.profile,
-//RS         allocations: capture.allocations,
-//RS         browser: capture.browser,
-//RS         game_frames: capture.game_frames,
-//RS         game_draw_events: capture.game_draw_events,
-//RS         tasks: capture.tasks,
-//RS         locks: capture.locks,
-//RS         io: capture.io,
-//RS         native: capture.native,
-//RS         spans: capture.spans,
-//RS         source_identity: capture.source_identity,
-//RS         source_maps: capture.source_maps,
-//RS         receipt_sections,
-//RS     };
-//RS     let bytes = build_skeleton_bytes(&skeleton)?;
-//RS     let path = match out {
-//RS         Some(path) => PathBuf::from(path),
-//RS         None => default_trace_path(&bytes)?,
-//RS     };
-//RS     if let Some(parent) = path.parent() {
-//RS         if !parent.as_os_str().is_empty() {
-//RS             fs::create_dir_all(parent)
-//RS                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-//RS         }
-//RS     }
-//RS     write_trace_file(&path, &bytes)?;
-//RS     let written = fs::read(&path).map_err(|e| format!("cannot re-read {}: {e}", path.display()))?;
-//RS     verify_jettrace(&written).map_err(|e| format!("wrote unverifiable jettrace: {e}"))?;
-//RS     Ok(path)
-//RS }
-//RS 
-//RS fn default_trace_path(bytes: &[u8]) -> Result<PathBuf, String> {
-//RS     let verified = verify_jettrace(bytes)?;
-//RS     let id = trace_id(&verified)?.to_string();
-//RS     let stamp = utc_stamp();
-//RS     let short = &id[..8];
-//RS     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
-//RS     let root = jet::Loader::selected_project_root(&cwd).unwrap_or(cwd);
-//RS     Ok(root
-//RS         .join(".jet")
-//RS         .join("perf")
-//RS         .join(format!("{stamp}-{short}{}", artifact_extension())))
-//RS }
-//RS 
-//RS fn write_trace_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-//RS     let tmp = path.with_extension("tmp");
-//RS     {
-//RS         let mut file = fs::OpenOptions::new()
-//RS             .write(true)
-//RS             .create(true)
-//RS             .truncate(true)
-//RS             .open(&tmp)
-//RS             .map_err(|e| format!("cannot create temp trace: {e}"))?;
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::PermissionsExt;
-//RS             let mut perms = file.metadata().map_err(|e| e.to_string())?.permissions();
-//RS             perms.set_mode(0o600);
-//RS             fs::set_permissions(&tmp, perms).map_err(|e| e.to_string())?;
-//RS         }
-//RS         file.write_all(bytes)
-//RS             .map_err(|e| format!("cannot write temp trace: {e}"))?;
-//RS         file.sync_all()
-//RS             .map_err(|e| format!("cannot durable-write temp trace: {e}"))?;
-//RS     }
-//RS     fs::rename(&tmp, path).map_err(|e| {
-//RS         let _ = fs::remove_file(&tmp);
-//RS         format!("cannot install trace {}: {e}", path.display())
-//RS     })?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn read_verified(path: &str) -> Result<CanonicalJson, String> {
-//RS     if !path.ends_with(ARTIFACT_EXT_TRACE) {
-//RS         return Err(format!("trace path must end with {ARTIFACT_EXT_TRACE}"));
-//RS     }
-//RS     let bytes = fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
-//RS     verify_jettrace(&bytes)
-//RS }
-//RS 
-//RS fn current_toolchain() -> TraceToolchain {
-//RS     TraceToolchain {
-//RS         jet_version: env!("CARGO_PKG_VERSION").into(),
-//RS         compiler_build_id: option_env!("JET_COMPILER_BUILD_ID")
-//RS             .unwrap_or(env!("CARGO_PKG_VERSION"))
-//RS             .into(),
-//RS         stdlib_id: "jet-stdlib".into(),
-//RS         runner_id: "jet-perf".into(),
-//RS     }
-//RS }
-//RS 
-//RS fn utc_stamp() -> String {
-//RS     let secs = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .map(|d| d.as_secs())
-//RS         .unwrap_or(0);
-//RS     // ponytail: epoch stamp, calendar UTC when capture clock lands.
-//RS     format!("{secs}")
-//RS }
-//RS 
-//RS fn process_exists(pid: u32) -> bool {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         Path::new(&format!("/proc/{pid}")).exists()
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = pid;
-//RS         true
-//RS     }
-//RS }
-//RS 
-//RS fn content_command(trace: &CanonicalJson) -> Option<&str> {
-//RS     let CanonicalJson::Object(fields) = trace else {
-//RS         return None;
-//RS     };
-//RS     let CanonicalJson::Object(content) = fields.get("content")? else {
-//RS         return None;
-//RS     };
-//RS     match content.get("command")? {
-//RS         CanonicalJson::String(command) => Some(command.as_str()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn toolchain_digest(trace: &CanonicalJson) -> Option<&str> {
-//RS     let CanonicalJson::Object(fields) = trace else {
-//RS         return None;
-//RS     };
-//RS     let CanonicalJson::Object(content) = fields.get("content")? else {
-//RS         return None;
-//RS     };
-//RS     let CanonicalJson::Object(toolchain) = content.get("toolchain")? else {
-//RS         return None;
-//RS     };
-//RS     match toolchain.get("digest")? {
-//RS         CanonicalJson::String(digest) => Some(digest.as_str()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn content_object(trace: &CanonicalJson) -> Option<&BTreeMap<String, CanonicalJson>> {
-//RS     let CanonicalJson::Object(fields) = trace else {
-//RS         return None;
-//RS     };
-//RS     match fields.get("content")? {
-//RS         CanonicalJson::Object(content) => Some(content),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn content_array<'a>(trace: &'a CanonicalJson, key: &str) -> Option<&'a [CanonicalJson]> {
-//RS     match content_object(trace)?.get(key)? {
-//RS         CanonicalJson::Array(items) => Some(items.as_slice()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn first_sample(trace: &CanonicalJson) -> Option<(String, String, String)> {
-//RS     let sample = content_array(trace, "samples")?.first()?;
-//RS     let CanonicalJson::Object(fields) = sample else {
-//RS         return None;
-//RS     };
-//RS     let domain = match fields.get("domain")? {
-//RS         CanonicalJson::String(domain) => domain.clone(),
-//RS         _ => return None,
-//RS     };
-//RS     let ns = match fields.get("duration_ns")? {
-//RS         CanonicalJson::Integer(ns) => ns.clone(),
-//RS         _ => return None,
-//RS     };
-//RS     let symbol = symbol_label(fields.get("symbol")?)?;
-//RS     Some((domain, ns, symbol))
-//RS }
-//RS fn profile_summary(trace: &CanonicalJson) -> Option<String> {
-//RS     let CanonicalJson::Object(profile) = content_object(trace)?.get("profile")? else {
-//RS         return None;
-//RS     };
-//RS     let string_field = |key: &str| match profile.get(key)? {
-//RS         CanonicalJson::String(value) => Some(value.as_str()),
-//RS         _ => None,
-//RS     };
-//RS     let status = string_field("status")?;
-//RS     let coverage = string_field("coverage")?;
-//RS     let method = string_field("method")?;
-//RS     let overhead = string_field("overhead_status")?;
-//RS     let rows = match profile.get("rows")? {
-//RS         CanonicalJson::Array(rows) => rows,
-//RS         _ => return None,
-//RS     };
-//RS     let mut clocks = BTreeSet::new();
-//RS     for row in rows {
-//RS         if let CanonicalJson::Object(fields) = row {
-//RS             if let Some(CanonicalJson::String(clock)) = fields.get("clock") {
-//RS                 clocks.insert(clock.as_str());
-//RS             }
-//RS         }
-//RS     }
-//RS     let clocks = if clocks.is_empty() {
-//RS         "none".to_string()
-//RS     } else {
-//RS         clocks.into_iter().collect::<Vec<_>>().join(",")
-//RS     };
-//RS     let window = string_field("window_status")?;
-//RS     let window_ns = |key: &str| match profile.get(key) {
-//RS         Some(CanonicalJson::Integer(ns)) => format!("{ns}ns"),
-//RS         _ => "unavailable".to_string(),
-//RS     };
-//RS     Some(format!(
-//RS         "profile method={method} status={status} coverage={coverage} rows={} clocks={clocks} overhead={overhead} window={window} run_wall={} run_cpu={}",
-//RS         rows.len(),
-//RS         window_ns("window_wall_ns"),
-//RS         window_ns("window_cpu_ns"),
-//RS     ))
-//RS }
-//RS 
-//RS 
-//RS fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
-//RS     let alloc = content_array(trace, "allocations")?.first()?;
-//RS     let CanonicalJson::Object(fields) = alloc else {
-//RS         return None;
-//RS     };
-//RS     let count = match fields.get("count")? {
-//RS         CanonicalJson::Integer(count) => count.clone(),
-//RS         _ => return None,
-//RS     };
-//RS     let bytes = match fields.get("bytes")? {
-//RS         CanonicalJson::Integer(bytes) => bytes.clone(),
-//RS         _ => return None,
-//RS     };
-//RS     let symbol = symbol_label(fields.get("symbol")?)?;
-//RS     Some((count, bytes, symbol))
-//RS }
-//RS 
-//RS fn browser_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
-//RS     let items = content_array(trace, "browser")?;
-//RS     let CanonicalJson::Object(first) = items.first()? else {
-//RS         return None;
-//RS     };
-//RS     Some((items.len(), symbol_label(first.get("symbol")?)?))
-//RS }
-//RS 
-//RS fn task_summary(trace: &CanonicalJson) -> Option<(usize, usize, String)> {
-//RS     let items = content_array(trace, "tasks")?;
-//RS     if items.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let mut children = 0usize;
-//RS     let mut symbol = None;
-//RS     for item in items {
-//RS         let CanonicalJson::Object(fields) = item else {
-//RS             continue;
-//RS         };
-//RS         if let Some(CanonicalJson::Integer(parent)) = fields.get("parent") {
-//RS             if parent != "0" {
-//RS                 children += 1;
-//RS             }
-//RS         }
-//RS         if symbol.is_none() {
-//RS             if let Some(value) = fields.get("symbol") {
-//RS                 symbol = symbol_label(value);
-//RS             }
-//RS         }
-//RS     }
-//RS     Some((items.len(), children, symbol.unwrap_or_else(|| "?".into())))
-//RS }
-//RS 
-//RS fn lock_summary(trace: &CanonicalJson) -> Option<(usize, u64, String)> {
-//RS     let items = content_array(trace, "locks")?;
-//RS     if items.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let mut waiters = 0u64;
-//RS     let mut symbol = None;
-//RS     for item in items {
-//RS         let CanonicalJson::Object(fields) = item else {
-//RS             continue;
-//RS         };
-//RS         if let Some(CanonicalJson::Integer(send)) = fields.get("send_waiters") {
-//RS             waiters = waiters.saturating_add(send.parse().unwrap_or(0));
-//RS         }
-//RS         if let Some(CanonicalJson::Integer(recv)) = fields.get("recv_waiters") {
-//RS             waiters = waiters.saturating_add(recv.parse().unwrap_or(0));
-//RS         }
-//RS         if symbol.is_none() {
-//RS             if let Some(value) = fields.get("symbol") {
-//RS                 symbol = symbol_label(value);
-//RS             }
-//RS         }
-//RS     }
-//RS     Some((items.len(), waiters, symbol.unwrap_or_else(|| "?".into())))
-//RS }
-//RS 
-//RS fn io_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
-//RS     let items = content_array(trace, "io")?;
-//RS     if items.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let mut symbol = None;
-//RS     for item in items {
-//RS         let CanonicalJson::Object(fields) = item else {
-//RS             continue;
-//RS         };
-//RS         if symbol.is_none() {
-//RS             if let Some(value) = fields.get("symbol") {
-//RS                 symbol = symbol_label(value);
-//RS             }
-//RS         }
-//RS     }
-//RS     Some((items.len(), symbol.unwrap_or_else(|| "?".into())))
-//RS }
-//RS 
-//RS fn native_summary(trace: &CanonicalJson) -> Option<String> {
-//RS     let item = content_array(trace, "native")?.first()?;
-//RS     let CanonicalJson::Object(fields) = item else {
-//RS         return None;
-//RS     };
-//RS     let status = match fields.get("status")? {
-//RS         CanonicalJson::String(value) => value.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     let target = match fields.get("target")? {
-//RS         CanonicalJson::String(value) => value.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     let symbol = fields
-//RS         .get("symbol")
-//RS         .and_then(symbol_label)
-//RS         .unwrap_or_else(|| "?".into());
-//RS     match status {
-//RS         "captured" => {
-//RS             let duration = match fields.get("duration_ns")? {
-//RS                 CanonicalJson::Integer(value) => value.as_str(),
-//RS                 _ => return None,
-//RS             };
-//RS             let observed = match fields.get("observed_at_ns")? {
-//RS                 CanonicalJson::Integer(value) => value.as_str(),
-//RS                 _ => return None,
-//RS             };
-//RS             let task = match fields.get("task_id")? {
-//RS                 CanonicalJson::Integer(value) => value.as_str(),
-//RS                 _ => return None,
-//RS             };
-//RS             Some(format!(
-//RS                 "native process_cpu={duration}ns observed_at={observed}ns target={target} task={task} · {symbol}"
-//RS             ))
-//RS         }
-//RS         "unavailable" => {
-//RS             let reason = match fields.get("reason")? {
-//RS                 CanonicalJson::String(value) => value.as_str(),
-//RS                 _ => return None,
-//RS             };
-//RS             Some(format!(
-//RS                 "native unavailable target={target} reason={reason} · {symbol}"
-//RS             ))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn span_summary(trace: &CanonicalJson) -> Option<String> {
-//RS     let items = content_array(trace, "spans")?;
-//RS     let CanonicalJson::Object(first) = items.first()? else {
-//RS         return None;
-//RS     };
-//RS     let status = match first.get("status")? {
-//RS         CanonicalJson::String(value) => value.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     let symbol = first
-//RS         .get("symbol")
-//RS         .and_then(symbol_label)
-//RS         .unwrap_or_else(|| "?".into());
-//RS     if status == "unavailable" {
-//RS         let reason = match first.get("reason")? {
-//RS             CanonicalJson::String(value) => value.as_str(),
-//RS             _ => return None,
-//RS         };
-//RS         return Some(format!("spans unavailable reason={reason} · {symbol}"));
-//RS     }
-//RS     if status != "captured" {
-//RS         return None;
-//RS     }
-//RS     let mut start = u64::MAX;
-//RS     let mut end = 0u64;
-//RS     let mut children = 0usize;
-//RS     for item in items {
-//RS         let CanonicalJson::Object(fields) = item else {
-//RS             return None;
-//RS         };
-//RS         let CanonicalJson::Integer(item_start) = fields.get("start_ns")? else {
-//RS             return None;
-//RS         };
-//RS         let CanonicalJson::Integer(item_end) = fields.get("end_ns")? else {
-//RS             return None;
-//RS         };
-//RS         start = start.min(item_start.parse().ok()?);
-//RS         end = end.max(item_end.parse().ok()?);
-//RS         if !matches!(fields.get("parent_task_id"), Some(CanonicalJson::Null)) {
-//RS             children += 1;
-//RS         }
-//RS     }
-//RS     Some(format!(
-//RS         "spans count={} children={children} window={start}..{end}ns · {symbol}",
-//RS         items.len()
-//RS     ))
-//RS }
-//RS 
-//RS fn symbol_label(value: &CanonicalJson) -> Option<String> {
-//RS     let CanonicalJson::Object(fields) = value else {
-//RS         return None;
-//RS     };
-//RS     let path = match fields.get("path")? {
-//RS         CanonicalJson::String(path) => path.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     let name = match fields.get("name")? {
-//RS         CanonicalJson::String(name) => name.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     Some(format!("{path}#{name}"))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn chrome_projection_trace() -> CanonicalJson {
-//RS         let symbol = CanonicalJson::object([
-//RS             ("name".into(), CanonicalJson::String("run".into())),
-//RS             (
-//RS                 "path".into(),
-//RS                 CanonicalJson::String("examples/app.jet".into()),
-//RS             ),
-//RS         ])
-//RS         .unwrap();
-//RS         let task = |id: &str| {
-//RS             CanonicalJson::object([
-//RS                 ("id".into(), CanonicalJson::Integer(id.into())),
-//RS                 ("symbol".into(), symbol.clone()),
-//RS             ])
-//RS             .unwrap()
-//RS         };
-//RS         let content = CanonicalJson::object([
-//RS             (
-//RS                 "allocations".into(),
-//RS                 CanonicalJson::Array(vec![CanonicalJson::object([
-//RS                     ("bytes".into(), CanonicalJson::Integer("64".into())),
-//RS                     ("count".into(), CanonicalJson::Integer("2".into())),
-//RS                     ("symbol".into(), symbol.clone()),
-//RS                 ])
-//RS                 .unwrap()]),
-//RS             ),
-//RS             (
-//RS                 "browser".into(),
-//RS                 CanonicalJson::Array(vec![CanonicalJson::object([
-//RS                     ("class".into(), CanonicalJson::String("dom".into())),
-//RS                     (
-//RS                         "duration_ns".into(),
-//RS                         CanonicalJson::Integer("3000000".into()),
-//RS                     ),
-//RS                     ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
-//RS                     ("symbol".into(), symbol.clone()),
-//RS                 ])
-//RS                 .unwrap()]),
-//RS             ),
-//RS             (
-//RS                 "io".into(),
-//RS                 CanonicalJson::Array(vec![CanonicalJson::object([
-//RS                     ("end_ns".into(), CanonicalJson::Integer("9000000".into())),
-//RS                     ("kind".into(), CanonicalJson::String("tcp".into())),
-//RS                     ("start_ns".into(), CanonicalJson::Integer("4000000".into())),
-//RS                     ("symbol".into(), symbol.clone()),
-//RS                     ("task_id".into(), CanonicalJson::Integer("1".into())),
-//RS                     ("wait".into(), CanonicalJson::String("tcp accept".into())),
-//RS                 ])
-//RS                 .unwrap()]),
-//RS             ),
-//RS             (
-//RS                 "locks".into(),
-//RS                 CanonicalJson::Array(vec![CanonicalJson::object([
-//RS                     ("depth".into(), CanonicalJson::Integer("1".into())),
-//RS                     ("kind".into(), CanonicalJson::String("channel".into())),
-//RS                     ("recv_waiters".into(), CanonicalJson::Integer("1".into())),
-//RS                     ("send_waiters".into(), CanonicalJson::Integer("0".into())),
-//RS                     ("symbol".into(), symbol.clone()),
-//RS                 ])
-//RS                 .unwrap()]),
-//RS             ),
-//RS             (
-//RS                 "native".into(),
-//RS                 CanonicalJson::Array(vec![CanonicalJson::object([
-//RS                     (
-//RS                         "duration_ns".into(),
-//RS                         CanonicalJson::Integer("5000000".into()),
-//RS                     ),
-//RS                     (
-//RS                         "observed_at_ns".into(),
-//RS                         CanonicalJson::Integer("1000000".into()),
-//RS                     ),
-//RS                     ("status".into(), CanonicalJson::String("captured".into())),
-//RS                     ("symbol".into(), symbol.clone()),
-//RS                     ("task_id".into(), CanonicalJson::Integer("1".into())),
-//RS                 ])
-//RS                 .unwrap()]),
-//RS             ),
-//RS             (
-//RS                 "samples".into(),
-//RS                 CanonicalJson::Array(vec![
-//RS                     CanonicalJson::object([
-//RS                         ("domain".into(), CanonicalJson::String("wall".into())),
-//RS                         (
-//RS                             "duration_ns".into(),
-//RS                             CanonicalJson::Integer("1500000".into()),
-//RS                         ),
-//RS                         ("symbol".into(), symbol.clone()),
-//RS                     ])
-//RS                     .unwrap(),
-//RS                     CanonicalJson::object([
-//RS                         ("domain".into(), CanonicalJson::String("cpu".into())),
-//RS                         (
-//RS                             "duration_ns".into(),
-//RS                             CanonicalJson::Integer("2500000".into()),
-//RS                         ),
-//RS                         ("symbol".into(), symbol.clone()),
-//RS                     ])
-//RS                     .unwrap(),
-//RS                 ]),
-//RS             ),
-//RS             (
-//RS                 "spans".into(),
-//RS                 CanonicalJson::Array(vec![
-//RS                     CanonicalJson::object([
-//RS                         ("end_ns".into(), CanonicalJson::Integer("8000000".into())),
-//RS                         ("start_ns".into(), CanonicalJson::Integer("1000000".into())),
-//RS                         ("status".into(), CanonicalJson::String("captured".into())),
-//RS                         ("symbol".into(), symbol.clone()),
-//RS                         ("task_id".into(), CanonicalJson::Integer("1".into())),
-//RS                     ])
-//RS                     .unwrap(),
-//RS                     CanonicalJson::object([
-//RS                         ("end_ns".into(), CanonicalJson::Integer("7000000".into())),
-//RS                         ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
-//RS                         ("status".into(), CanonicalJson::String("captured".into())),
-//RS                         ("symbol".into(), symbol.clone()),
-//RS                         ("task_id".into(), CanonicalJson::Integer("2".into())),
-//RS                     ])
-//RS                     .unwrap(),
-//RS                 ]),
-//RS             ),
-//RS             (
-//RS                 "tasks".into(),
-//RS                 CanonicalJson::Array(vec![task("1"), task("2")]),
-//RS             ),
-//RS         ])
-//RS         .unwrap();
-//RS         CanonicalJson::object([
-//RS             ("content".into(), content),
-//RS             (
-//RS                 "trace_id".into(),
-//RS                 CanonicalJson::String("trace-test".into()),
-//RS             ),
-//RS         ])
-//RS         .unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn chrome_projection_emits_all_domains_in_trace_event_units() {
-//RS         let projection = export_chrome_projection(&chrome_projection_trace());
-//RS         let CanonicalJson::Object(fields) = &projection else {
-//RS             panic!("projection is not an object")
-//RS         };
-//RS         let CanonicalJson::Array(events) = fields.get("traceEvents").unwrap() else {
-//RS             panic!("traceEvents is not an array")
-//RS         };
-//RS         let mut complete = 0;
-//RS         let mut metadata_names = std::collections::BTreeSet::new();
-//RS         let mut task_tids = std::collections::BTreeSet::new();
-//RS         for event in events {
-//RS             let CanonicalJson::Object(fields) = event else {
-//RS                 panic!("trace event is not an object")
-//RS             };
-//RS             let CanonicalJson::String(phase) = fields.get("ph").unwrap() else {
-//RS                 panic!("trace event has no phase")
-//RS             };
-//RS             assert!(phase == "X" || phase == "M", "unexpected phase {phase}");
-//RS             if phase == "X" {
-//RS                 complete += 1;
-//RS                 assert!(fields.contains_key("args"), "complete event has no args");
-//RS                 assert!(fields.contains_key("dur"), "complete event has no duration");
-//RS                 assert!(fields.contains_key("ts"), "complete event has no timestamp");
-//RS                 assert!(fields.contains_key("tid"), "complete event has no lane");
-//RS             } else if let Some(CanonicalJson::String(name)) = fields.get("name") {
-//RS                 metadata_names.insert(name.clone());
-//RS                 if name == "thread_name" {
-//RS                     if let Some(CanonicalJson::Integer(tid)) = fields.get("tid") {
-//RS                         if tid == "1001" || tid == "1002" {
-//RS                             task_tids.insert(tid.clone());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         assert_eq!(complete, 9, "every captured domain row needs an X event");
-//RS         assert!(metadata_names.contains("process_name"));
-//RS         assert!(metadata_names.contains("thread_name"));
-//RS         assert_eq!(
-//RS             task_tids.into_iter().collect::<Vec<_>>(),
-//RS             vec!["1001".to_string(), "1002".to_string()]
-//RS         );
-//RS         assert!(events.iter().any(|event| {
-//RS             let CanonicalJson::Object(fields) = event else {
-//RS                 return false;
-//RS             };
-//RS             fields.get("name") == Some(&CanonicalJson::String("examples/app.jet#run".into()))
-//RS                 && fields.get("dur") == Some(&CanonicalJson::Integer("1500".into()))
-//RS                 && fields.get("ph") == Some(&CanonicalJson::String("X".into()))
-//RS                 && fields.get("args").is_some()
-//RS         }));
-//RS         let CanonicalJson::String(loss) = fields.get("loss").unwrap() else {
-//RS             panic!("loss is not a string")
-//RS         };
-//RS         assert!(loss.contains("unavailable states"), "{loss}");
-//RS         assert!(!loss.contains("no pprof/otel/chrome payloads"), "{loss}");
-//RS         assert_eq!(
-//RS             CanonicalJson::parse_canonical(&projection.bytes()).unwrap(),
-//RS             projection
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn task_ingestion_is_capped_and_audits_possible_io_loss() {
-//RS         let tasks = (1..=TRACE_TASK_ROW_LIMIT + 1)
-//RS             .map(|id| {
-//RS                 format!(
-//RS                     "{{\"id\":{id},\"parent\":0,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}}"
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let snapshot = format!("{{\"tasks\":[{tasks}]}}");
-//RS         let observed = observe_tasks(&snapshot, 10);
-//RS         assert_eq!(observed.rows.len(), TRACE_TASK_ROW_LIMIT as usize);
-//RS         assert!(observed.truncated);
-//RS 
-//RS         let mut timeline = IOTimeline::default();
-//RS         timeline.observe(&observed, 10, false);
-//RS         timeline.finish(20);
-//RS         assert_eq!(timeline.tasks.len(), TRACE_TASK_ROW_LIMIT as usize);
-//RS         assert_eq!(timeline.completed.len(), TRACE_IO_ROW_LIMIT as usize);
-//RS         assert_eq!(timeline.task_spans.len(), TRACE_SPAN_ROW_LIMIT as usize);
-//RS         assert!(timeline.task_rows_truncated);
-//RS         assert!(timeline.io_rows_truncated);
-//RS         assert!(timeline.span_rows_truncated);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn sequential_processes_with_reused_runtime_task_ids_remain_distinct() {
-//RS         let snapshot = "{\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}]}";
-//RS         let first = observe_tasks(snapshot, 100);
-//RS         let second = observe_tasks(snapshot, 200);
-//RS         let mut timeline = IOTimeline::default();
-//RS         timeline.observe(&first, 10, true);
-//RS         timeline.observe(&second, 20, false);
-//RS         timeline.finish(30);
-//RS 
-//RS         let tasks = timeline.tasks();
-//RS         let ids = trace_task_id_map(&tasks);
-//RS         assert_eq!(tasks.len(), 4);
-//RS         assert_eq!(timeline.spans().len(), 4);
-//RS         assert_eq!(timeline.completed.len(), 2);
-//RS         assert_eq!(timeline.completed[0].end_ns, 10);
-//RS         assert_eq!(timeline.completed[1].end_ns, 20);
-//RS         assert_ne!(ids[&(100, 1)], ids[&(200, 1)]);
-//RS         assert_ne!(ids[&(100, 2)], ids[&(200, 2)]);
-//RS         assert_eq!(ids[&(100, 1)], 1);
-//RS         assert_eq!(ids[&(100, 2)], 2);
-//RS         assert_eq!(ids[&(200, 1)], 3);
-//RS         assert_eq!(ids[&(200, 2)], 4);
-//RS         for process_id in [100, 200] {
-//RS             let child = tasks
-//RS                 .iter()
-//RS                 .find(|task| task.key() == (process_id, 2))
-//RS                 .unwrap();
-//RS             assert_eq!(ids[&(process_id, child.parent)], ids[&(process_id, 1)]);
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn native_process_cpu_support_matrix_is_explicit() {
-//RS         assert!(native_process_cpu_supported("linux"));
-//RS         assert!(native_process_cpu_supported("android"));
-//RS         assert!(!native_process_cpu_supported("macos"));
-//RS         assert!(!native_process_cpu_supported("windows"));
-//RS         assert!(!native_process_cpu_supported("wasi"));
-//RS         assert_eq!(
-//RS             native_unavailable_reason_for("windows", "x86_64-pc-windows-msvc"),
-//RS             "process CPU timing is unavailable on target x86_64-pc-windows-msvc"
-//RS         );
-//RS         assert_eq!(
-//RS             native_unavailable_reason_for("linux", "x86_64-unknown-linux-gnu"),
-//RS             "process CPU timing was not observable"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn proc_tick_conversion_uses_the_injected_rate_without_overflow() {
-//RS         let mut auxv = Vec::new();
-//RS         auxv.extend_from_slice(&17usize.to_ne_bytes());
-//RS         auxv.extend_from_slice(&250usize.to_ne_bytes());
-//RS         auxv.extend_from_slice(&0usize.to_ne_bytes());
-//RS         auxv.extend_from_slice(&0usize.to_ne_bytes());
-//RS         assert_eq!(clock_ticks_per_second_from_auxv(&auxv), Some(250));
-//RS         assert_eq!(uptime_ticks("2.50 1.00\n", 100), Some(250));
-//RS         assert_eq!(uptime_ticks("2.50 1.00\n", 250), Some(625));
-//RS         assert_eq!(ticks_to_ns(1, 100), Some(10_000_000));
-//RS         assert_eq!(ticks_to_ns(1, 250), Some(4_000_000));
-//RS         assert_eq!(ticks_to_ns(1, 1_000), Some(1_000_000));
-//RS         assert_eq!(ticks_to_ns(1, 0), None);
-//RS         assert_eq!(ticks_to_ns(u64::MAX, 1), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn source_profile_attributes_the_parsed_entrypoint_not_a_comment() {
-//RS         let src = "// `fn run` in a comment\nfn helper() {}\nfn run() {\n    helper()\n}\n";
-//RS         let sha = "a".repeat(64);
-//RS         let functions = source_functions(src).unwrap();
-//RS         let names: Vec<_> = functions.iter().map(|function| function.name.as_str()).collect();
-//RS         assert_eq!(names, ["helper", "run"]);
-//RS         let profile = sampled_source_profile("app.jet", &sha, src, Some(&functions), 2, 1, false);
-//RS         assert_eq!(profile.status, "captured");
-//RS         let ranges: Vec<_> = profile
-//RS             .rows
-//RS             .iter()
-//RS             .map(|row| {
-//RS                 let source = &row.source;
-//RS                 (row.clock.as_str(), source.start_line, source.start_column, source.end_line, source.end_column)
-//RS             })
-//RS             .collect();
-//RS         assert_eq!(ranges, [("wall", 3, 1, 5, 2), ("cpu", 3, 1, 5, 2)]);
-//RS         let unparsed = "fn run( {";
-//RS         assert!(source_functions(unparsed).is_none());
-//RS         let unparsed = sampled_source_profile("app.jet", &sha, unparsed, None, 2, 1, false);
-//RS         assert_eq!(unparsed.status, "unsupported");
-//RS         assert!(unparsed.rows.is_empty());
-//RS     }
-//RS }
-// END-PORT-PENDING 0702 Source/CmdPerf.rs:1805-4075
+// Private continuation of Cli.Evidence.Perf (Source/CmdPerf.rs).
+use core.files as fs
+use core.files.path.[OSPath]
+use core.sys as env
+use core.sys.target.[selected_os, selected_pointer_width, selected_endianness]
+use std.process.[Child]
+use jet.[DevServer, ExitCodes, CLI, SHA256, Manifest, BuildProfile]
+use jet_foundation.[CanonicalJson, StatusValue, StatusFields, StatusEnvelope]
 
+// Rust: Source/CmdPerf.rs:1805
+fn split_json_objects(inner: String, limit: Int) -> (objects: [String], truncated: Bool) {
+    out := [String]{}
+    bytes :: inner.as_bytes()
+    i := 0
+    loop i < bytes.len() {
+        loop i < bytes.len() && (bytes[i] == 44 || bytes[i].is_ascii_whitespace()) -> i += 1
+        if i >= bytes.len() -> break
+        if out.len() == limit -> return (objects: ^out, truncated: true)
+        if bytes[i] != 123 -> break
+        start :: i
+        depth := 0
+        loop i < bytes.len() {
+            if bytes[i] == {
+                123 -> depth += 1
+                125 -> {
+                    depth -= 1
+                    if depth == 0 {
+                        &out.push(inner.get(start..<i + 1) ?? panic("JSON UTF-8 byte boundary")) // #4303
+                        i += 1
+                        break
+                    }
+                }
+                34 -> {
+                    i += 1
+                    loop i < bytes.len() {
+                        if bytes[i] == 92 { i += 2; next }
+                        if bytes[i] == 34 -> break
+                        i += 1
+                    }
+                }
+                else -> {}
+            }
+            i += 1
+        }
+    }
+    (objects: ^out, truncated: false)
+}
+// Rust: Source/CmdPerf.rs:1856
+fn json_string(object: String, key: String) -> String? {
+    tail :: object.split_once("\"{key}\":\"")?.1
+    out := String.new()
+    chars := tail.chars()
+    loop chars.next() == .Val(ch) {
+        if ch == {
+            '\\' -> {
+                escaped :: chars.next() ?? return None
+                mapped :: if escaped == { '"' -> '"'; '\\' -> '\\'; 'n' -> '\n'; 'r' -> '\r'; 't' -> '\t'; else -> escaped }
+                &out.push(mapped)
+            }
+            '"' -> { return Val(^out) }
+            else -> &out.push(ch)
+        }
+    }
+    None
+}
+
+// Rust: Source/CmdPerf.rs:1878
+struct PolledSnapshot { process_id: U32, process_cpu_ns: U64?, tasks: ObservedTasks, text: String }
+// Rust: Source/CmdPerf.rs:1885
+fn poll_observe_snapshot(root_pid: U32) -> PolledSnapshot? {
+    stack := [U32]{root_pid}
+    seen := [U32:Bool]{}
+    best := PolledSnapshot?{None}
+    best_score := U64{0}
+    loop stack.pop() == .Val(pid) {
+        if seen.has_key(pid) -> next
+        seen[pid] = true
+        if DevServer.LiveInspect.read(pid) == .Ok(snapshot) {
+            resources :: observe_arena_resources(snapshot)
+            tasks :: observe_tasks(snapshot, pid)
+            locks :: observe_locks(snapshot)
+            io :: observe_io(tasks.rows)
+            child_tasks := U64{0}
+            loop task in tasks.rows { if task.parent > 0 -> child_tasks += 1 }
+            contended :: U64{locks.len()}
+            io_n :: U64{io.len()}
+            score :: U64{if resources.0 > 0 || resources.1 > 0 -> 100 else -> 0} + child_tasks.saturating_mul(10) + contended.saturating_mul(20) + io_n.saturating_mul(20) + U64{tasks.rows.len()}
+            if score > best_score {
+                best_score = score
+                best = Val(PolledSnapshot{process_id: pid, process_cpu_ns: process_times(pid).map((times) -> times.1), tasks: ^tasks, text: ~snapshot})
+            }
+            if (resources.0 > 0 || resources.1 > 0) && child_tasks > 0 && contended > 0 && io_n > 0 -> return ^best
+        }
+        &stack.extend(process_children(pid))
+    }
+    best
+}
+// Rust: Source/CmdPerf.rs:1929
+fn child_exited(child: &Child) -> Bool IOError! {
+    // GATE #4494 / #4483: non-reaping Linux/Android zombie observation.
+    if selected_os() == "linux" || selected_os() == "android" {
+        if fs.read_to_string("/proc/{child.id()}/stat") == .Ok(stat) -> return Ok(stat.rsplit_once(") ").map((pair) -> pair.1.starts_with('Z') || pair.1.starts_with('X')) ?? false)
+    }
+    status :: &child.try_wait()
+    Ok(status != None)
+}
+// Rust: Source/CmdPerf.rs:1939
+fn process_children(pid: U32) -> [U32] {
+    if selected_os() != "linux" && selected_os() != "android" -> return []
+    kids := [U32:Bool]{}
+    children_readable := false
+    if fs.read_dir("/proc/{pid}/task") == .Ok(entries) {
+        loop entry in entries.flatten() {
+            if fs.read_to_string(entry.path().join("children")) == .Ok(text) {
+                children_readable = true
+                loop value in text.split_whitespace() {
+                    if U32.parse(value) == .Ok(child) -> kids[child] = true
+                }
+            }
+        }
+    }
+    if !children_readable {
+        entries :: fs.read_dir("/proc") ?? return []
+        loop entry in entries.flatten() {
+            child :: entry.file_name().to_str().and_then((s) -> U32.parse(s).ok()) ?? { next }
+            stat :: fs.read_to_string("/proc/{child}/stat") ?? { next }
+            fields :: stat.rsplit_once(") ").map((pair) -> pair.1) ?? { next }
+            parts := fields.split_whitespace()
+            _ :: parts.next()
+            ppid :: parts.next().and_then((value) -> U32.parse(value).ok()) ?? { next }
+            if ppid == pid -> kids[child] = true
+        }
+    }
+    result := kids.keys().to_list()
+    &result.sort()
+    result
+}
+// Rust: Source/CmdPerf.rs:1993
+fn json_u64(object: String, key: String) -> U64? {
+    tail :: object.split_once("\"{key}\":")?.1
+    digits :: String.from_iter(tail.chars().take_while((ch) -> ch.is_ascii_digit()))
+    U64.parse(digits).ok()
+}
+// Rust: Source/CmdPerf.rs:1999
+fn process_times(pid: U32) -> (U64, U64)? {
+    if selected_os() != "linux" && selected_os() != "android" -> return None
+    rate :: proc_clock_ticks_per_second() ?? return None
+    uptime :: fs.read_to_string("/proc/uptime").ok() ?? return None
+    now_ticks :: uptime_ticks(uptime, rate) ?? return None
+    stat :: fs.read_to_string("/proc/{pid}/stat").ok() ?? return None
+    fields :: stat.rsplit_once(") ")?.1.split_whitespace().to_list()
+    utime :: U64.parse(fields.get(11)?).ok() ?? return None
+    stime :: U64.parse(fields.get(12)?).ok() ?? return None
+    starttime :: U64.parse(fields.get(19)?).ok() ?? return None
+    wall :: ticks_to_ns(now_ticks.checked_sub(starttime) ?? return None, rate) ?? return None
+    cpu :: ticks_to_ns(utime.checked_add(stime) ?? return None, rate) ?? return None
+    Val((wall, cpu))
+}
+// Rust: Source/CmdPerf.rs:2022
+fn proc_clock_ticks_per_second() -> U64? {
+    auxv :: fs.read("/proc/self/auxv").ok() ?? return None
+    clock_ticks_per_second_from_auxv(auxv)
+}
+// Rust: Source/CmdPerf.rs:2027
+fn clock_ticks_per_second_from_auxv(auxv: [U8]) -> U64? {
+    // Rust: Source/CmdPerf.rs:2028
+    const AT_CLKTCK: U64 = 17
+    width :: selected_pointer_width() /% 8 // GATE #4483
+    loop pair in auxv.chunks_exact(width * 2) {
+        tag :: native_word(pair[0..<width]) ?? return None
+        if tag == 0 -> break
+        if tag == AT_CLKTCK {
+            ticks :: native_word(pair[width..<width * 2]) ?? return None
+            return if ticks == 0 -> None else -> Val(ticks)
+        }
+    }
+    None
+}
+// Rust: Source/CmdPerf.rs:2045
+fn native_word(bytes: [U8]) -> U64? {
+    width :: selected_pointer_width() /% 8 // GATE #4483
+    if bytes.len() != width -> return None
+    // Rust usize::from_ne_bytes, checked into u64; target endian, never host endian.
+    word := U128{0}
+    little :: selected_endianness() == "little"
+    loop index in 0..<width {
+        at :: if little -> width - index - 1 else -> index
+        word = word.checked_mul(256)?.checked_add(U128{bytes[at]}) ?? return None
+    }
+    U64.try_from(word).ok()
+}
+// Rust: Source/CmdPerf.rs:2050
+fn uptime_ticks(uptime: String, rate: U64) -> U64? {
+    if rate == 0 -> return None
+    value :: uptime.split_whitespace().next() ?? return None
+    pair :: value.split_once(".") ?? (value, "")
+    seconds :: U128.parse(pair.0).ok() ?? return None
+    ticks := seconds.checked_mul(U128{rate}) ?? return None
+    if !pair.1.is_empty() {
+        scale :: U128{10}.checked_pow(U32{pair.1.bytes().len()}) ?? return None
+        fraction :: U128.parse(pair.1).ok() ?? return None
+        ticks = ticks.checked_add(fraction.checked_mul(U128{rate})?.checked_div(scale) ?? return None) ?? return None
+    }
+    U64.try_from(ticks).ok()
+}
+// Rust: Source/CmdPerf.rs:2070
+fn ticks_to_ns(ticks: U64, rate: U64) -> U64? {
+    if rate == 0 -> return None
+    nanos :: U128{ticks}.checked_mul(1_000_000_000)?.checked_div(U128{rate}) ?? return None
+    U64.try_from(nanos).ok()
+}
+
+// Rust: Source/CmdPerf.rs:2080
+fn view(args: [String]) -> I32 {
+    path := String?{None}
+    mode := ViewMode.Text
+    frames := FramesMode.Jet
+    i := 0
+    loop i < args.len() {
+        arg :: args[i]
+        if arg == CLI.MACHINE_OUTPUT_FLAG { mode = ViewMode.JSON; i += 1; next }
+        if arg == "--html" { mode = ViewMode.HTML; i += 1; next }
+        if arg.strip_prefix("--frames=") == .Val(value) {
+            if value == "jet" -> frames = FramesMode.Jet
+            else { if value == "all" -> frames = FramesMode.All else { perf_error("`--frames` accepts only `jet` or `all`"); return ExitCodes.USAGE } }
+            i += 1
+            next
+        }
+        if arg == "--frames" {
+            value :: args.get(i + 1) ?? { perf_error("`--frames` needs `jet` or `all`"); return ExitCodes.USAGE }
+            if value == "jet" -> frames = FramesMode.Jet
+            else { if value == "all" -> frames = FramesMode.All else { perf_error("`--frames` accepts only `jet` or `all`"); return ExitCodes.USAGE } }
+            i += 2
+            next
+        }
+        if arg.starts_with("-") {
+            perf_error_with_fix("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{ARTIFACT_EXT_TRACE}> [--json|--html] [--frames=jet|all]`")
+            return ExitCodes.USAGE
+        }
+        if path != None { perf_error("`jet perf view` takes one trace path"); return ExitCodes.USAGE }
+        path = Val(~arg)
+        i += 1
+    }
+    selected :: path ?? { perf_error("`jet perf view` needs a {ARTIFACT_EXT_TRACE} path"); return ExitCodes.USAGE }
+    trace :: read_verified(selected) ?? { perf_error(err); return ExitCodes.USAGE }
+    if mode == {
+        .Text -> render_view_text(trace, frames, use_color())
+        .JSON -> print_raw(render_perf_json("perf.view", view_json(trace, frames)))
+        .HTML -> print_raw(view_html(trace, frames))
+    }
+    ExitCodes.OK
+}
+// Rust: Source/CmdPerf.rs:2169
+enum ViewMode { Text JSON HTML }
+// Rust: Source/CmdPerf.rs:2176
+enum FramesMode { Jet All }
+// Rust: Source/CmdPerf.rs:2181
+fn use_color() -> Bool {
+    if env.var_os("NO_COLOR") != None -> return false
+    if env.var_os("JET_FORCE_COLOR") != None -> return true
+    std.io.IsTerminal.is_terminal(std.io.stdout()) // GATE #4494
+}
+// Rust: Source/CmdPerf.rs:2191
+fn render_view_text(trace: CanonicalJson, frames: FramesMode, color: Bool) -> {
+    id :: trace_id(trace) ?? "unknown"
+    command :: content_command(trace) ?? "unknown"
+    bold :: if color -> "\u{1b}[1m" else -> ""
+    reset :: if color -> "\u{1b}[0m" else -> ""
+    print("{bold}schema{reset} {TRACE_SCHEMA} v{TRACE_VERSION}")
+    print("{bold}trace{reset} {id}")
+    print("{bold}command{reset} {command}")
+    label :: if frames == FramesMode.Jet -> "jet" else -> "all"
+    print("{bold}frames{reset} {label}")
+    if first_sample(trace) == .Val((domain, ns, symbol)) -> print("sample {domain} {ns}ns · {symbol}")
+    if profile_summary(trace) == .Val(summary) -> print(summary)
+    if first_allocation(trace) == .Val((count, bytes, symbol)) -> print("alloc count={count} bytes={bytes} · {symbol}")
+    if browser_summary(trace) == .Val((n, symbol)) -> print("browser count={n} · {symbol}")
+    if task_summary(trace) == .Val((n, child_n, symbol)) -> print("tasks count={n} children={child_n} · {symbol}")
+    if lock_summary(trace) == .Val((n, waiters, symbol)) -> print("locks count={n} waiters={waiters} · {symbol}")
+    if io_summary(trace) == .Val((n, symbol)) -> print("io count={n} · {symbol}")
+    if native_summary(trace) == .Val(summary) -> print(summary)
+    if span_summary(trace) == .Val(summary) -> print(summary)
+    if frames_show_generated(frames) -> print("generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)")
+    flame :: ascii_flame(trace)
+    if !flame.is_empty() { print("{bold}flamegraph{reset}"); loop line in flame -> print(line) }
+    timeline :: ascii_timeline(trace)
+    if !timeline.is_empty() { print("{bold}timeline{reset}"); loop line in timeline -> print(line) }
+}
+// Rust: Source/CmdPerf.rs:2252
+fn frames_show_generated(frames: FramesMode) -> Bool { frames == FramesMode.All }
+// Rust: Source/CmdPerf.rs:2256
+fn ascii_flame(trace: CanonicalJson) -> [String] {
+    rows := [String]{}
+    if first_sample(trace) == .Val((domain, ns, symbol)) {
+        width :: Int{(U64.parse(ns) ?? 1).min(40)}.max(1)
+        &rows.push("{symbol} {domain} {\"#\".repeat(width)}")
+    }
+    if content_object(trace).and_then((content) -> content.get("profile")) == .Val(.Object(profile)) {
+        if profile.get("rows") == .Val(.Array(values)) {
+            loop row in values.iter().take(8) {
+                fields :: if row == .Object(fields) -> fields else -> { next }
+                symbol :: fields.get("symbol").and_then(symbol_label) ?? { next }
+                clock :: if fields.get("clock") == .Val(.String(value)) -> value else -> { next }
+                weight :: if fields.get("sample_weight") == .Val(.Integer(value)) -> value else -> { next }
+                &rows.push("{symbol} profile:{clock} samples={weight}")
+            }
+        }
+    }
+    if browser_summary(trace) == .Val((n, symbol)) -> &rows.push("{symbol} browser {\"#\".repeat(n.min(40).max(1))}")
+    rows
+}
+// Rust: Source/CmdPerf.rs:2292
+fn ascii_timeline(trace: CanonicalJson) -> [String] {
+    rows := [String]{}
+    if content_array(trace, "browser") == .Val(items) {
+        loop item in items.iter().take(8) {
+            fields :: if item == .Object(fields) -> fields else -> { next }
+            start :: if fields.get("start_ns") == .Val(.Integer(value)) -> value else -> { next }
+            duration :: if fields.get("duration_ns") == .Val(.Integer(value)) -> value else -> { next }
+            name :: fields.get("symbol").and_then(symbol_label) ?? "browser"
+            &rows.push("[{start}+{duration}] {name}")
+        }
+    }
+    if content_array(trace, "spans") == .Val(items) {
+        loop item in items.iter().take(8) {
+            fields :: if item == .Object(fields) -> fields else -> { next }
+            if fields.get("status") != Val(CanonicalJson.String("captured")) -> next
+            start :: if fields.get("start_ns") == .Val(.Integer(value)) -> value else -> { next }
+            end :: if fields.get("end_ns") == .Val(.Integer(value)) -> value else -> { next }
+            name :: fields.get("symbol").and_then(symbol_label) ?? "span"
+            &rows.push("[{start}..{end}] {name}")
+        }
+    }
+    rows
+}
+// Rust: Source/CmdPerf.rs:2340
+fn view_json(trace: CanonicalJson, frames: FramesMode) -> CanonicalJson {
+    flame := [CanonicalJson]{}
+    loop row in ascii_flame(trace) -> &flame.push(CanonicalJson.String(^row))
+    timeline := [CanonicalJson]{}
+    loop row in ascii_timeline(trace) -> &timeline.push(CanonicalJson.String(^row))
+    CanonicalJson.object([("flamegraph", CanonicalJson.Array(^flame)), ("frames", CanonicalJson.String(if frames == FramesMode.Jet -> "jet" else -> "all")), ("kind", CanonicalJson.String("jet.trace.view")), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("timeline", CanonicalJson.Array(^timeline)), ("trace", ~trace), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("view json keys are unique")
+}
+// Rust: Source/CmdPerf.rs:2384
+fn render_perf_json(action: String, value: ^CanonicalJson) -> String { StatusEnvelope.new(action, true).with_field("perf", status_value(value)).json() }
+// Rust: Source/CmdPerf.rs:2390
+fn status_value(value: CanonicalJson) -> StatusValue {
+    if value == {
+        .Null -> StatusValue.Null
+        .Bool(flag) -> StatusValue.Bool(flag)
+        .Integer(text) -> StatusValue.Integer(text.parse() ?? panic("canonical perf integer must fit status integer"))
+        .String(text) -> StatusValue.String(~text)
+        .Array(values) -> {
+            rows := [StatusValue]{}
+            loop value in values -> &rows.push(status_value(value))
+            StatusValue.array(^rows)
+        }
+        .Object(values) -> {
+            fields := StatusFields.new()
+            loop (name, value) in values -> fields = fields.with(name, status_value(value))
+            StatusValue.object(^fields)
+        }
+    }
+}
+// Rust: Source/CmdPerf.rs:2411
+fn view_html(trace: CanonicalJson, frames: FramesMode) -> String {
+    id :: trace_id(trace) ?? "unknown"
+    flame_rows := [String]{}
+    loop line in ascii_flame(trace) -> &flame_rows.push("<li>{html_escape(line)}</li>")
+    flame :: flame_rows.join("")
+    timeline_rows := [String]{}
+    loop line in ascii_timeline(trace) -> &timeline_rows.push("<li>{html_escape(line)}</li>")
+    timeline :: timeline_rows.join("")
+    frames_label :: if frames == FramesMode.Jet -> "jet" else -> "all"
+    """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>jettrace {id}</title>
+<style>
+body{{font:14px/1.4 ui-monospace,monospace;margin:1.5rem;background:#111;color:#eee}}
+h1,h2{{font-weight:600}}
+.bar{{display:inline-block;height:10px;background:#6cf;margin-left:.5rem}}
+section{{margin:1rem 0}}
+</style></head><body>
+<h1>jettrace {id}</h1>
+<p>schema {TRACE_SCHEMA} v{TRACE_VERSION} · frames={frames_label}</p>
+<section><h2>flamegraph</h2><ul id="flame">{flame}</ul></section>
+<section><h2>timeline</h2><ul id="timeline">{timeline}</ul></section>
+<script>
+const flame=document.getElementById('flame');
+for (const li of flame.querySelectorAll('li')) {{
+  const m=li.textContent.match(/#+/);
+  if(!m) continue;
+  const bar=document.createElement('span');
+  bar.className='bar';
+  bar.style.width=(m[0].length*4)+'px';
+  li.appendChild(bar);
+}}
+</script>
+</body></html>
+"""
+}
+// Rust: Source/CmdPerf.rs:2456
+fn html_escape(text: String) -> String { text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;") }
+
+// Rust: Source/CmdPerf.rs:2463
+fn compare(args: [String]) -> I32 {
+    paths := [String]{}
+    override_identity := false
+    baseline_name := String?{None}
+    i := 0
+    loop i < args.len() {
+        arg :: args[i]
+        if arg == "--override-identity" { override_identity = true; i += 1; next }
+        if arg.strip_prefix("--baseline=") == .Val(value) { baseline_name = Val(~value); i += 1; next }
+        if arg == "--baseline" {
+            value :: args.get(i + 1) ?? { perf_error("`--baseline` needs a pinned baseline name"); return ExitCodes.USAGE }
+            baseline_name = Val(~value)
+            i += 2
+            next
+        }
+        if arg.starts_with("-") {
+            perf_error_with_fix("unknown `jet perf compare` flag `{arg}`", "run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]")
+            return ExitCodes.USAGE
+        }
+        &paths.push(~arg)
+        i += 1
+    }
+    if paths.len() != 2 {
+        perf_error_with_fix("`jet perf compare` needs two {ARTIFACT_EXT_TRACE} paths", "run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]")
+        return ExitCodes.USAGE
+    }
+    base :: read_verified(paths[0]) ?? { perf_error("base trace: {err}"); return ExitCodes.USAGE }
+    head :: read_verified(paths[1]) ?? { perf_error("head trace: {err}"); return ExitCodes.USAGE }
+    base_tool :: toolchain_digest(base)
+    head_tool :: toolchain_digest(head)
+    identity_mismatch :: base_tool != head_tool || hardware_fingerprint(base) != hardware_fingerprint(head)
+    if identity_mismatch && !override_identity {
+        if base_tool != head_tool -> emit_cli_report("E2102", "toolchain identity mismatch between traces", "compare requires matching toolchain digests (D-PERFSESSION1)", "recapture both traces on the same machine/toolchain, or pass `--override-identity`", false)
+        else -> emit_cli_report("E2102", "hardware identity mismatch between traces", "compare requires matching hardware fingerprints (D-PERFSESSION1)", "recapture both traces on the same machine/toolchain, or pass `--override-identity`", false)
+        return ExitCodes.USER_ERROR
+    }
+    if baseline_name == .Val(name) {
+        require_pinned_baseline(name) ?? {
+            emit_cli_report("E2102", err, "`--baseline` selects a D-PERFBUDGET-BASELINE1 pinned name", "create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`", false)
+            return ExitCodes.USER_ERROR
+        }
+    }
+    deltas :: compare_domain_deltas(base, head)
+    receipt_deltas :: compare_receipt_sections(base, head) ?? { perf_error("receipt sections: {err}"); return ExitCodes.USAGE }
+    budget_line :: budget_compare_line(base, head, baseline_name)
+    override_note :: if identity_mismatch && override_identity -> " · identity override" else -> ""
+    baseline_note :: if baseline_name == .Val(name) -> " · baseline {name}" else -> ""
+    print("compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? \"unknown\"} · head {trace_id(head) ?? \"unknown\"}{override_note}{baseline_note}")
+    if !deltas.is_empty() -> print("deltas: {deltas.join(\" · \")}")
+    if !receipt_deltas.is_empty() -> print("receipt deltas: {receipt_deltas.join(\" · \")}")
+    print(budget_line)
+    ExitCodes.OK
+}
+// Rust: Source/CmdPerf.rs:2590
+fn require_pinned_baseline(name: String) -[FS.Read, Env]> Err! {
+    invalid := name.is_empty() || name.contains(".") || name.contains("\\") || name.starts_with("/")
+    loop part in name.split("/") { if part.is_empty() || part == "." || part == ".." -> invalid = true }
+    loop byte in name.bytes() { if !byte.is_ascii_lowercase() && !byte.is_ascii_digit() && byte != 45 && byte != 47 -> invalid = true }
+    if invalid -> return Err("baseline name `{name}` is not a pinned BaselineName")
+    cwd :: env.current_dir() ?? return Err("cannot resolve cwd: {err}") // GATE #4494
+    root :: jet.Loader.selected_project_root(cwd) ?? cwd
+    path :: root.join(".jet").join("perf").join("baselines").join("names").join("{name}.json")
+    if !path.is_file() -> return Err("pinned baseline `{name}` is missing at {path.display()}")
+    return
+}
+// Rust: Source/CmdPerf.rs:2623
+fn hardware_fingerprint(trace: CanonicalJson) -> String? {
+    hardware :: content_object(trace)?.get("hardware") ?? return None
+    if hardware == .Object(fields) {
+        if fields.get("fingerprint") == .Val(.String(text)) -> return Val(~text)
+    }
+    None
+}
+// Rust: Source/CmdPerf.rs:2635
+fn compare_domain_deltas(base: CanonicalJson, head: CanonicalJson) -> [String] {
+    out := [String]{}
+    loop domain in [String]{"wall", "cpu"} {
+        if sample_duration(base, domain) == .Val(b) {
+            if sample_duration(head, domain) == .Val(h) -> &out.push("{domain} {b}->{h} ns")
+        }
+    }
+    if allocation_bytes(base) == .Val(b) {
+        if allocation_bytes(head) == .Val(h) -> &out.push("alloc {b}->{h} B")
+    }
+    out
+}
+// Rust: Source/CmdPerf.rs:2649
+fn sample_duration(trace: CanonicalJson, domain: String) -> U64? {
+    samples :: if content_object(trace)?.get("samples") == .Val(.Array(items)) -> items else -> { return None }
+    loop sample in samples {
+        if sample == .Object(fields) {
+            if fields.get("domain") == Val(CanonicalJson.String(domain)) {
+                if fields.get("duration_ns") == .Val(.Integer(text)) -> return text.parse().ok()
+            }
+        }
+    }
+    None
+}
+// Rust: Source/CmdPerf.rs:2667
+fn allocation_bytes(trace: CanonicalJson) -> U64? {
+    items :: if content_object(trace)?.get("allocations") == .Val(.Array(items)) -> items else -> { return None }
+    fields :: if items.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    if fields.get("bytes") == .Val(.Integer(text)) -> text.parse().ok() else -> None
+}
+// Rust: Source/CmdPerf.rs:2681
+fn budget_compare_line(base: CanonicalJson, head: CanonicalJson, baseline: String?) -> String {
+    if sample_duration(base, "wall") == .Val(base_ns) {
+        if sample_duration(head, "wall") == .Val(head_ns) {
+            if base_ns > 0 {
+                bad :: head_ns.saturating_sub(base_ns)
+                bp :: U128{bad}.saturating_mul(10_000) /% U128{base_ns}
+                name :: baseline ?? "trace-baseline"
+                return "budgets: wall RelativeTo({name}) regression={bp}bp · base={base_ns}ns head={head_ns}ns"
+            }
+        }
+    }
+    "budgets: no comparable wall samples for #241 RelativeTo evaluation"
+}
+// Rust: Source/CmdPerf.rs:2700
+fn export(args: [String]) -> I32 {
+    path := String?{None}
+    mode := ExportMode.JSON
+    i := 0
+    loop i < args.len() {
+        arg :: args[i]
+        if arg == CLI.MACHINE_OUTPUT_FLAG { mode = ExportMode.JSON; i += 1; next }
+        if arg == "--pprof" { mode = ExportMode.Pprof; i += 1; next }
+        if arg == "--otel" { mode = ExportMode.Otel; i += 1; next }
+        if arg == "--chrome" { mode = ExportMode.Chrome; i += 1; next }
+        if arg == "--emit-profile-map" { mode = ExportMode.ProfileMap; i += 1; next }
+        if arg.starts_with("-") {
+            perf_error_with_fix("unknown `jet perf export` flag `{arg}`", "run `jet perf export <path{ARTIFACT_EXT_TRACE}> [--json|--pprof|--otel|--chrome|--emit-profile-map]")
+            return ExitCodes.USAGE
+        }
+        if path != None { perf_error("`jet perf export` takes one trace path"); return ExitCodes.USAGE }
+        path = Val(~arg)
+        i += 1
+    }
+    selected :: path ?? { perf_error("`jet perf export` needs a {ARTIFACT_EXT_TRACE} path"); return ExitCodes.USAGE }
+    trace :: read_verified(selected) ?? { perf_error(err); return ExitCodes.USAGE }
+    projection :: if mode == {
+        .JSON -> export_json_envelope(trace)
+        .Pprof -> export_pprof_projection(trace)
+        .Otel -> export_otel_projection(trace)
+        .Chrome -> export_chrome_projection(trace)
+        .ProfileMap -> export_profile_map_projection(trace)
+    }
+    if mode == ExportMode.JSON -> print_raw(render_perf_json("perf.export", ^projection))
+    else -> print_raw(String.from_utf8_lossy(projection.bytes()))
+    ExitCodes.OK
+}
+// Rust: Source/CmdPerf.rs:2777
+enum ExportMode { JSON Pprof Otel Chrome ProfileMap }
+// Rust: Source/CmdPerf.rs:2785
+fn export_json_envelope(trace: CanonicalJson) -> CanonicalJson {
+    any_domain :: first_sample(trace) != None || profile_summary(trace) != None || first_allocation(trace) != None || browser_summary(trace) != None || task_summary(trace) != None || lock_summary(trace) != None || io_summary(trace) != None || native_summary(trace) != None || span_summary(trace) != None
+    loss :: if any_domain -> "json-envelope; typed profile evidence and domains are retained in trace — standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections" else -> "json-envelope-only; standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
+    CanonicalJson.object([("kind", CanonicalJson.String("jet.trace.projection")), ("loss", CanonicalJson.String(loss)), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("trace", ~trace), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("projection keys are unique")
+}
+
+// Rust: Source/CmdPerf.rs:2816
+fn export_pprof_projection(trace: CanonicalJson) -> CanonicalJson {
+    samples := [CanonicalJson]{}
+    loop domain in [String]{"wall", "cpu"} {
+        if sample_duration(trace, domain) == .Val(value) -> &samples.push(CanonicalJson.object([("location", CanonicalJson.String(domain)), ("value", CanonicalJson.Integer("{value}"))]) ?? panic("unique sample keys"))
+    }
+    CanonicalJson.object([("kind", CanonicalJson.String("jet.trace.pprof-projection")), ("loss", CanonicalJson.String("pprof-json; samples are Jet wall/cpu only — no native stack frames, no gzip proto, no labels beyond domain")), ("samples", CanonicalJson.Array(^samples)), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("trace_id", CanonicalJson.String(trace_id(trace) ?? "unknown")), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("pprof projection keys are unique")
+}
+// Rust: Source/CmdPerf.rs:2853
+fn export_otel_projection(trace: CanonicalJson) -> CanonicalJson {
+    spans := [CanonicalJson]{}
+    if content_object(trace) == .Val(content) {
+        loop domain in [String]{"spans", "browser"} {
+            if content.get(domain) == .Val(.Array(items)) { loop item in items -> &spans.push(~item) }
+        }
+    }
+    CanonicalJson.object([("kind", CanonicalJson.String("jet.trace.otel-projection")), ("loss", CanonicalJson.String("otel-json; Jet spans/browser only — no resource attributes, no OTLP protobuf, no baggage/traceparent wire")), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("spans", CanonicalJson.Array(^spans)), ("trace_id", CanonicalJson.String(trace_id(trace) ?? "unknown")), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("otel projection keys are unique")
+}
+// Rust: Source/CmdPerf.rs:2884
+fn export_chrome_projection(trace: CanonicalJson) -> CanonicalJson {
+    events := [CanonicalJson]{}
+    chrome_process_name(&events)
+    loop (tid, name) in [(U64{1}, "wall samples"), (U64{2}, "cpu samples"), (U64{3}, "browser"), (U64{4}, "lock contention"), (U64{5}, "native CPU"), (U64{6}, "allocations")] -> chrome_thread_name(&events, tid, name)
+    if content_object(trace) == .Val(content) {
+        if content.get("samples") == .Val(.Array(items)) {
+            loop item in items {
+                fields :: if item == .Object(fields) -> fields else -> { next }
+                duration :: chrome_integer(fields, "duration_ns") ?? { next }
+                domain :: fields.get("domain").and_then(chrome_string) ?? { next }
+                tid :: if domain == { "wall" -> U64{1}; "cpu" -> U64{2}; else -> { next } }
+                chrome_symbol_event(&events, fields, 0, duration, tid)
+            }
+        }
+        if content.get("allocations") == .Val(.Array(items)) {
+            loop item in items {
+                if item == .Object(fields) -> chrome_symbol_event(&events, fields, 0, 0, 6)
+            }
+        }
+        if content.get("tasks") == .Val(.Array(items)) {
+            loop item in items {
+                fields :: if item == .Object(fields) -> fields else -> { next }
+                task_id :: chrome_integer(fields, "id") ?? { next }
+                chrome_thread_name(&events, chrome_task_tid(task_id), "task {task_id}")
+            }
+        }
+        if content.get("browser") == .Val(.Array(items)) {
+            loop item in items {
+                fields :: if item == .Object(fields) -> fields else -> { next }
+                start :: chrome_integer(fields, "start_ns") ?? { next }
+                duration :: chrome_integer(fields, "duration_ns") ?? { next }
+                chrome_symbol_event(&events, fields, start, duration, 3)
+            }
+        }
+        loop domain in [String]{"spans", "io"} {
+            if content.get(domain) == .Val(.Array(items)) {
+                loop item in items {
+                    fields :: if item == .Object(fields) -> fields else -> { next }
+                    if domain == "spans" && fields.get("status") != Val(CanonicalJson.String("captured")) -> next
+                    start :: chrome_integer(fields, "start_ns") ?? { next }
+                    end :: chrome_integer(fields, "end_ns") ?? { next }
+                    task_id :: chrome_integer(fields, "task_id") ?? { next }
+                    chrome_symbol_event(&events, fields, start, end.saturating_sub(start), chrome_task_tid(task_id))
+                }
+            }
+        }
+        if content.get("locks") == .Val(.Array(items)) {
+            loop item in items { if item == .Object(fields) -> chrome_symbol_event(&events, fields, 0, 0, 4) }
+        }
+        if content.get("native") == .Val(.Array(items)) {
+            loop item in items {
+                fields :: if item == .Object(fields) -> fields else -> { next }
+                if fields.get("status") != Val(CanonicalJson.String("captured")) -> next
+                start :: chrome_integer(fields, "observed_at_ns") ?? { next }
+                duration :: chrome_integer(fields, "duration_ns") ?? { next }
+                tid :: fields.get("task_id").and_then(chrome_value_integer).map(chrome_task_tid) ?? 5
+                chrome_symbol_event(&events, fields, start, duration, tid)
+            }
+        }
+    }
+    CanonicalJson.object([("kind", CanonicalJson.String("jet.trace.chrome-projection")), ("loss", CanonicalJson.String("chrome-trace-json; captured X events cover wall/cpu/alloc/browser/task spans/io/locks/native and M lane metadata — unavailable states, async flow events, counter tracks, screenshots, and source-map events remain unprojected")), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("traceEvents", CanonicalJson.Array(^events)), ("trace_id", CanonicalJson.String(trace_id(trace) ?? "unknown")), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("chrome projection keys are unique")
+}
+// Rust: Source/CmdPerf.rs:3056
+fn chrome_process_name(events: &[CanonicalJson]) -> {
+    args :: CanonicalJson.object([("name", CanonicalJson.String("Jet perf"))]) ?? panic("unique process args")
+    &events.push(CanonicalJson.object([("args", ^args), ("name", CanonicalJson.String("process_name")), ("ph", CanonicalJson.String("M")), ("pid", CanonicalJson.Integer("1"))]) ?? panic("unique process keys"))
+}
+// Rust: Source/CmdPerf.rs:3072
+fn chrome_thread_name(events: &[CanonicalJson], tid: U64, name: String) -> {
+    args :: CanonicalJson.object([("name", CanonicalJson.String(~name))]) ?? panic("unique thread args")
+    &events.push(CanonicalJson.object([("args", ^args), ("name", CanonicalJson.String("thread_name")), ("ph", CanonicalJson.String("M")), ("pid", CanonicalJson.Integer("1")), ("tid", CanonicalJson.Integer("{tid}"))]) ?? panic("unique thread keys"))
+}
+// Rust: Source/CmdPerf.rs:3089
+fn chrome_symbol_event(events: &[CanonicalJson], fields: [String:CanonicalJson], start_ns: U64, duration_ns: U64, tid: U64) -> {
+    symbol :: fields.get("symbol") ?? return
+    name :: symbol_label(symbol) ?? return
+    args :: chrome_symbol_args(symbol) ?? return
+    &events.push(CanonicalJson.object([("args", ^args), ("dur", CanonicalJson.Integer("{duration_ns /% 1000}")), ("name", CanonicalJson.String(^name)), ("ph", CanonicalJson.String("X")), ("pid", CanonicalJson.Integer("1")), ("tid", CanonicalJson.Integer("{tid}")), ("ts", CanonicalJson.Integer("{start_ns /% 1000}"))]) ?? panic("unique event keys"))
+}
+// Rust: Source/CmdPerf.rs:3125
+fn chrome_symbol_args(value: CanonicalJson) -> CanonicalJson? {
+    fields :: if value == .Object(fields) -> fields else -> { return None }
+    path :: if fields.get("path") == .Val(.String(path)) -> path else -> { return None }
+    name :: if fields.get("name") == .Val(.String(name)) -> name else -> { return None }
+    args := [String:CanonicalJson]{}
+    args["file"] = CanonicalJson.String(~path)
+    args["location"] = CanonicalJson.String("{path}:{name}")
+    args["symbol"] = CanonicalJson.String(~name)
+    loop key in [String]{"bytes", "cancelled", "capacity", "class", "clock", "closed", "count", "depth", "domain", "id", "kind", "parent", "parent_task_id", "reason", "recv_waiters", "send_waiters", "state", "status", "target", "task_id", "wait"} {
+        if fields.get(key) == .Val(value) -> args[~key] = ~value
+    }
+    Val(CanonicalJson.Object(^args))
+}
+// Rust: Source/CmdPerf.rs:3172
+fn chrome_integer(fields: [String:CanonicalJson], key: String) -> U64? { chrome_value_integer(fields.get(key) ?? return None) }
+// Rust: Source/CmdPerf.rs:3176
+fn chrome_value_integer(value: CanonicalJson) -> U64? { if value == .Integer(text) -> text.parse().ok() else -> None }
+// Rust: Source/CmdPerf.rs:3183
+fn chrome_string(value: CanonicalJson) -> String? { if value == .String(text) -> Val(text) else -> None }
+// Rust: Source/CmdPerf.rs:3190
+fn chrome_task_tid(task_id: U64) -> U64 { U64{1000}.saturating_add(task_id) }
+
+// Rust: Source/CmdPerf.rs:3194
+fn export_profile_map_projection(trace: CanonicalJson) -> CanonicalJson {
+    symbols := [CanonicalJson]{}
+    maps := [CanonicalJson]{}
+    profile :: content_object(trace).and_then((content) -> content.get("profile")).map((value) -> ~value) ?? CanonicalJson.Null
+    if content_object(trace) == .Val(content) {
+        if content.get("source_identity") == .Val(.Array(items)) { loop item in items -> &symbols.push(~item) }
+        if content.get("source_maps") == .Val(.Array(items)) { loop item in items -> &maps.push(~item) }
+    }
+    CanonicalJson.object([("kind", CanonicalJson.String("jet.trace.profile-map-projection")), ("loss", CanonicalJson.String("profile-map; source_identity+source_maps+typed profile evidence — no Rust/LLVM frames, no address ranges, no DWARF")), ("schema", CanonicalJson.String(TRACE_SCHEMA)), ("source_identity", CanonicalJson.Array(^symbols)), ("source_maps", CanonicalJson.Array(^maps)), ("profile", ^profile), ("trace_id", CanonicalJson.String(trace_id(trace) ?? "unknown")), ("version", CanonicalJson.Integer("{TRACE_VERSION}"))]) ?? panic("profile-map projection keys are unique")
+}
+// Rust: Source/CmdPerf.rs:3235
+fn receipt_sections_for_command(command: String, argv: [String]) -[FS, Env]> [TraceReceiptSection] Err! {
+    cwd :: env.current_dir() ?? return Err("cannot resolve cwd: {err}")
+    root :: jet.ReceiptStore.receipt_root_for(command, argv, cwd)
+    store :: jet.ReceiptStore.ReceiptStore.new(root)
+    inputs :: jet.ReceiptStore.input_paths_for(command, argv, cwd)
+    claim :: store.claim(command, argv, inputs)
+    receipt :: store.lookup(claim) ?? return Ok([])
+    trace_receipt_sections_from_receipt(receipt)
+}
+// Rust: Source/CmdPerf.rs:3250
+fn trace_receipt_sections_from_receipt(receipt: jet.ReceiptStore.Receipt) -> [TraceReceiptSection] Err! {
+    rows := [TraceReceiptSection]{}
+    loop section in receipt.sections {
+        value :: section.value()
+        &rows.push(TraceReceiptSection{name: ~section.name, type_name: ~section.type_name, digest: value.sha256(), value: ^value})
+    }
+    Ok(^rows)
+}
+// Rust: Source/CmdPerf.rs:3268
+fn receipt_sections_for_compare(trace: CanonicalJson) -> [jet.ReceiptStore.ReceiptSection] Err! {
+    items :: if content_object(trace).and_then((content) -> content.get("receipt_sections")) == .Val(.Array(items)) -> items else -> { return Err("trace content.receipt_sections is missing or not an array") }
+    rows := [jet.ReceiptStore.ReceiptSection]{}
+    loop (index, item) in items {
+        section :: TraceReceiptSection.from_json(item) ?? return Err("content.receipt_sections[{index}]: {err}")
+        value :: jet.ReceiptStore.ReceiptSection.from_json(section.name, section.type_name, section.value) ?? return Err("content.receipt_sections[{index}]: {err}")
+        &rows.push(^value)
+    }
+    Ok(^rows)
+}
+// Rust: Source/CmdPerf.rs:3294
+fn compare_receipt_sections(base: CanonicalJson, head: CanonicalJson) -> [String] Err! {
+    before :: receipt_sections_for_compare(base)
+    after :: receipt_sections_for_compare(head)
+    diffs :: jet.ReceiptStore.diff_sections(before, after)
+    rows := [String]{}
+    loop diff in diffs -> &rows.push(diff.render())
+    Ok(^rows)
+}
+// Rust: Source/CmdPerf.rs:3304
+fn write_session_trace(command: String, argv: [String], out: String?, capture: ^CaptureBundle, game_bodies: [JetDevtoolsEventBody], capture_allowlist: [String], receipt_sections: ^[TraceReceiptSection]) -[FS, Env, Time]> OSPath Err! {
+    captured := ^capture
+    &captured.add_game_devtools_bodies(game_bodies)
+    policy := CapturePolicy.default_exclusions()
+    policy.allowlist = ~capture_allowlist
+    policy.io_rows_truncated = captured.io_rows_truncated
+    policy.browser_rows_truncated = captured.browser_rows_truncated
+    policy.native_rows_truncated = captured.native_rows_truncated
+    policy.span_rows_truncated = captured.span_rows_truncated
+    policy.task_rows_truncated = captured.task_rows_truncated
+    skeleton :: TraceSkeleton{command: ~command, argv: ~argv, toolchain: current_toolchain(), hardware: TraceHardware.current(), capture_policy: ^policy, samples: ^captured.samples, profile: ^captured.profile, allocations: ^captured.allocations, browser: ^captured.browser, game_frames: ^captured.game_frames, game_draw_events: ^captured.game_draw_events, tasks: ^captured.tasks, locks: ^captured.locks, io: ^captured.io, native: ^captured.native, spans: ^captured.spans, source_identity: ^captured.source_identity, source_maps: ^captured.source_maps, receipt_sections: ^receipt_sections}
+    bytes :: build_skeleton_bytes(skeleton)
+    path :: if out == .Val(value) -> OSPath.of(value) else -> default_trace_path(bytes)
+    if path.parent() == .Val(parent) {
+        if !parent.as_os_str().is_empty() -> fs.create_dir_all(parent) ?? return Err("cannot create {parent.display()}: {err}")
+    }
+    write_trace_file(path, bytes)
+    written :: fs.read(path) ?? return Err("cannot re-read {path.display()}: {err}")
+    _ :: verify_jettrace(written) ?? return Err("wrote unverifiable jettrace: {err}")
+    Ok(path)
+}
+// Rust: Source/CmdPerf.rs:3359
+fn default_trace_path(bytes: [U8]) -[FS, Env, Time]> OSPath Err! {
+    verified :: verify_jettrace(bytes)
+    id :: trace_id(verified)
+    stamp :: utc_stamp()
+    short :: id.get(0..<8) ?? panic("trace id has eight bytes") // #4303
+    cwd :: env.current_dir() ?? return Err("cannot resolve cwd: {err}")
+    root :: jet.Loader.selected_project_root(cwd) ?? cwd
+    Ok(root.join(".jet").join("perf").join("{stamp}-{short}{artifact_extension()}"))
+}
+// Rust: Source/CmdPerf.rs:3372
+fn write_trace_file(path: OSPath, bytes: [U8]) -[FS]> Err! {
+    tmp :: path.with_extension("tmp")
+    {
+        // GATE #4494: native owned file lifetime closes at scope exit, including errors.
+        file := fs.OpenOptions.new().write(true).create(true).truncate(true).open(tmp) ?? return Err("cannot create temp trace: {err}")
+        if core.sys.target.selected_family() == "unix" {
+            perms := file.metadata().map((metadata) -> metadata.permissions()) ?? return Err("{err}")
+            &perms.set_mode(0o600)
+            fs.set_permissions(tmp, perms) ?? return Err("{err}")
+        }
+        &file.write_all(bytes) ?? return Err("cannot write temp trace: {err}")
+        &file.sync_all() ?? return Err("cannot durable-write temp trace: {err}")
+    }
+    fs.rename(tmp, path) ?? {
+        _ :: fs.remove_file(tmp)
+        return Err("cannot install trace {path.display()}: {err}")
+    }
+    return
+}
+// Rust: Source/CmdPerf.rs:3400
+fn read_verified(path: String) -[FS.Read]> CanonicalJson Err! {
+    if !path.ends_with(ARTIFACT_EXT_TRACE) -> return Err("trace path must end with {ARTIFACT_EXT_TRACE}")
+    bytes :: fs.read(path) ?? return Err("cannot read {path}: {err}")
+    verify_jettrace(bytes)
+}
+// Rust: Source/CmdPerf.rs:3408
+fn current_toolchain() -> TraceToolchain {
+    TraceToolchain{jet_version: Manifest.COMPILER_VERSION, compiler_build_id: JET_COMPILER_BUILD_ID ?? Manifest.COMPILER_VERSION, stdlib_id: "jet-stdlib", runner_id: "jet-perf"}
+}
+// Rust: Source/CmdPerf.rs:3419
+fn utc_stamp() -[Time]> String {
+    secs :: std.time.SystemTime.now().duration_since(std.time.UNIX_EPOCH).map((duration) -> duration.as_secs()) ?? 0 // GATE #4494
+    "{secs}"
+}
+// Rust: Source/CmdPerf.rs:3428
+fn process_exists(pid: U32) -[FS.Read]> Bool {
+    if core.sys.target.selected_family() == "unix" -> OSPath.of("/proc/{pid}").exists()
+    else -> true
+}
+// Rust: Source/CmdPerf.rs:3440
+fn content_command(trace: CanonicalJson) -> String? {
+    fields :: if trace == .Object(fields) -> fields else -> { return None }
+    content :: if fields.get("content") == .Val(.Object(content)) -> content else -> { return None }
+    if content.get("command") == .Val(.String(command)) -> Val(command) else -> None
+}
+// Rust: Source/CmdPerf.rs:3453
+fn toolchain_digest(trace: CanonicalJson) -> String? {
+    fields :: if trace == .Object(fields) -> fields else -> { return None }
+    content :: if fields.get("content") == .Val(.Object(content)) -> content else -> { return None }
+    toolchain :: if content.get("toolchain") == .Val(.Object(toolchain)) -> toolchain else -> { return None }
+    if toolchain.get("digest") == .Val(.String(digest)) -> Val(digest) else -> None
+}
+// Rust: Source/CmdPerf.rs:3469
+fn content_object(trace: CanonicalJson) -> [String:CanonicalJson]? {
+    fields :: if trace == .Object(fields) -> fields else -> { return None }
+    if fields.get("content") == .Val(.Object(content)) -> Val(content) else -> None
+}
+// Rust: Source/CmdPerf.rs:3480
+fn content_array(trace: CanonicalJson, key: String) -> [CanonicalJson]? {
+    if content_object(trace)?.get(key) == .Val(.Array(items)) -> Val(items) else -> None
+}
+
+// Rust: Source/CmdPerf.rs:3487
+fn first_sample(trace: CanonicalJson) -> (String, String, String)? {
+    fields :: if content_array(trace, "samples")?.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    domain :: if fields.get("domain") == .Val(.String(value)) -> ~value else -> { return None }
+    ns :: if fields.get("duration_ns") == .Val(.Integer(value)) -> ~value else -> { return None }
+    symbol :: symbol_label(fields.get("symbol")?) ?? return None
+    Val((^domain, ^ns, ^symbol))
+}
+// Rust: Source/CmdPerf.rs:3503
+fn profile_summary(trace: CanonicalJson) -> String? {
+    profile :: if content_object(trace)?.get("profile") == .Val(.Object(profile)) -> profile else -> { return None }
+    string_field :: (key: String) -> profile.get(key).and_then(chrome_string)
+    status :: string_field("status") ?? return None
+    coverage :: string_field("coverage") ?? return None
+    method :: string_field("method") ?? return None
+    overhead :: string_field("overhead_status") ?? return None
+    rows :: if profile.get("rows") == .Val(.Array(rows)) -> rows else -> { return None }
+    clocks := [String:Bool]{}
+    loop row in rows {
+        if row == .Object(fields) {
+            if fields.get("clock") == .Val(.String(clock)) -> clocks[~clock] = true
+        }
+    }
+    names := clocks.keys().to_list()
+    &names.sort()
+    clock_text :: if names.is_empty() -> "none" else -> names.join(",")
+    window :: string_field("window_status") ?? return None
+    window_ns :: (key: String) -> if profile.get(key) == .Val(.Integer(ns)) -> "{ns}ns" else -> "unavailable"
+    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_text} overhead={overhead} window={window} run_wall={window_ns(\"window_wall_ns\")} run_cpu={window_ns(\"window_cpu_ns\")}")
+}
+// Rust: Source/CmdPerf.rs:3546
+fn first_allocation(trace: CanonicalJson) -> (String, String, String)? {
+    fields :: if content_array(trace, "allocations")?.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    count :: if fields.get("count") == .Val(.Integer(value)) -> ~value else -> { return None }
+    bytes :: if fields.get("bytes") == .Val(.Integer(value)) -> ~value else -> { return None }
+    symbol :: symbol_label(fields.get("symbol")?) ?? return None
+    Val((^count, ^bytes, ^symbol))
+}
+// Rust: Source/CmdPerf.rs:3563
+fn browser_summary(trace: CanonicalJson) -> (Int, String)? {
+    items :: content_array(trace, "browser") ?? return None
+    first :: if items.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    Val((items.len(), symbol_label(first.get("symbol")?)?))
+}
+// Rust: Source/CmdPerf.rs:3571
+fn task_summary(trace: CanonicalJson) -> (Int, Int, String)? {
+    items :: content_array(trace, "tasks") ?? return None
+    if items.is_empty() -> return None
+    children := 0
+    symbol := String?{None}
+    loop item in items {
+        fields :: if item == .Object(fields) -> fields else -> { next }
+        if fields.get("parent") == .Val(.Integer(parent)) { if parent != "0" -> children += 1 }
+        if symbol == None {
+            if fields.get("symbol") == .Val(value) -> symbol = symbol_label(value)
+        }
+    }
+    Val((items.len(), children, symbol ?? "?"))
+}
+// Rust: Source/CmdPerf.rs:3596
+fn lock_summary(trace: CanonicalJson) -> (Int, U64, String)? {
+    items :: content_array(trace, "locks") ?? return None
+    if items.is_empty() -> return None
+    waiters := U64{0}
+    symbol := String?{None}
+    loop item in items {
+        fields :: if item == .Object(fields) -> fields else -> { next }
+        if fields.get("send_waiters") == .Val(.Integer(send)) -> waiters = waiters.saturating_add(send.parse() ?? 0)
+        if fields.get("recv_waiters") == .Val(.Integer(recv)) -> waiters = waiters.saturating_add(recv.parse() ?? 0)
+        if symbol == None {
+            if fields.get("symbol") == .Val(value) -> symbol = symbol_label(value)
+        }
+    }
+    Val((items.len(), waiters, symbol ?? "?"))
+}
+// Rust: Source/CmdPerf.rs:3622
+fn io_summary(trace: CanonicalJson) -> (Int, String)? {
+    items :: content_array(trace, "io") ?? return None
+    if items.is_empty() -> return None
+    symbol := String?{None}
+    loop item in items {
+        fields :: if item == .Object(fields) -> fields else -> { next }
+        if symbol == None {
+            if fields.get("symbol") == .Val(value) -> symbol = symbol_label(value)
+        }
+    }
+    Val((items.len(), symbol ?? "?"))
+}
+// Rust: Source/CmdPerf.rs:3641
+fn native_summary(trace: CanonicalJson) -> String? {
+    fields :: if content_array(trace, "native")?.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    status :: fields.get("status").and_then(chrome_string) ?? return None
+    target :: fields.get("target").and_then(chrome_string) ?? return None
+    symbol :: fields.get("symbol").and_then(symbol_label) ?? "?"
+    if status == {
+        "captured" -> {
+            duration :: if fields.get("duration_ns") == .Val(.Integer(value)) -> value else -> { return None }
+            observed :: if fields.get("observed_at_ns") == .Val(.Integer(value)) -> value else -> { return None }
+            task :: if fields.get("task_id") == .Val(.Integer(value)) -> value else -> { return None }
+            Val("native process_cpu={duration}ns observed_at={observed}ns target={target} task={task} · {symbol}")
+        }
+        "unavailable" -> {
+            reason :: fields.get("reason").and_then(chrome_string) ?? return None
+            Val("native unavailable target={target} reason={reason} · {symbol}")
+        }
+        else -> None
+    }
+}
+// Rust: Source/CmdPerf.rs:3689
+fn span_summary(trace: CanonicalJson) -> String? {
+    items :: content_array(trace, "spans") ?? return None
+    first :: if items.first() == .Val(.Object(fields)) -> fields else -> { return None }
+    status :: first.get("status").and_then(chrome_string) ?? return None
+    symbol :: first.get("symbol").and_then(symbol_label) ?? "?"
+    if status == "unavailable" {
+        reason :: first.get("reason").and_then(chrome_string) ?? return None
+        return Val("spans unavailable reason={reason} · {symbol}")
+    }
+    if status != "captured" -> return None
+    start := U64.MAX
+    end := U64{0}
+    children := 0
+    loop item in items {
+        fields :: if item == .Object(fields) -> fields else -> { return None }
+        item_start :: if fields.get("start_ns") == .Val(.Integer(value)) -> value else -> { return None }
+        item_end :: if fields.get("end_ns") == .Val(.Integer(value)) -> value else -> { return None }
+        start = start.min(item_start.parse().ok()?)
+        end = end.max(item_end.parse().ok()?)
+        if fields.get("parent_task_id") != Val(CanonicalJson.Null) -> children += 1
+    }
+    Val("spans count={items.len()} children={children} window={start}..{end}ns · {symbol}")
+}
+// Rust: Source/CmdPerf.rs:3737
+fn symbol_label(value: CanonicalJson) -> String? {
+    fields :: if value == .Object(fields) -> fields else -> { return None }
+    path :: fields.get("path").and_then(chrome_string) ?? return None
+    name :: fields.get("name").and_then(chrome_string) ?? return None
+    Val("{path}#{name}")
+}
+
+// Rust: Source/CmdPerf.rs:3753-4075 — original test module and fixture live in
+// Compiler/JetCli/Tests/Cli/Evidence/Perf02.jet; every original assertion retained.

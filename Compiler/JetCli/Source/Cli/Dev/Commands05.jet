@@ -1,2504 +1,996 @@
-// PORT-PENDING 0683 source-cmddevtools-slice-7220: Source/CmdDevTools.rs:7220-9719
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn run_com_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!("usage: {} inspect bind com <library.tlb> --pkg <lib>\n       {} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME)
-//RS     };
-//RS     if !cfg!(target_os = "windows") {
-//RS         eprintln!("Error [E3260]: `com.*` needs a Windows host.");
-//RS         eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");
-//RS         eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");
-//RS         eprintln!("More: jet-lang.dev/e/E3260");
-//RS         exit(ExitCodes::USER_ERROR)
-//RS     }
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         })
-//RS     }
-//RS     let mut file = None;
-//RS     let mut guid = None;
-//RS     let mut major = None;
-//RS     let mut minor = None;
-//RS     let mut lcid = 0u32;
-//RS     let mut pkg = None;
-//RS     let mut i = 0;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--registered" => {
-//RS                 guid = args.get(i + 1).map(|v| v.to_string());
-//RS                 i += 2
-//RS             }
-//RS             "--major" => {
-//RS                 major = args.get(i + 1).and_then(|v| v.parse::<u16>().ok());
-//RS                 i += 2
-//RS             }
-//RS             "--minor" => {
-//RS                 minor = args.get(i + 1).and_then(|v| v.parse::<u16>().ok());
-//RS                 i += 2
-//RS             }
-//RS             "--lcid" => {
-//RS                 lcid = args
-//RS                     .get(i + 1)
-//RS                     .and_then(|v| v.parse::<u32>().ok())
-//RS                     .unwrap_or(u32::MAX);
-//RS                 i += 2
-//RS             }
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
-//RS                 i += 2
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 crate::cli_error!(
-//RS                     "E2102",
-//RS                     "`inspect bind com` writes the checked binding to `.jet/bindings/com`; custom output paths are not supported"
-//RS                 );
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE)
-//RS             }
-//RS             value if !value.starts_with('-') && file.is_none() => {
-//RS                 file = Some(value.to_string());
-//RS                 i += 1
-//RS             }
-//RS             _ => {
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE)
-//RS             }
-//RS         }
-//RS     }
-//RS     let Some(lib) = pkg else {
-//RS         usage();
-//RS         exit(ExitCodes::USAGE)
-//RS     };
-//RS     let binding_root_path = file.as_deref().unwrap_or("package.jet").to_owned();
-//RS     let input = if let Some(path) = file.as_ref() {
-//RS         if guid.is_some() {
-//RS             usage();
-//RS             exit(ExitCodes::USAGE)
-//RS         }
-//RS         jet::ComBind::TypeLibraryInput::File(path.to_owned().into())
-//RS     } else {
-//RS         let (Some(guid), Some(major), Some(minor)) = (guid, major, minor) else {
-//RS             usage();
-//RS             exit(ExitCodes::USAGE)
-//RS         };
-//RS         if lcid == u32::MAX {
-//RS             usage();
-//RS             exit(ExitCodes::USAGE)
-//RS         }
-//RS         jet::ComBind::TypeLibraryInput::Registered {
-//RS             guid,
-//RS             major,
-//RS             minor,
-//RS             lcid,
-//RS         }
-//RS     };
-//RS     let out_path =
-//RS         default_binding_output(&binding_root_path, jet::Syntax::COM_MODULE_ROOT, &lib);
-//RS     let cache = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result =
-//RS         jet::ComBind::bind(&input, &lib, cache).unwrap_or_else(|e| com_bind_error(&e.to_string()));
-//RS     let provenance_path = cache.join(format!("{lib}.provenance"));
-//RS     if let Err(e) = publish_com_binding_artifacts(
-//RS         Path::new(&out_path),
-//RS         &result.source,
-//RS         &provenance_path,
-//RS         &result.provenance,
-//RS     ) {
-//RS         com_bind_error(&e)
-//RS     }
-//RS     println!(
-//RS         "bound {} typed COM member{} → {out_path}",
-//RS         result.methods.len(),
-//RS         if result.methods.len() == 1 { "" } else { "s" }
-//RS     );
-//RS }
-//RS fn com_bind_error(why: &str) -> ! {
-//RS     bind_e3208("Could not generate COM bindings.".to_string(),format!("{why}."),"select a registered or file-backed type library with IDispatch metadata and rerun on Windows.".to_string())
-//RS }
-//RS 
-//RS /// Publish generated source and provenance as one recoverable pair. A failed
-//RS /// write must leave either the previous pair or no pair, never a source whose
-//RS /// ABI record describes different bytes.
-//RS fn publish_com_binding_artifacts(
-//RS     source_path: &Path,
-//RS     source: &str,
-//RS     provenance_path: &Path,
-//RS     provenance: &str,
-//RS ) -> Result<(), String> {
-//RS     if source_path == provenance_path {
-//RS         return Err("generated COM source and provenance paths must differ".into());
-//RS     }
-//RS     let suffix = format!(
-//RS         "{}-{}",
-//RS         std::process::id(),
-//RS         std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .map_err(|error| format!("could not create COM output transaction: {error}"))?
-//RS             .as_nanos()
-//RS     );
-//RS     let source_stage = source_path.with_file_name(format!(
-//RS         ".{}..com-stage-{suffix}",
-//RS         source_path
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .ok_or_else(|| "generated COM source has no valid file name".to_string())?
-//RS     ));
-//RS     let provenance_stage = provenance_path.with_file_name(format!(
-//RS         ".{}..com-stage-{suffix}",
-//RS         provenance_path
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .ok_or_else(|| "generated COM provenance has no valid file name".to_string())?
-//RS     ));
-//RS     let source_backup = source_path.with_file_name(format!(
-//RS         ".{}..com-previous-{suffix}",
-//RS         source_path
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .ok_or_else(|| "generated COM source has no valid file name".to_string())?
-//RS     ));
-//RS     let provenance_backup = provenance_path.with_file_name(format!(
-//RS         ".{}..com-previous-{suffix}",
-//RS         provenance_path
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .ok_or_else(|| "generated COM provenance has no valid file name".to_string())?
-//RS     ));
-//RS     let cleanup_staged = || {
-//RS         let _ = fs::remove_file(&source_stage);
-//RS         let _ = fs::remove_file(&provenance_stage);
-//RS     };
-//RS     let cleanup_backups = || {
-//RS         let _ = fs::remove_file(&source_backup);
-//RS         let _ = fs::remove_file(&provenance_backup);
-//RS     };
-//RS     if let Err(error) = fs::write(&source_stage, source) {
-//RS         cleanup_staged();
-//RS         return Err(format!(
-//RS             "the generated COM cache could not be staged ({error})"
-//RS         ));
-//RS     }
-//RS     if let Err(error) = fs::write(&provenance_stage, provenance) {
-//RS         cleanup_staged();
-//RS         return Err(format!("the COM provenance could not be staged ({error})"));
-//RS     }
-//RS     let had_source = match fs::symlink_metadata(source_path) {
-//RS         Ok(metadata) if metadata.file_type().is_file() => {
-//RS             if let Err(error) = fs::rename(source_path, &source_backup) {
-//RS                 cleanup_staged();
-//RS                 return Err(format!("could not stage the previous COM cache ({error})"));
-//RS             }
-//RS             true
-//RS         }
-//RS         Ok(_) => {
-//RS             cleanup_staged();
-//RS             return Err("the generated COM cache path is not a regular file".into());
-//RS         }
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-//RS         Err(error) => {
-//RS             cleanup_staged();
-//RS             return Err(format!(
-//RS                 "could not inspect the generated COM cache ({error})"
-//RS             ));
-//RS         }
-//RS     };
-//RS     let had_provenance = match fs::symlink_metadata(provenance_path) {
-//RS         Ok(metadata) if metadata.file_type().is_file() => {
-//RS             if let Err(error) = fs::rename(provenance_path, &provenance_backup) {
-//RS                 if had_source {
-//RS                     let _ = fs::rename(&source_backup, source_path);
-//RS                 }
-//RS                 cleanup_staged();
-//RS                 return Err(format!(
-//RS                     "could not stage the previous COM provenance ({error})"
-//RS                 ));
-//RS             }
-//RS             true
-//RS         }
-//RS         Ok(_) => {
-//RS             if had_source {
-//RS                 let _ = fs::rename(&source_backup, source_path);
-//RS             }
-//RS             cleanup_staged();
-//RS             return Err("the generated COM provenance path is not a regular file".into());
-//RS         }
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-//RS         Err(error) => {
-//RS             if had_source {
-//RS                 let _ = fs::rename(&source_backup, source_path);
-//RS             }
-//RS             cleanup_staged();
-//RS             return Err(format!(
-//RS                 "could not inspect the generated COM provenance ({error})"
-//RS             ));
-//RS         }
-//RS     };
-//RS     if let Err(error) = fs::rename(&source_stage, source_path) {
-//RS         if had_source {
-//RS             let _ = fs::rename(&source_backup, source_path);
-//RS         }
-//RS         if had_provenance {
-//RS             let _ = fs::rename(&provenance_backup, provenance_path);
-//RS         }
-//RS         cleanup_staged();
-//RS         return Err(format!(
-//RS             "could not publish the generated COM cache ({error})"
-//RS         ));
-//RS     }
-//RS     if let Err(error) = fs::rename(&provenance_stage, provenance_path) {
-//RS         let _ = fs::remove_file(source_path);
-//RS         if had_source {
-//RS             let _ = fs::rename(&source_backup, source_path);
-//RS         }
-//RS         if had_provenance {
-//RS             let _ = fs::rename(&provenance_backup, provenance_path);
-//RS         }
-//RS         cleanup_staged();
-//RS         return Err(format!("could not publish the COM provenance ({error})"));
-//RS     }
-//RS     cleanup_staged();
-//RS     cleanup_backups();
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
-//RS /// then build an in-process JNI invocation bridge.
-//RS fn run_java_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!(
-//RS             "usage: {} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         )
-//RS     };
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         });
-//RS     }
-//RS     let source_path = args[0].as_str();
-//RS     let mut pkg = None;
-//RS     let mut out = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
-//RS                 if pkg.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 out = args.get(i + 1).map(|v| v.to_string());
-//RS                 if out.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             flag => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind java` flag `{flag}`");
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE)
-//RS             }
-//RS         }
-//RS     }
-//RS     let lib = pkg.unwrap_or_else(|| {
-//RS         let base = source_path.rsplit('/').next().unwrap_or(source_path);
-//RS         base.rsplit_once('.')
-//RS             .map(|v| v.0)
-//RS             .unwrap_or(base)
-//RS             .to_string()
-//RS     });
-//RS     let source = std::fs::read_to_string(source_path).unwrap_or_else(|e| {
-//RS         java_bind_error(
-//RS             source_path,
-//RS             &format!("the source file could not be read ({e})"),
-//RS         )
-//RS     });
-//RS     let out_path = out.unwrap_or_else(|| {
-//RS         default_binding_output(source_path, jet::Syntax::JAVA_MODULE_ROOT, &lib)
-//RS     });
-//RS     let cache = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result = jet::JavaBind::bind(std::path::Path::new(source_path), &source, &lib, cache)
-//RS         .unwrap_or_else(|e| java_bind_error(source_path, &e.to_string()));
-//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
-//RS         java_bind_error(
-//RS             source_path,
-//RS             &format!("the generated cache could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     if let Err(e) = std::fs::write(
-//RS         cache.join(format!("{lib}.jvm-path")),
-//RS         format!("{}\n", result.jvm_dir.display()),
-//RS     ) {
-//RS         java_bind_error(
-//RS             source_path,
-//RS             &format!("the JVM runtime identity could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
-//RS         java_bind_error(
-//RS             source_path,
-//RS             &format!("the binding provenance could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     println!(
-//RS         "bound {} JVM member{} from `{}` → {}",
-//RS         result.bound.len(),
-//RS         if result.bound.len() == 1 { "" } else { "s" },
-//RS         source_path,
-//RS         out_path
-//RS     );
-//RS }
-//RS 
-//RS fn java_bind_error(source: &str, why: &str) -> ! {
-//RS     bind_e3208(format!("Could not generate bindings from `{source}`."),format!("{why}."),"use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.".to_string())
-//RS }
-//RS 
-//RS /// D-FFI-DOTNET1=A: reflect a C# assembly surface, then generate an in-process
-//RS /// hostfxr bridge. Managed state remains behind consuming GCHandle ownership.
-//RS fn run_dotnet_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!(
-//RS             "usage: {} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         )
-//RS     };
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         })
-//RS     }
-//RS     let path = args[0].as_str();
-//RS     let mut pkg = None;
-//RS     let mut out = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
-//RS                 if pkg.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 out = args.get(i + 1).map(|v| v.to_string());
-//RS                 if out.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             flag => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind cs` flag `{flag}`");
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE)
-//RS             }
-//RS         }
-//RS     }
-//RS     let lib = pkg.unwrap_or_else(|| {
-//RS         let base = path.rsplit('/').next().unwrap_or(path);
-//RS         base.rsplit_once('.')
-//RS             .map(|v| v.0)
-//RS             .unwrap_or(base)
-//RS             .to_ascii_lowercase()
-//RS     });
-//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
-//RS         dotnet_bind_error(path, &format!("the C# source could not be read ({e})"))
-//RS     });
-//RS     let out_path = out.unwrap_or_else(|| {
-//RS         default_binding_output(path, jet::Syntax::CS_MODULE_ROOT, &lib)
-//RS     });
-//RS     let cache = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result = jet::DotNetBind::bind(std::path::Path::new(path), &source, &lib, cache)
-//RS         .unwrap_or_else(|e| dotnet_bind_error(path, &e.to_string()));
-//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
-//RS         dotnet_bind_error(
-//RS             path,
-//RS             &format!("the generated cache could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
-//RS         dotnet_bind_error(path, &format!("the provenance could not be written ({e})"))
-//RS     }
-//RS     println!(
-//RS         "bound {} .NET member{} from `{path}` → {out_path}",
-//RS         result.bound.len(),
-//RS         if result.bound.len() == 1 { "" } else { "s" }
-//RS     );
-//RS }
-//RS fn dotnet_bind_error(path: &str, why: &str) -> ! {
-//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.".to_string())
-//RS }
-//RS 
-//RS /// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
-//RS /// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
-//RS fn run_go_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!(
-//RS             "usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         )
-//RS     };
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         eprintln!();
-//RS         eprintln!("Generate typed Jet bindings for scalar and uintptr //export Go functions.");
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         });
-//RS     }
-//RS     let source_path = args[0].as_str();
-//RS     let mut pkg = None;
-//RS     let mut out = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|value| value.to_string());
-//RS                 if pkg.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 i += 2;
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 out = args.get(i + 1).map(|value| value.to_string());
-//RS                 if out.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 i += 2;
-//RS             }
-//RS             flag => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind go` flag `{flag}`");
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS     let lib = pkg.unwrap_or_else(|| {
-//RS         let base = source_path.rsplit('/').next().unwrap_or(source_path);
-//RS         base.rsplit_once('.')
-//RS             .map(|(stem, _)| stem)
-//RS             .unwrap_or(base)
-//RS             .to_string()
-//RS     });
-//RS     let source = std::fs::read_to_string(source_path).unwrap_or_else(|error| {
-//RS         go_bind_error(
-//RS             source_path,
-//RS             &format!("the source file could not be read ({error})"),
-//RS         )
-//RS     });
-//RS     let out_path = out.unwrap_or_else(|| {
-//RS         default_binding_output(source_path, jet::Syntax::GO_MODULE_ROOT, &lib)
-//RS     });
-//RS     let cache_dir = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result = jet::GoBind::bind(std::path::Path::new(source_path), &source, &lib, cache_dir)
-//RS         .unwrap_or_else(|error| go_bind_error(source_path, &error.to_string()));
-//RS     if let Err(error) = std::fs::write(&out_path, &result.source) {
-//RS         go_bind_error(
-//RS             source_path,
-//RS             &format!("the generated cache could not be written ({error})"),
-//RS         );
-//RS     }
-//RS     if let Err(error) = std::fs::write(
-//RS         cache_dir.join(format!("{lib}.provenance")),
-//RS         &result.provenance,
-//RS     ) {
-//RS         go_bind_error(
-//RS             source_path,
-//RS             &format!("the binding provenance could not be written ({error})"),
-//RS         );
-//RS     }
-//RS     println!(
-//RS         "bound {} Go export{} from `{}` → {}",
-//RS         result.bound.len(),
-//RS         if result.bound.len() == 1 { "" } else { "s" },
-//RS         source_path,
-//RS         out_path
-//RS     );
-//RS }
-//RS 
-//RS fn go_bind_error(source: &str, why: &str) -> ! {
-//RS     bind_e3208(
-//RS         format!("Could not generate bindings from `{source}`."),
-//RS         format!("{why}."),
-//RS         "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.".to_string(),
-//RS     )
-//RS }
-//RS 
-//RS /// D-FFI-FORTRAN1=A: discover scalar and fixed-shape ISO_C_BINDING functions, compile them
-//RS /// with the provisioned gfortran toolchain, and emit a typed `fortran.<lib>`
-//RS /// Jet module backed by the shared C ABI linker.
-//RS fn run_fortran_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!(
-//RS             "usage: {} inspect bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]",
-//RS             jet::Syntax::BINARY_NAME
-//RS         );
-//RS     };
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         eprintln!();
-//RS         eprintln!(
-//RS             "Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions."
-//RS         );
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         });
-//RS     }
-//RS 
-//RS     let source_path = args[0].as_str();
-//RS     let mut pkg = None;
-//RS     let mut out = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|value| value.to_string());
-//RS                 if pkg.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 i += 2;
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 out = args.get(i + 1).map(|value| value.to_string());
-//RS                 if out.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 i += 2;
-//RS             }
-//RS             flag => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind fortran` flag `{flag}`");
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS     let lib = pkg.unwrap_or_else(|| {
-//RS         let base = source_path.rsplit('/').next().unwrap_or(source_path);
-//RS         base.rsplit_once('.')
-//RS             .map(|(stem, _)| stem)
-//RS             .unwrap_or(base)
-//RS             .to_string()
-//RS     });
-//RS     let source = match std::fs::read_to_string(source_path) {
-//RS         Ok(source) => source,
-//RS         Err(error) => fortran_bind_error(
-//RS             source_path,
-//RS             &format!("the source file could not be read ({error})"),
-//RS         ),
-//RS     };
-//RS     let out_path = out.unwrap_or_else(|| {
-//RS         default_binding_output(source_path, jet::Syntax::FORTRAN_MODULE_ROOT, &lib)
-//RS     });
-//RS     let cache_dir = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result =
-//RS         match jet::FortranBind::bind(std::path::Path::new(source_path), &source, &lib, cache_dir) {
-//RS             Ok(result) => result,
-//RS             Err(error) => fortran_bind_error(source_path, &error.to_string()),
-//RS         };
-//RS     if let Err(error) = std::fs::write(&out_path, &result.source) {
-//RS         fortran_bind_error(
-//RS             source_path,
-//RS             &format!("the generated cache could not be written ({error})"),
-//RS         );
-//RS     }
-//RS     if let Err(error) = std::fs::write(
-//RS         cache_dir.join(format!("{lib}.provenance")),
-//RS         &result.provenance,
-//RS     ) {
-//RS         fortran_bind_error(
-//RS             source_path,
-//RS             &format!("the binding provenance could not be written ({error})"),
-//RS         );
-//RS     }
-//RS     println!(
-//RS         "bound {} ISO_C_BINDING routine{} from `{}` → {}",
-//RS         result.bound.len(),
-//RS         if result.bound.len() == 1 { "" } else { "s" },
-//RS         source_path,
-//RS         out_path
-//RS     );
-//RS     for layout in &result.layouts {
-//RS         println!(
-//RS             "  layout: {}.{} {} {}",
-//RS             layout.routine,
-//RS             layout.parameter,
-//RS             layout.order,
-//RS             layout
-//RS                 .extents
-//RS                 .iter()
-//RS                 .map(usize::to_string)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("x")
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn fortran_bind_error(source: &str, why: &str) -> ! {
-//RS     bind_e3208(
-//RS         format!("Could not generate bindings from `{source}`."),
-//RS         format!("{why}."),
-//RS         "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.".to_string(),
-//RS     )
-//RS }
-//RS 
-//RS fn run_cobol_bind(args: &[&String]) {
-//RS     let usage = || {
-//RS         eprintln!("usage: {} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME)
-//RS     };
-//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
-//RS         usage();
-//RS         exit(if args.is_empty() {
-//RS             ExitCodes::USAGE
-//RS         } else {
-//RS             ExitCodes::OK
-//RS         })
-//RS     }
-//RS     let source_path = args[0].as_str();
-//RS     let mut copybook = None;
-//RS     let mut pkg = None;
-//RS     let mut out = None;
-//RS     let mut i = 1;
-//RS     while i < args.len() {
-//RS         match args[i].as_str() {
-//RS             "--copybook" => {
-//RS                 copybook = args.get(i + 1).map(|v| v.to_string());
-//RS                 if copybook.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             "--pkg" => {
-//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
-//RS                 if pkg.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             "-o" | "--out" => {
-//RS                 out = args.get(i + 1).map(|v| v.to_string());
-//RS                 if out.is_none() {
-//RS                     usage();
-//RS                     exit(ExitCodes::USAGE)
-//RS                 }
-//RS                 i += 2
-//RS             }
-//RS             flag => {
-//RS                 crate::cli_error!("E2102", "unknown `inspect bind cobol` flag `{flag}`");
-//RS                 usage();
-//RS                 exit(ExitCodes::USAGE)
-//RS             }
-//RS         }
-//RS     }
-//RS     let Some(copybook_path) = copybook else {
-//RS         usage();
-//RS         exit(ExitCodes::USAGE)
-//RS     };
-//RS     let lib = pkg.unwrap_or_else(|| {
-//RS         let b = source_path.rsplit('/').next().unwrap_or(source_path);
-//RS         b.rsplit_once('.')
-//RS             .map(|v| v.0)
-//RS             .unwrap_or(b)
-//RS             .to_ascii_lowercase()
-//RS             .replace('-', "_")
-//RS     });
-//RS     let source = std::fs::read_to_string(source_path).unwrap_or_else(|e| {
-//RS         cobol_bind_error(source_path, &format!("the program could not be read ({e})"))
-//RS     });
-//RS     let copybook = std::fs::read_to_string(&copybook_path).unwrap_or_else(|e| {
-//RS         cobol_bind_error(
-//RS             &copybook_path,
-//RS             &format!("the copybook could not be read ({e})"),
-//RS         )
-//RS     });
-//RS     let out_path = out.unwrap_or_else(|| {
-//RS         default_binding_output(source_path, jet::Syntax::COBOL_MODULE_ROOT, &lib)
-//RS     });
-//RS     let cache = std::path::Path::new(&out_path)
-//RS         .parent()
-//RS         .unwrap_or_else(|| std::path::Path::new("."));
-//RS     let result = jet::CobolBind::bind(
-//RS         std::path::Path::new(source_path),
-//RS         &source,
-//RS         std::path::Path::new(&copybook_path),
-//RS         &copybook,
-//RS         &lib,
-//RS         cache,
-//RS     )
-//RS     .unwrap_or_else(|e| cobol_bind_error(source_path, &e.to_string()));
-//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
-//RS         cobol_bind_error(
-//RS             source_path,
-//RS             &format!("the generated cache could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
-//RS         cobol_bind_error(
-//RS             source_path,
-//RS             &format!("the binding provenance could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     if let Err(e) = std::fs::write(
-//RS         cache.join(format!("{lib}.cobol-path")),
-//RS         format!("{}\n", result.runtime_dir.display()),
-//RS     ) {
-//RS         cobol_bind_error(
-//RS             source_path,
-//RS             &format!("the libcob runtime identity could not be written ({e})"),
-//RS         )
-//RS     }
-//RS     println!(
-//RS         "bound GnuCOBOL program `{}` and {}-byte copybook `{}` → {out_path}",
-//RS         result.program, result.layout.width, result.layout.name
-//RS     );
-//RS     for field in &result.layout.fields {
-//RS         println!(
-//RS             "  layout: {} offset={} width={} type={}",
-//RS             field.name,
-//RS             field.offset,
-//RS             field.width,
-//RS             field.kind.jet_type()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn cobol_bind_error(path: &str, why: &str) -> ! {
-//RS     bind_e3208(
-//RS         format!("Could not generate bindings from `{path}`."),
-//RS         format!("{why}."),
-//RS         "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.".to_string(),
-//RS     )
-//RS }
-//RS 
-//RS /// S60 / D-PURE1 (E2-M16): evaluate a `pure fn run()` program.
-//RS /// D-EVAL1=A: pretty output by default; `--json` for stable machine JSON.
-//RS ///
-//RS /// When `--pure` is given, the entire call graph from `run` is checked for
-//RS /// purity violations (E3401 with the full transitive chain, not just the
-//RS /// direct callee). This replaces the old hand-rolled `impure_fns` check.
-//RS pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(e) => {
-//RS             crate::cli_error!("E2105", "couldn't read `{}`: {}", file, e);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(error) => {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(file, &src, &[error.diagnostic()], mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     // Lex + parse (needed for purity walk and for eval).
-//RS     let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
-//RS     if !lex_diags.is_empty() {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored(file, &src, &lex_diags, mode.color_stderr())
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let prog = match jet::Parser::parse_with_source(&toks, &source_for_parse) {
-//RS         Ok(p) => p,
-//RS         Err(ds) => {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(file, &src, &ds, mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     // Transitive purity check via the real sema root-walker (E3401 with full
-//RS     // call chain). Replaces the old hand-rolled top-level `is_pure` scan.
-//RS     if pure_required {
-//RS         // Build a FuncSig map from the parsed program for purity flags.
-//RS         use std::collections::HashMap;
-//RS         let mut funcs_sig: HashMap<String, jet::Sema::FuncSig> = HashMap::new();
-//RS         let mut ast_funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
-//RS         for item in &prog.items {
-//RS             if let jet::AST::Item::Func(f) = item {
-//RS                 funcs_sig.insert(
-//RS                     f.name.clone(),
-//RS                     jet::Sema::FuncSig {
-//RS                         deprecation: None,
-//RS                         params: f
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|p| (p.convention.clone(), p.ty.clone()))
-//RS                             .collect(),
-//RS                         root_param: f.params.first().is_some_and(|p| p.root),
-//RS                         return_type: f.return_type.clone(),
-//RS                         return_view_provenance: f
-//RS                             .return_view_provenance
-//RS                             .clone()
-//RS                             .map(|provenance| {
-//RS                                 let cell = jet::AST::ViewProvenanceCell::new();
-//RS                                 cell.set(provenance);
-//RS                                 cell
-//RS                             })
-//RS                             .unwrap_or_default(),
-//RS                         is_extern: false,
-//RS                         is_c_abi: false,
-//RS                         c_abi_name: None,
-//RS                         callback_transport: None,
-//RS                         callback_plan_digest: None,
-//RS                         callback_identity: None,
-//RS                         foreign_effect_root: None,
-//RS                         undo: None,
-//RS                         is_unsafe: f.is_unsafe,
-//RS                         is_pure: f.is_pure,
-//RS                         memo_bound: None,
-//RS                         is_foreign_thread_safe: false,
-//RS                         is_sanitizer: f.is_sanitizer,
-//RS                         is_must_use: f.is_must_use,
-//RS                         param_info: f
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|p| (p.name.clone(), p.default.is_some()))
-//RS                             .collect(),
-//RS                         param_call: f
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|p| (p.call_label().to_string(), p.zone))
-//RS                             .collect(),
-//RS                         defaults: f
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|p| p.default.as_ref().map(|d| *d.clone()))
-//RS                             .collect(),
-//RS                         param_variadic: f.params.iter().map(|p| p.variadic).collect(),
-//RS                         variadic_bounds: f
-//RS                             .params
-//RS                             .last()
-//RS                             .and_then(|p| p.variadic_bound_list.clone()),
-//RS                         param_view_from_names: f
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|p| p.declared_view_from_names.clone())
-//RS                             .collect(),
-//RS                         callable_policies: Default::default(),
-//RS                     },
-//RS                 );
-//RS                 ast_funcs.insert(f.name.clone(), f);
-//RS             }
-//RS         }
-//RS         let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
-//RS         if !diags.is_empty() {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(file, &src, &diags, mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS 
-//RS     // Full sema type-check with CompileMode::Eval — runs all type/ownership
-//RS     // checks and accepts a value-returning `pure fn run() -> T`. This ensures
-//RS     // type errors (e.g. `"string" + 5`) surface with their precise diagnostics
-//RS     // rather than falling through to E0956.
-//RS     {
-//RS         let type_diags = jet::check_for_eval(&source_for_parse, file);
-//RS         if !type_diags.is_empty() {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(file, &src, &type_diags, mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS 
-//RS     // Evaluate via comptime and render. D-EVAL1=A: pretty by default, JSON with --json.
-//RS     match jet::eval_pure_program_value(&source_for_parse, file) {
-//RS         Ok((value, printed)) => {
-//RS             // #2068: what the program printed is program output, not noise.
-//RS             // In `--json` mode it goes to stderr so stdout stays exactly one
-//RS             // JSON document for a machine consumer; otherwise it precedes the
-//RS             // value, in the order the program produced it.
-//RS             if mode.json {
-//RS                 eprint!("{printed}");
-//RS                 println!("{}", render_eval_json(&value));
-//RS             } else {
-//RS                 print!("{printed}");
-//RS                 if let Some(value) = render_eval_value(&value) {
-//RS                     println!("{value}");
-//RS                 }
-//RS             }
-//RS         }
-//RS         Err(diags) => {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(file, &src, &diags, mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn render_eval_value(value: &jet::CtValue) -> Option<String> {
-//RS     match value {
-//RS         jet::CtValue::Present(inner) => render_eval_value(inner),
-//RS         jet::CtValue::Unit => None,
-//RS         value => Some(value.jet_show()),
-//RS     }
-//RS }
-//RS 
-//RS /// Label diagnostics carry when the evaluated source came from the command
-//RS /// line rather than a file, so a caret can point into the argument text.
-//RS const EVAL_EXPRESSION_LABEL: &str = "<eval>";
-//RS 
-//RS fn render_eval_json(value: &jet::CtValue) -> String {
-//RS     let value = StatusValue::parse(&value.to_json()).expect("evaluated value must be valid JSON");
-//RS     StatusEnvelope::new("eval", true)
-//RS         .with_field("value", value)
-//RS         .json()
-//RS }
-//RS 
-//RS /// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
-//RS /// verb (#2068). Before this, an expression fell through to the file reader
-//RS /// and died as `E2105 couldn't read '1 + 2'`, contradicting the registry
-//RS /// summary ("Evaluate pure Jet and print JSON").
-//RS ///
-//RS /// Evaluation runs through `jet::REPL::eval_once`, the shipped one-turn
-//RS /// expression pipeline, so a command-line expression and the same text typed
-//RS /// into `jet repl` cannot disagree — there is no second expression evaluator
-//RS /// (I8) and no second set of semantics (I9). This function only marshals the
-//RS /// result into D-EVAL1=A's rendering: pretty by default, `--json` for stable
-//RS /// machine JSON with program output kept off stdout.
-//RS ///
-//RS /// Effects are refused unconditionally (E1803 — `eval_once` attaches no
-//RS /// prompt), which is strictly stronger than `--pure`, so the expression form
-//RS /// needs no purity walk of its own.
-//RS pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
-//RS     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     match jet::REPL::eval_once(source, &base_dir, jet::REPL::ReplFlags::default()) {
-//RS         Ok(evaluated) => {
-//RS             // An input that only binds or declares has no value of its own;
-//RS             // render it as Unit, the same way a `run()` that hands nothing
-//RS             // back renders in the file form. One canonical rendering.
-//RS             let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
-//RS             if mode.json {
-//RS                 eprint!("{}{}", evaluated.stdout, evaluated.stderr);
-//RS                 println!("{}", render_eval_json(&value));
-//RS             } else {
-//RS                 print!("{}", evaluated.stdout);
-//RS                 eprint!("{}", evaluated.stderr);
-//RS                 println!("{}", value.render_pretty());
-//RS             }
-//RS         }
-//RS         Err(diags) => {
-//RS             eprint!(
-//RS                 "{}",
-//RS                 jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &diags, mode.color_stderr())
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-A11YGATE1=B (c134 Phase 6): the a11y lint codes (E2930/E2931). These are
-//RS /// always computed during sema (same as any other `Severity::Lint`), but per
-//RS /// the ratified decision they only *surface* under `jet lint --a11y` — never
-//RS /// as ordinary build/run/emit warnings. `visible_lints` is the one filter
-//RS /// every normal compile-flavored command applies before printing `out.lints`.
-//RS const A11Y_LINT_CODES: [&str; 2] = ["E2930", "E2931"];
-//RS 
-//RS pub(crate) fn visible_lints(
-//RS     lints: &[jet::Diagnostics::Diagnostic],
-//RS ) -> Vec<jet::Diagnostics::Diagnostic> {
-//RS     lints
-//RS         .iter()
-//RS         .filter(|d| !A11Y_LINT_CODES.contains(&d.code.as_str()))
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS /// D-TOOL3 (E2-M11): `jet emit --rust` — print Rust from optimized canonical
-//RS /// MIR for a checked Jet file. `--metadata` adds the canonical MIR identity
-//RS /// header used by artifact witnesses.
-//RS pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let (diagnostics, bundle, _facts) =
-//RS         jet::Driver::check_file_with_effect_facts_for_run(file, "dev", &BTreeMap::new());
-//RS     let (errors, lints): (Vec<_>, Vec<_>) = diagnostics
-//RS         .into_iter()
-//RS         .partition(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
-//RS     if !errors.is_empty() {
-//RS         report_problems(mode, file, &src, &errors);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let bundle = match bundle {
-//RS         Some(bundle) => bundle,
-//RS         None => {
-//RS             report_problems(mode, file, &src, &[]);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let lints = visible_lints(&lints);
-//RS     if !lints.is_empty() {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored(file, &src, &lints, mode.color_stderr())
-//RS         );
-//RS     }
-//RS     // Lowering and emission recurse with body depth (a long value `if` chain
-//RS     // lowers one nested frame per arm); run them on the compiler stack like
-//RS     // every other compiler entry.
-//RS     let bundle = &bundle;
-//RS     let rust = jet::with_compiler_stack(move || {
-//RS         let target = if bundle.build_facts.target_triple.is_empty() {
-//RS             jet_foundation::Layout::TargetLayout::host()
-//RS         } else {
-//RS             jet_foundation::Layout::TargetLayout::from_triple(
-//RS                 bundle.build_facts.target_triple.clone(),
-//RS             )
-//RS         };
-//RS         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
-//RS             bundle,
-//RS             jet_foundation::MIR::MirArtifactRequest::new(
-//RS                 jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS                 jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS             ),
-//RS         );
-//RS         let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
-//RS         let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS         execution.emit_metadata = emit_metadata;
-//RS         execution.semantic_digest = emit_metadata.then_some(mir_digest);
-//RS         jet::Codegen::MIRRust::emit_mir_program(
-//RS             &mir,
-//RS             &jet::Codegen::MIRRust::MirRustConfig {
-//RS                 target,
-//RS                 target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-//RS                 root_prefix: String::new(),
-//RS                 execution,
-//RS             },
-//RS         )
-//RS     });
-//RS     print!("{rust}");
-//RS }
-//RS /// Project the shared cost diagnostics consumed by `jet check` and
-//RS /// `jet lint --cost`. Sema owns view-copy diagnostics; typed TIR owns the
-//RS /// remaining cost kinds. Optimizer-proven removals stay in `jet explain --cost`
-//RS /// only.
-//RS pub(crate) fn cost_diagnostics(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     sema_diagnostics: &[jet::Diagnostics::Diagnostic],
-//RS ) -> Result<Vec<jet::Diagnostics::Diagnostic>, jet::Codegen::TIR::TCostReportError> {
-//RS     let report = jet::Codegen::TIR::cost_report(bundle)?;
-//RS     Ok(cost_diagnostics_from_report(&report, sema_diagnostics))
-//RS }
-//RS 
-//RS fn cost_diagnostics_from_report(
-//RS     report: &jet::Codegen::TIR::TCostReport,
-//RS     sema_diagnostics: &[jet::Diagnostics::Diagnostic],
-//RS ) -> Vec<jet::Diagnostics::Diagnostic> {
-//RS     let mut diagnostics = sema_diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| is_cost_diagnostic(diagnostic))
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     diagnostics.extend(
-//RS         report
-//RS             .sites
-//RS             .iter()
-//RS             .filter(|site| {
-//RS                 site.loop_depth > 0
-//RS                     && matches!(site.state, jet::Codegen::TIR::TCostState::SemanticRemainder)
-//RS                     && !matches!(site.kind, jet::Codegen::TIR::TCostKind::ViewMaterialization)
-//RS             })
-//RS             .map(|site| {
-//RS                 jet::Diagnostics::Diagnostic::from_row(
-//RS                     "L2510",
-//RS                     &[
-//RS                         ("operation", site.kind.operation()),
-//RS                         ("fix", site.kind.fix()),
-//RS                     ],
-//RS                     Some(site.span),
-//RS                 )
-//RS             }),
-//RS     );
-//RS     dedup_cost_diagnostics(&mut diagnostics);
-//RS     diagnostics
-//RS }
-//RS 
-//RS fn is_cost_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) -> bool {
-//RS     diagnostic.code == "L2510"
-//RS }
-//RS 
-//RS fn same_cost_diagnostic(
-//RS     left: &jet::Diagnostics::Diagnostic,
-//RS     right: &jet::Diagnostics::Diagnostic,
-//RS ) -> bool {
-//RS     left.code == right.code
-//RS         && left.severity == right.severity
-//RS         && left.span == right.span
-//RS         && left.what == right.what
-//RS         && left.why == right.why
-//RS         && left.fix == right.fix
-//RS }
-//RS 
-//RS fn dedup_cost_diagnostics(diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>) {
-//RS     let mut seen = Vec::new();
-//RS     diagnostics.retain(|diagnostic| {
-//RS         if !is_cost_diagnostic(diagnostic) {
-//RS             return true;
-//RS         }
-//RS         if seen
-//RS             .iter()
-//RS             .any(|previous| same_cost_diagnostic(previous, diagnostic))
-//RS         {
-//RS             false
-//RS         } else {
-//RS             seen.push(diagnostic.clone());
-//RS             true
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS pub(crate) fn merge_cost_diagnostics(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>,
-//RS ) -> Result<(), jet::Codegen::TIR::TCostReportError> {
-//RS     dedup_cost_diagnostics(diagnostics);
-//RS     let cost_diagnostics = cost_diagnostics(bundle, diagnostics)?;
-//RS     for diagnostic in cost_diagnostics {
-//RS         if !diagnostics
-//RS             .iter()
-//RS             .any(|existing| same_cost_diagnostic(existing, &diagnostic))
-//RS         {
-//RS             diagnostics.push(diagnostic);
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// `jet lint --cost <file>` — surface semantic costs that remain on a hot
-//RS /// loop.  The report is opt-in and fails only when a typed cost site exists.
-//RS pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let projection = match crate::CmdInspect::check_projection_for_effects(
-//RS         Path::new(file),
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS     ) {
-//RS         Ok(projection) => projection,
-//RS         Err(diagnostics) => {
-//RS             report_problems(mode, file, &src, &diagnostics);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
-//RS         Ok(lints) => lints,
-//RS         Err(error) => exit_cost_projection_error(file, &error),
-//RS     };
-//RS     if lints.is_empty() {
-//RS         if mode.json {
-//RS             let machine_file = crate::machine_report_path_for_process(file);
-//RS             print!("{}", jet::render_all_json(&machine_file, &src, &[]));
-//RS         } else {
-//RS             println!("ok: `{}` has no hidden dynamic costs in loops", file);
-//RS         }
-//RS         return;
-//RS     }
-//RS     if mode.json {
-//RS         let machine_file = crate::machine_report_path_for_process(file);
-//RS         eprint!("{}", jet::render_all_json(&machine_file, &src, &lints));
-//RS     } else {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored(file, &src, &lints, mode.color_stderr())
-//RS         );
-//RS         let n = lints.len();
-//RS         eprintln!(
-//RS             "\n{} hidden dynamic cost warning{} found",
-//RS             n,
-//RS             if n == 1 { "" } else { "s" }
-//RS         );
-//RS     }
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS /// D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y <file>` — the opt-in
-//RS /// surface for accessibility lints (E2930 unlabeled control, E2931 duplicate
-//RS /// label). Never runs during `jet build`/`jet run`/`jet check`; exits nonzero
-//RS /// when it finds something so a project can gate CI on "zero a11y warnings"
-//RS /// without those warnings ever blocking ordinary compilation.
-//RS pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let diags = jet::check_with_path(file);
-//RS     let errors: Vec<jet::Diagnostics::Diagnostic> = diags
-//RS         .iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .cloned()
-//RS         .collect();
-//RS     if !errors.is_empty() {
-//RS         report_problems(mode, file, &src, &errors);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let a11y_lints: Vec<jet::Diagnostics::Diagnostic> = diags
-//RS         .into_iter()
-//RS         .filter(|d| A11Y_LINT_CODES.contains(&d.code.as_str()))
-//RS         .collect();
-//RS     if a11y_lints.is_empty() {
-//RS         if mode.json {
-//RS             let machine_file = crate::machine_report_path_for_process(file);
-//RS             print!("{}", jet::render_all_json(&machine_file, &src, &[]));
-//RS         } else {
-//RS             println!("ok: `{}` has no accessibility problems", file);
-//RS         }
-//RS         return;
-//RS     }
-//RS     if mode.json {
-//RS         let machine_file = crate::machine_report_path_for_process(file);
-//RS         eprint!("{}", jet::render_all_json(&machine_file, &src, &a11y_lints));
-//RS     } else {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored(file, &src, &a11y_lints, mode.color_stderr())
-//RS         );
-//RS         let n = a11y_lints.len();
-//RS         eprintln!(
-//RS             "\n{} accessibility warning{} found",
-//RS             n,
-//RS             if n == 1 { "" } else { "s" }
-//RS         );
-//RS     }
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS /// `jet lint --complexity <file>` — deterministic per-function scores. The
-//RS /// category reports by default; `--max=<n>` is the explicit failure gate.
-//RS ///
-//RS /// D-ARCH-ADVICE1: the read-only inspection form (without `--max`) also
-//RS /// projects conservative architecture evidence from the checked semantic
-//RS /// index. Complexity remains a local control-flow signal; call-graph rows are
-//RS /// only invariant candidates and never an automatic refactor or policy.
-//RS pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Option<u32>) {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let diags = jet::check_with_path(file);
-//RS     let errors: Vec<jet::Diagnostics::Diagnostic> = diags
-//RS         .iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .cloned()
-//RS         .collect();
-//RS     if !errors.is_empty() {
-//RS         report_problems(mode, file, &src, &errors);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(error) => {
-//RS             report_problems(mode, file, &src, &[error.diagnostic()]);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let (tokens, lex_errors) = jet::Lexer::lex(&source_for_parse);
-//RS     if !lex_errors.is_empty() {
-//RS         report_problems(mode, file, &src, &lex_errors);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let program = match jet::Parser::parse_with_source(&tokens, &source_for_parse) {
-//RS         Ok(program) => program,
-//RS         Err(parse_errors) => {
-//RS             report_problems(mode, file, &src, &parse_errors);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let reports = jet::Sema::cognitive_complexity_reports(&program);
-//RS     let rows: Vec<_> = reports
-//RS         .iter()
-//RS         .map(|report| {
-//RS             let line = src[..report.span.start]
-//RS                 .bytes()
-//RS                 .filter(|byte| *byte == b'\n')
-//RS                 .count()
-//RS                 + 1;
-//RS             let over = max_budget.is_some_and(|budget| report.score > budget);
-//RS             (line, over)
-//RS         })
-//RS         .collect();
-//RS     if mode.json {
-//RS         let json_rows: Vec<String> = reports
-//RS             .iter()
-//RS             .zip(&rows)
-//RS             .map(|(report, (line, over))| {
-//RS                 let budget =
-//RS                     max_budget.map_or_else(|| "null".to_string(), |value| value.to_string());
-//RS                 format!(
-//RS                     "{{\"file\":{},\"fn\":{},\"line\":{},\"score\":{},\"budget\":{},\"over\":{}}}",
-//RS                     json_string(file),
-//RS                     json_string(&report.name),
-//RS                     line,
-//RS                     report.score,
-//RS                     budget,
-//RS                     over
-//RS                 )
-//RS             })
-//RS             .collect();
-//RS         if max_budget.is_none() {
-//RS             let inspection = collect_architecture_inspection(file);
-//RS             let mut envelope = StatusEnvelope::new("lint.complexity", true)
-//RS                 .with_field("contract", ARCH_ADVICE_SCHEMA)
-//RS                 .with_field("file", file)
-//RS                 .with_field(
-//RS                     "local_complexity",
-//RS                     complexity_rows_value(file, &reports, &rows),
-//RS                 )
-//RS                 .with_field("architecture_advice", architecture_inspection_value(&inspection))
-//RS                 .with_field(
-//RS                     "measurement",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("benchmark", "not_run")
-//RS                             .with("change_task", "not_measured")
-//RS                             .with("claim", "none"),
-//RS                     ),
-//RS                 );
-//RS             if let Some(check) = inspection.check.clone() {
-//RS                 envelope = envelope.with_field("check", check);
-//RS             }
-//RS             println!("{}", envelope.json());
-//RS         } else {
-//RS             // The explicit budget form keeps its established machine array
-//RS             // contract and rejection behavior; advice is inspection-only.
-//RS             println!("[{}]", json_rows.join(","));
-//RS         }
-//RS     } else {
-//RS         for (report, (line, _)) in reports.iter().zip(&rows) {
-//RS             match max_budget {
-//RS                 Some(budget) => println!(
-//RS                     "{}:{} fn {} — score {} (budget {})",
-//RS                     file, line, report.name, report.score, budget
-//RS                 ),
-//RS                 None => println!(
-//RS                     "{}:{} fn {} — score {}",
-//RS                     file, line, report.name, report.score
-//RS                 ),
-//RS             }
-//RS         }
-//RS         if max_budget.is_none() {
-//RS             render_architecture_inspection(&collect_architecture_inspection(file));
-//RS         }
-//RS     }
-//RS     let Some(budget) = max_budget else { return };
-//RS     let exceeded: Vec<_> = reports
-//RS         .iter()
-//RS         .filter(|report| report.score > budget)
-//RS         .map(|report| {
-//RS             jet::Diagnostics::Diagnostic::lint(
-//RS                 "L2902",
-//RS                 format!(
-//RS                     "function `{}` has cognitive complexity {} above budget {}",
-//RS                     report.name, report.score, budget
-//RS                 ),
-//RS                 "the function's control flow is harder to read and maintain than the selected budget allows".to_string(),
-//RS                 "split the function, reduce nesting, or replace mixed control flow with a focused helper".to_string(),
-//RS                 Some(report.span),
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     if exceeded.is_empty() {
-//RS         return;
-//RS     }
-//RS     if !mode.json {
-//RS         eprint!(
-//RS             "{}",
-//RS             jet::render_all_colored(file, &src, &exceeded, mode.color_stderr())
-//RS         );
-//RS     }
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS const ARCH_ADVICE_SCHEMA: &str = "jet.architecture-advice/v1";
-//RS const ARCH_ADVICE_MAX_ROWS: usize = 64;
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct ArchitectureSourceEvidence {
-//RS     role: &'static str,
-//RS     module_path: String,
-//RS     start: usize,
-//RS     end: usize,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct ArchitectureBehaviorCheck {
-//RS     name: &'static str,
-//RS     status: &'static str,
-//RS     detail: &'static str,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct ArchitectureAdviceRow {
-//RS     kind: &'static str,
-//RS     subject: String,
-//RS     scope: &'static str,
-//RS     evidence: Vec<ArchitectureSourceEvidence>,
-//RS     boundaries: Vec<String>,
-//RS     behavior: Vec<ArchitectureBehaviorCheck>,
-//RS     uncertainty: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct ArchitectureCall {
-//RS     caller_key: String,
-//RS     caller_name: String,
-//RS     caller_module: String,
-//RS     caller_span: (usize, usize),
-//RS     callee_key: String,
-//RS     callee_name: String,
-//RS     callee_module: String,
-//RS     callee_span: (usize, usize),
-//RS     callee_return: Option<String>,
-//RS     call_span: (usize, usize),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct ArchitectureInspection {
-//RS     status: &'static str,
-//RS     check: Option<StatusValue>,
-//RS     rows: Vec<ArchitectureAdviceRow>,
-//RS     reason: Option<String>,
-//RS }
-//RS 
-//RS fn complexity_rows_value(
-//RS     file: &str,
-//RS     reports: &[jet::Sema::CognitiveComplexityReport],
-//RS     rows: &[(usize, bool)],
-//RS ) -> StatusValue {
-//RS     StatusValue::array(reports.iter().zip(rows).map(|(report, (line, over))| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("file", file)
-//RS                 .with("fn", report.name.as_str())
-//RS                 .with("line", *line)
-//RS                 .with("score", report.score)
-//RS                 .with("budget", StatusValue::Null)
-//RS                 .with("over", *over),
-//RS         )
-//RS     }))
-//RS }
-//RS 
-//RS fn collect_architecture_inspection(file: &str) -> ArchitectureInspection {
-//RS     let projection = match crate::CmdInspect::check_projection(Path::new(file)) {
-//RS         Ok(projection) => projection,
-//RS         Err(diagnostics) => {
-//RS             let reason = diagnostics
-//RS                 .iter()
-//RS                 .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("; ");
-//RS             return ArchitectureInspection {
-//RS                 status: "unavailable",
-//RS                 check: None,
-//RS                 rows: Vec::new(),
-//RS                 reason: Some(format!(
-//RS                     "the checked semantic projection was unavailable; no architecture claim was emitted ({reason})"
-//RS                 )),
-//RS             };
-//RS         }
-//RS     };
-//RS     let check = crate::CmdInspect::check_result_value(&projection.check);
-//RS     let calls = architecture_calls(projection.index());
-//RS     let mut rows = architecture_advice_rows(projection.index(), &calls);
-//RS     rows.sort_by(|left, right| {
-//RS         left.subject
-//RS             .cmp(&right.subject)
-//RS             .then(left.kind.cmp(right.kind))
-//RS             .then(left.scope.cmp(right.scope))
-//RS     });
-//RS     rows.truncate(ARCH_ADVICE_MAX_ROWS);
-//RS     ArchitectureInspection {
-//RS         status: "advisory",
-//RS         check: Some(check),
-//RS         rows,
-//RS         reason: None,
-//RS     }
-//RS }
-//RS 
-//RS fn architecture_calls(index: &jet_semindex::SemIndex) -> Vec<ArchitectureCall> {
-//RS     index
-//RS         .call_edges()
-//RS         .iter()
-//RS         .filter_map(|edge| {
-//RS             let caller = index.definitions().iter().find(|definition| {
-//RS                 definition.module_path == edge.module_path
-//RS                     && function_definition_matches(&definition.name, &edge.caller)
-//RS             })?;
-//RS             let reference = index
-//RS                 .references()
-//RS                 .iter()
-//RS                 .filter(|reference| {
-//RS                     reference.module_path == edge.module_path
-//RS                         && spans_overlap(
-//RS                             (reference.span.start, reference.span.end),
-//RS                             (edge.call_span.start, edge.call_span.end),
-//RS                         )
-//RS                         && reference.target.is_some()
-//RS                 })
-//RS                 .min_by_key(|reference| {
-//RS                     reference.span.end.saturating_sub(reference.span.start)
-//RS                 })?;
-//RS             let target = reference.target.as_ref()?;
-//RS             let callee = index.definitions().iter().find(|definition| {
-//RS                 definition.module_path == target.module_path
-//RS                     && definition.def_span.start == target.def_span.start
-//RS                     && definition.def_span.end == target.def_span.end
-//RS             })?;
-//RS             let callee_return = match &callee.kind {
-//RS                 jet_semindex::SymbolKind::Function { ret, .. } => ret.clone(),
-//RS                 _ => return None,
-//RS             };
-//RS             Some(ArchitectureCall {
-//RS                 caller_key: definition_key(caller),
-//RS                 caller_name: caller.qualified_name.clone(),
-//RS                 caller_module: caller.module_path.clone(),
-//RS                 caller_span: (caller.def_span.start, caller.def_span.end),
-//RS                 callee_key: definition_key(callee),
-//RS                 callee_name: callee.qualified_name.clone(),
-//RS                 callee_module: callee.module_path.clone(),
-//RS                 callee_span: (callee.def_span.start, callee.def_span.end),
-//RS                 callee_return,
-//RS                 call_span: (edge.call_span.start, edge.call_span.end),
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn function_definition_matches(name: &str, key: &str) -> bool {
-//RS     key == name || key.rsplit("::").next().is_some_and(|short| short == name)
-//RS }
-//RS 
-//RS fn definition_key(definition: &jet_semindex::SymbolDef) -> String {
-//RS     format!(
-//RS         "{}:{}..{}",
-//RS         definition.module_path, definition.def_span.start, definition.def_span.end
-//RS     )
-//RS }
-//RS 
-//RS fn spans_overlap(left: (usize, usize), right: (usize, usize)) -> bool {
-//RS     left.0 <= right.1 && right.0 <= left.1
-//RS }
-//RS 
-//RS fn architecture_advice_rows(
-//RS     index: &jet_semindex::SemIndex,
-//RS     calls: &[ArchitectureCall],
-//RS ) -> Vec<ArchitectureAdviceRow> {
-//RS     let mut rows = Vec::new();
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut by_callee: BTreeMap<String, Vec<ArchitectureCall>> = BTreeMap::new();
-//RS     let mut by_caller: BTreeMap<String, Vec<ArchitectureCall>> = BTreeMap::new();
-//RS     for call in calls {
-//RS         by_callee
-//RS             .entry(call.callee_key.clone())
-//RS             .or_default()
-//RS             .push(call.clone());
-//RS         by_caller
-//RS             .entry(call.caller_key.clone())
-//RS             .or_default()
-//RS             .push(call.clone());
-//RS     }
-//RS 
-//RS     for calls in by_callee.into_values() {
-//RS         let callers = calls
-//RS             .iter()
-//RS             .map(|call| call.caller_key.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         if callers.len() < 2 {
-//RS             continue;
-//RS         }
-//RS         let subject = calls[0].callee_name.clone();
-//RS         let key = format!("shared-callee:{subject}");
-//RS         if seen.insert(key) {
-//RS             rows.push(make_architecture_advice_row(
-//RS                 index,
-//RS                 "shared-callee",
-//RS                 subject,
-//RS                 calls,
-//RS                 "one checked callable is consumed by multiple callers; review whether they must preserve one invariant",
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     for calls in by_caller.into_values() {
-//RS         let callees = calls
-//RS             .iter()
-//RS             .map(|call| call.callee_key.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         let return_types = calls
-//RS             .iter()
-//RS             .filter_map(|call| call.callee_return.as_deref())
-//RS             .collect::<BTreeSet<_>>();
-//RS         if callees.len() < 2 || return_types.len() != 1 {
-//RS             continue;
-//RS         }
-//RS         let subject = calls[0].caller_name.clone();
-//RS         let key = format!("consumer-agreement:{subject}");
-//RS         if seen.insert(key) {
-//RS             rows.push(make_architecture_advice_row(
-//RS                 index,
-//RS                 "consumer-agreement",
-//RS                 subject,
-//RS                 calls,
-//RS                 "one checked consumer joins multiple same-result call paths; review whether their results must agree",
-//RS             ));
-//RS         }
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn make_architecture_advice_row(
-//RS     index: &jet_semindex::SemIndex,
-//RS     kind: &'static str,
-//RS     subject: String,
-//RS     calls: Vec<ArchitectureCall>,
-//RS     note: &'static str,
-//RS ) -> ArchitectureAdviceRow {
-//RS     let mut evidence = Vec::new();
-//RS     let mut evidence_keys = BTreeSet::new();
-//RS     let mut boundary_set = BTreeSet::new();
-//RS     for call in &calls {
-//RS         boundary_set.insert(format!(
-//RS             "{} -> {}",
-//RS             call.caller_module, call.callee_module
-//RS         ));
-//RS         let entries = [
-//RS             (
-//RS                 "caller-definition",
-//RS                 call.caller_module.as_str(),
-//RS                 call.caller_span,
-//RS             ),
-//RS             (
-//RS                 "callee-definition",
-//RS                 call.callee_module.as_str(),
-//RS                 call.callee_span,
-//RS             ),
-//RS             ("checked-call-site", call.caller_module.as_str(), call.call_span),
-//RS         ];
-//RS         for (role, module_path, (start, end)) in entries {
-//RS             let key = format!("{role}:{module_path}:{start}:{end}");
-//RS             if evidence_keys.insert(key) {
-//RS                 evidence.push(ArchitectureSourceEvidence {
-//RS                     role,
-//RS                     module_path: module_path.to_string(),
-//RS                     start,
-//RS                     end,
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     evidence.sort_by(|left, right| {
-//RS         left.module_path
-//RS             .cmp(&right.module_path)
-//RS             .then(left.start.cmp(&right.start))
-//RS             .then(left.role.cmp(right.role))
-//RS     });
-//RS     let cross_module = calls
-//RS         .iter()
-//RS         .any(|call| call.caller_module != call.callee_module);
-//RS     let scope = if cross_module {
-//RS         "cross-module"
-//RS     } else {
-//RS         "same-module"
-//RS     };
-//RS     let mut boundaries = boundary_set.into_iter().collect::<Vec<_>>();
-//RS     for call in &calls {
-//RS         if let Some(effect) = index.effect_of(&call.caller_name) {
-//RS             if !effect.inferred.is_empty() {
-//RS                 boundaries.push(format!(
-//RS                     "effects {}: {}",
-//RS                     call.caller_name,
-//RS                     effect.inferred.join(", ")
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     boundaries.sort();
-//RS     boundaries.dedup();
-//RS     ArchitectureAdviceRow {
-//RS         kind,
-//RS         subject,
-//RS         scope,
-//RS         evidence,
-//RS         boundaries,
-//RS         behavior: vec![
-//RS             ArchitectureBehaviorCheck {
-//RS                 name: "checked_reference_resolution",
-//RS                 status: "passed",
-//RS                 detail: "the compiler semantic index resolved the definitions and call sites",
-//RS             },
-//RS             ArchitectureBehaviorCheck {
-//RS                 name: "consumer_behavior",
-//RS                 status: "not_run",
-//RS                 detail: "this read-only inspection does not execute user code",
-//RS             },
-//RS             ArchitectureBehaviorCheck {
-//RS                 name: "cross_mode_agreement",
-//RS                 status: "unknown",
-//RS                 detail: "no runtime or change-task receipt was supplied",
-//RS             },
-//RS         ],
-//RS         uncertainty: vec![
-//RS             note.to_string(),
-//RS             "the checked call graph proves references, not a business invariant".to_string(),
-//RS             "operator review may reject this candidate; no refactor or policy is applied".to_string(),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn architecture_source_value(evidence: &ArchitectureSourceEvidence) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("role", evidence.role)
-//RS             .with("module", evidence.module_path.as_str())
-//RS             .with(
-//RS                 "span",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("start", evidence.start)
-//RS                         .with("end", evidence.end),
-//RS                 ),
-//RS             ),
-//RS     )
-//RS }
-//RS 
-//RS fn architecture_row_value(row: &ArchitectureAdviceRow) -> StatusValue {
-//RS     let behavior = StatusValue::array(row.behavior.iter().map(|check| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("name", check.name)
-//RS                 .with("status", check.status)
-//RS                 .with("detail", check.detail),
-//RS         )
-//RS     }));
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("kind", row.kind)
-//RS             .with("subject", row.subject.as_str())
-//RS             .with("scope", row.scope)
-//RS             .with(
-//RS                 "source_evidence",
-//RS                 StatusValue::array(row.evidence.iter().map(architecture_source_value)),
-//RS             )
-//RS             .with(
-//RS                 "affected_boundaries",
-//RS                 StatusValue::array(row.boundaries.iter().map(|value| StatusValue::from(value.as_str()))),
-//RS             )
-//RS             .with("behavioral_checks", behavior)
-//RS             .with(
-//RS                 "uncertainty",
-//RS                 StatusValue::array(row.uncertainty.iter().map(|value| StatusValue::from(value.as_str()))),
-//RS             )
-//RS             .with("operator_action", "review_or_reject"),
-//RS     )
-//RS }
-//RS 
-//RS fn architecture_inspection_value(inspection: &ArchitectureInspection) -> StatusValue {
-//RS     let mut fields = StatusFields::new()
-//RS         .with("status", inspection.status)
-//RS         .with(
-//RS             "rows",
-//RS             StatusValue::array(inspection.rows.iter().map(architecture_row_value)),
-//RS         )
-//RS         .with("operator_action", "review_or_reject");
-//RS     if let Some(reason) = inspection.reason.as_deref() {
-//RS         fields = fields.with("reason", reason);
-//RS     }
-//RS     StatusValue::object(fields)
-//RS }
-//RS 
-//RS fn render_architecture_inspection(inspection: &ArchitectureInspection) {
-//RS     println!("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):");
-//RS     if let Some(reason) = inspection.reason.as_deref() {
-//RS         println!("  status: unavailable — {reason}");
-//RS     } else if inspection.rows.is_empty() {
-//RS         println!(
-//RS             "  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant"
-//RS         );
-//RS     } else {
-//RS         for row in &inspection.rows {
-//RS             println!("  {} `{}` [{}]", row.kind, row.subject, row.scope);
-//RS             for evidence in &row.evidence {
-//RS                 println!(
-//RS                     "    evidence: {} {}:{}..{}",
-//RS                     evidence.role,
-//RS                     evidence.module_path,
-//RS                     evidence.start,
-//RS                     evidence.end
-//RS                 );
-//RS             }
-//RS             for boundary in &row.boundaries {
-//RS                 println!("    boundary: {boundary}");
-//RS             }
-//RS             for check in &row.behavior {
-//RS                 println!(
-//RS                     "    check: {}={} ({})",
-//RS                     check.name, check.status, check.detail
-//RS                 );
-//RS             }
-//RS             for uncertainty in &row.uncertainty {
-//RS                 println!("    uncertainty: {uncertainty}");
-//RS             }
-//RS         }
-//RS     }
-//RS     println!("  measurement: benchmark/change-task not measured; no advantage claim");
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) struct BenchEvidence {
-//RS     pub(crate) name: String,
-//RS     pub(crate) samples: Vec<(u128, u64)>,
-//RS     /// One exact `(jet_mem allocation events, requested bytes, iterations)`
-//RS     /// row per measured trial. Calibration/warmup runs are outside the reset
-//RS     /// boundary and never enter these facts.
-//RS     pub(crate) allocation_samples: Vec<(u128, u128, u64)>,
-//RS }
-//RS 
-//RS /// D-CLAIM-BENCH1=A: collect the same exact twenty samples through the test
-//RS /// harness used by `jet test --measure`. Budget providers call this seam; the
-//RS /// retired benchmark command is not part of measurement anymore.
-//RS pub(crate) fn collect_measure_evidence(
-//RS     file: &str,
-//RS     src: &str,
-//RS     mode: OutputMode,
-//RS     filter: Option<&str>,
-//RS ) -> Vec<BenchEvidence> {
-//RS     let (rust_code, ffi_link) = match jet::compile_tests_with_path(src, file) {
-//RS         Ok(value) => value,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, src, &diags);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let project_root = match jet::build_project_root(file) {
-//RS         Ok(root) => root,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, src, &diags);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let bin = project_root
-//RS         .join(".jet")
-//RS         .join("build")
-//RS         .join(format!("test_measure_{}", stem(file)));
-//RS     build(
-//RS         file,
-//RS         &rust_code,
-//RS         None,
-//RS         bin.clone(),
-//RS         BuildProfile::Release,
-//RS         ffi_link.as_ref(),
-//RS         &[],
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         mode,
-//RS         false,
-//RS         None,
-//RS     );
-//RS     let mut command = Command::new(&bin);
-//RS     command
-//RS         .env("JET_TEST_MEASURE", "1")
-//RS         .env("JET_TEST_MEASURE_EVIDENCE", "1");
-//RS     if let Some(filter) = filter {
-//RS         command.env("JET_TEST_FILTER", filter);
-//RS     }
-//RS     let output = command.output().unwrap_or_else(|error| {
-//RS         eprintln!("measure: couldn't run `{}`: {}", bin.display(), error);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     if !output.stderr.is_empty() {
-//RS         eprint!("{}", String::from_utf8_lossy(&output.stderr));
-//RS     }
-//RS     if !output.status.success() {
-//RS         exit(crate::CmdCompile::child_exit_code(output.status));
-//RS     }
-//RS     let stdout = String::from_utf8(output.stdout).unwrap_or_else(|_| {
-//RS         eprintln!("measure: harness emitted non-UTF-8 evidence");
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let mut evidence = Vec::new();
-//RS     for line in stdout.lines() {
-//RS         if let Some(wire) = line.strip_prefix("JETALLOC1\t") {
-//RS             let mut fields = wire.split('\t');
-//RS             let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted malformed allocation identity");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS             let tier = fields
-//RS                 .next()
-//RS                 .filter(|value| !value.is_empty())
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!("measure: harness emitted no execution tier for allocation evidence");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             let profile = fields
-//RS                 .next()
-//RS                 .filter(|value| !value.is_empty())
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!("measure: harness emitted no build profile for allocation evidence");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             let warmups = fields
-//RS                 .next()
-//RS                 .and_then(|value| value.parse::<u64>().ok())
-//RS                 .filter(|value| *value > 0)
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!(
-//RS                         "measure: harness emitted invalid warmup count for allocation evidence"
-//RS                     );
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             let iters = fields
-//RS                 .next()
-//RS                 .and_then(|value| value.parse::<u64>().ok())
-//RS                 .filter(|value| *value > 0)
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!("measure: harness emitted invalid allocation iteration count");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             let serial = fields
-//RS                 .next()
-//RS                 .and_then(|value| value.parse::<bool>().ok())
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!("measure: harness emitted non-serial allocation evidence");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             if tier != "aot" || profile != "release" || warmups != 5 || !serial {
-//RS                 eprintln!("measure: harness emitted allocation evidence without the optimized serial AOT profile");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             let samples = fields
-//RS                 .map(|value| {
-//RS                     let (count, bytes) = value.split_once(':').ok_or(())?;
-//RS                     Ok((
-//RS                         count.parse::<u128>().map_err(|_| ())?,
-//RS                         bytes.parse::<u128>().map_err(|_| ())?,
-//RS                         iters,
-//RS                     ))
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, ()>>()
-//RS                 .unwrap_or_else(|_| {
-//RS                     eprintln!("measure: harness emitted malformed allocation evidence");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             if samples.len() != 20 {
-//RS                 eprintln!(
-//RS                     "measure: harness emitted {} allocation samples; policy requires 20",
-//RS                     samples.len()
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             let entry = evidence
-//RS                 .iter_mut()
-//RS                 .find(|entry: &&mut BenchEvidence| entry.name == name)
-//RS                 .unwrap_or_else(|| {
-//RS                     eprintln!("measure: allocation evidence preceded its named claim");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 });
-//RS             entry.allocation_samples = samples;
-//RS             continue;
-//RS         }
-//RS         let Some(wire) = line.strip_prefix("JETTESTMEASURE1\t") else {
-//RS             continue;
-//RS         };
-//RS         let mut fields = wire.split('\t');
-//RS         let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
-//RS             eprintln!("measure: harness emitted malformed claim identity");
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         });
-//RS         let tier = fields
-//RS             .next()
-//RS             .filter(|value| !value.is_empty())
-//RS             .unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted no execution tier");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         let profile = fields
-//RS             .next()
-//RS             .filter(|value| !value.is_empty())
-//RS             .unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted no build profile");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         let warmups = fields
-//RS             .next()
-//RS             .and_then(|value| value.parse::<u64>().ok())
-//RS             .filter(|value| *value > 0)
-//RS             .unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted invalid warmup count");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         let iters = fields
-//RS             .next()
-//RS             .and_then(|value| value.parse::<u64>().ok())
-//RS             .filter(|value| *value > 0)
-//RS             .unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted invalid iteration count");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         let serial = fields
-//RS             .next()
-//RS             .and_then(|value| value.parse::<bool>().ok())
-//RS             .unwrap_or_else(|| {
-//RS                 eprintln!("measure: harness emitted non-serial timing evidence");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         if tier != "aot" || profile != "release" || warmups != 5 || !serial {
-//RS             eprintln!(
-//RS                 "measure: harness emitted timing evidence without the optimized serial AOT profile"
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let samples = fields
-//RS             .map(|value| value.parse::<u128>().map(|elapsed| (elapsed, iters)))
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .unwrap_or_else(|_| {
-//RS                 eprintln!("measure: harness emitted invalid exact sample");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             });
-//RS         if samples.len() != 20 {
-//RS             eprintln!(
-//RS                 "measure: harness emitted {} samples; policy requires 20",
-//RS                 samples.len()
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         evidence.push(BenchEvidence {
-//RS             name,
-//RS             samples,
-//RS             allocation_samples: Vec::new(),
-//RS         });
-//RS     }
-//RS     evidence
-//RS }
-//RS 
-//RS /// Collect `ServiceProbe` evidence by cycling each named service down→up→ready
-//RS /// 20 times. Reads `env.jet` from the project root to resolve `DevServicePlan`.
-//RS /// Returns one `ServiceEvidence` entry per service name present in `specs`.
-//RS pub(crate) fn collect_service_evidence(
-//RS     root: &std::path::Path,
-//RS     specs: &[jet::Sema::LocatedBudgetSpec],
-//RS ) -> Vec<crate::CmdBudget::ServiceEvidence> {
-//RS     // Names of services that have a ServiceProbe budget.
-//RS     let service_names: std::collections::BTreeSet<String> = specs
-//RS         .iter()
-//RS         .filter(|s| {
-//RS             let kind = s
-//RS                 .spec
-//RS                 .provider
-//RS                 .split_once('(')
-//RS                 .map(|(k, _)| k)
-//RS                 .unwrap_or(&s.spec.provider);
-//RS             kind == "ServiceProbe"
-//RS         })
-//RS         .map(|s| {
-//RS             s.spec
-//RS                 .provider
-//RS                 .split_once('(')
-//RS                 .and_then(|(_, rest)| rest.strip_suffix(')'))
-//RS                 .unwrap_or("")
-//RS                 .to_string()
-//RS         })
-//RS         .collect();
-//RS 
-//RS     if service_names.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS 
-//RS     let mut result = Vec::new();
-//RS     for name in &service_names {
-//RS         let argv = vec![
-//RS             "__service-probe".to_string(),
-//RS             name.clone(),
-//RS             "--no-color".to_string(),
-//RS         ];
-//RS         let output = match crate::EngineDispatch::capture(
-//RS             jet::Syntax::JETPACK_BINARY_NAME,
-//RS             "ServiceProbe",
-//RS             &argv,
-//RS             root,
-//RS         ) {
-//RS             Ok(output) => output,
-//RS             Err(_) => continue,
-//RS         };
-//RS         if !output.status.success() {
-//RS             let stderr = String::from_utf8_lossy(&output.stderr);
-//RS             eprintln!(
-//RS                 "budget: ServiceProbe `{name}` measurement failed: {}",
-//RS                 stderr.trim()
-//RS             );
-//RS             continue;
-//RS         }
-//RS         let stdout = match String::from_utf8(output.stdout) {
-//RS             Ok(stdout) => stdout,
-//RS             Err(_) => {
-//RS                 eprintln!("budget: ServiceProbe `{name}` returned non-UTF-8 evidence");
-//RS                 continue;
-//RS             }
-//RS         };
-//RS         let expected_name: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
-//RS         let mut rows = stdout.lines();
-//RS         let Some(row) = rows.next() else {
-//RS             eprintln!("budget: ServiceProbe `{name}` returned no evidence");
-//RS             continue;
-//RS         };
-//RS         if rows.next().is_some() {
-//RS             eprintln!("budget: ServiceProbe `{name}` returned extra evidence rows");
-//RS             continue;
-//RS         }
-//RS         let mut fields = row.split('\t');
-//RS         if fields.next() != Some("JETSERVICE1") || fields.next() != Some(expected_name.as_str()) {
-//RS             eprintln!("budget: ServiceProbe `{name}` returned incompatible evidence");
-//RS             continue;
-//RS         }
-//RS         let samples_ns: Option<Vec<u64>> = fields.map(|field| field.parse().ok()).collect();
-//RS         let Some(samples_ns) = samples_ns.filter(|samples| samples.len() == 20) else {
-//RS             eprintln!("budget: ServiceProbe `{name}` did not return exactly 20 samples");
-//RS             continue;
-//RS         };
-//RS         result.push(crate::CmdBudget::ServiceEvidence {
-//RS             name: name.clone(),
-//RS             samples_ns,
-//RS         });
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS /// Collect `SceneProbe` evidence by compiling the entry file, running it with
-//RS /// `JET_SCENE_PROBE=<name>` for each named scene, and parsing JETSCENE1 rows.
-//RS /// Returns one `SceneEvidence` per scene present in `specs`.
-//RS pub(crate) fn collect_scene_evidence(
-//RS     file: &str,
-//RS     src: &str,
-//RS     mode: OutputMode,
-//RS     specs: &[jet::Sema::LocatedBudgetSpec],
-//RS ) -> Vec<crate::CmdBudget::SceneEvidence> {
-//RS     // Names of scenes that have a SceneProbe budget.
-//RS     let scene_names: std::collections::BTreeSet<String> = specs
-//RS         .iter()
-//RS         .filter(|s| {
-//RS             let kind = s
-//RS                 .spec
-//RS                 .provider
-//RS                 .split_once('(')
-//RS                 .map(|(k, _)| k)
-//RS                 .unwrap_or(&s.spec.provider);
-//RS             kind == "SceneProbe"
-//RS         })
-//RS         .map(|s| {
-//RS             s.spec
-//RS                 .provider
-//RS                 .split_once('(')
-//RS                 .and_then(|(_, rest)| rest.strip_suffix(')'))
-//RS                 .unwrap_or("")
-//RS                 .to_string()
-//RS         })
-//RS         .collect();
-//RS 
-//RS     if scene_names.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS 
-//RS     // Compile the program once.
-//RS     let compiled = match jet::compile_with_path(src, file) {
-//RS         Ok(out) => out,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, src, &diags);
-//RS             return Vec::new();
-//RS         }
-//RS     };
-//RS     let project_root = match jet::build_project_root(file) {
-//RS         Ok(root) => root,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, src, &diags);
-//RS             return Vec::new();
-//RS         }
-//RS     };
-//RS     let bin = project_root
-//RS         .join(".jet")
-//RS         .join("build")
-//RS         .join(format!("scene_probe_{}", stem(file)));
-//RS     build(
-//RS         file,
-//RS         &compiled.rust,
-//RS         None,
-//RS         bin.clone(),
-//RS         BuildProfile::Release,
-//RS         compiled.ffi.as_ref(),
-//RS         &[],
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         mode,
-//RS         false,
-//RS         None,
-//RS     );
-//RS 
-//RS     let mut result = Vec::new();
-//RS     for scene_name in &scene_names {
-//RS         let out = match std::process::Command::new(&bin)
-//RS             .env("JET_SCENE_PROBE", scene_name)
-//RS             .output()
-//RS         {
-//RS             Ok(o) => o,
-//RS             Err(e) => {
-//RS                 eprintln!("budget: SceneProbe `{scene_name}` run failed: {e}");
-//RS                 continue;
-//RS             }
-//RS         };
-//RS         if !out.status.success() {
-//RS             eprintln!("budget: SceneProbe `{scene_name}` exited with non-zero status");
-//RS             continue;
-//RS         }
-//RS         let stdout = String::from_utf8(out.stdout).unwrap_or_default();
-//RS         let mut frame_ns = Vec::new();
-//RS         let mut draw_calls = Vec::new();
-//RS         let mut asset_bytes = Vec::new();
-//RS         let mut rss_hwm = Vec::new();
-//RS         let expected_hex: String = scene_name.bytes().map(|b| format!("{:02x}", b)).collect();
-//RS         for line in stdout.lines() {
-//RS             let Some(wire) = line.strip_prefix("JETSCENE1\t") else {
-//RS                 continue;
-//RS             };
-//RS             let mut fields = wire.splitn(4, '\t');
-//RS             let hex = fields.next().unwrap_or("");
-//RS             let metric = fields.next().unwrap_or("");
-//RS             let value_str = fields.next().unwrap_or("");
-//RS             if hex != expected_hex {
-//RS                 continue;
-//RS             }
-//RS             let value: u64 = match value_str.parse() {
-//RS                 Ok(v) => v,
-//RS                 Err(_) => {
-//RS                     eprintln!("budget: SceneProbe `{scene_name}` malformed value `{value_str}`");
-//RS                     continue;
-//RS                 }
-//RS             };
-//RS             match metric {
-//RS                 "FrameTime" => frame_ns.push(value),
-//RS                 "DrawCalls" => draw_calls.push(value),
-//RS                 "SceneAssetBytes" => asset_bytes.push(value),
-//RS                 "MemoryHighWater" => rss_hwm.push(value),
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         // Require exactly 600 measured samples per metric (120 warmup omitted).
-//RS         if frame_ns.len() != 600
-//RS             || draw_calls.len() != 600
-//RS             || asset_bytes.len() != 600
-//RS             || rss_hwm.len() != 600
-//RS         {
-//RS             eprintln!(
-//RS                 "budget: SceneProbe `{scene_name}` emitted {}/{}/{}/{} samples; need 600 for each metric",
-//RS                 frame_ns.len(), draw_calls.len(), asset_bytes.len(), rss_hwm.len()
-//RS             );
-//RS             continue;
-//RS         }
-//RS         result.push(crate::CmdBudget::SceneEvidence {
-//RS             name: scene_name.clone(),
-//RS             frame_ns,
-//RS             draw_calls,
-//RS             asset_bytes,
-//RS             rss_hwm,
-//RS         });
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS /// `jet devtools probe <file>` — internal test-only single-shot dev probe.
-//RS /// Collects SceneProbe/ServiceProbe evidence for the given file and triggers
-//RS /// a budget report refresh. Exits 0 if the report is built and all gates pass,
-//RS /// 1 otherwise. Not user-documented; used by CI tests.
-//RS pub(crate) fn run_devtools_probe(args: &[&String]) {
-//RS     use std::process::exit;
-//RS     let file = match args.first() {
-//RS         Some(f) => f.as_str(),
-//RS         None => {
-//RS             eprintln!("usage: jet devtools probe <file.jet>");
-//RS             exit(jet::ExitCodes::USAGE);
-//RS         }
-//RS     };
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(e) => {
-//RS             eprintln!("probe: cannot read `{file}`: {e}");
-//RS             exit(jet::ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let mode = OutputMode {
-//RS         json: false,
-//RS         color: jet::Diagnostics::ColorChoice::Never,
-//RS         quiet: false,
-//RS     };
-//RS     let bundle = match jet::Loader::load_entry(file) {
-//RS         Ok(mut b) => {
-//RS             let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
-//RS             b
-//RS         }
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, &src, &diags);
-//RS             exit(jet::ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let specs = match jet::Sema::collect_located_budget_specs_bundle(&bundle) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             exit(jet::ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let root = Path::new(file)
-//RS         .canonicalize()
-//RS         .ok()
-//RS         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-//RS         .and_then(|d| jet::Loader::find_manifest_root(&d).or_else(|| Some(d)))
-//RS         .unwrap_or_else(|| PathBuf::from("."));
-//RS     let service_evidence = collect_service_evidence(&root, &specs);
-//RS     let scene_evidence = collect_scene_evidence(file, &src, mode, &specs);
-//RS     let status = crate::CmdBudget::run_dev_refresh(file, &service_evidence, &scene_evidence);
-//RS     exit(status);
-//RS }
-//RS 
-//RS fn decode_hex(value: &str) -> Option<String> {
-//RS     if value.len() % 2 != 0 {
-//RS         return None;
-//RS     }
-//RS     let nibble = |byte: u8| match byte {
-//RS         b'0'..=b'9' => Some(byte - b'0'),
-//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS         _ => None,
-//RS     };
-//RS     let bytes = value
-//RS         .as_bytes()
-//RS         .chunks_exact(2)
-//RS         .map(|pair| Some((nibble(pair[0])? << 4) | nibble(pair[1])?))
-//RS         .collect::<Option<Vec<_>>>()?;
-//RS     String::from_utf8(bytes).ok()
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod schedule_tests {
-//RS     use super::JobClock;
-//RS 
-//RS     /// D-SCHEDULE1 (card #505): an interval job fires the first time it's
-//RS     /// checked (no prior run), then not again immediately after.
-//RS     #[test]
-//RS     fn interval_fires_once_then_waits() {
-//RS         let mut clock = JobClock::new();
-//RS         let jobs = vec![(
-//RS             "prune".to_string(),
-//RS             jet::AST::EverySchedule::Duration {
-//RS                 nanos: 60 * 1_000_000_000,
-//RS             },
-//RS         )];
-//RS         assert_eq!(clock.due(&jobs), vec!["prune".to_string()]);
-//RS         assert!(
-//RS             clock.due(&jobs).is_empty(),
-//RS             "must not re-fire on the very next tick"
-//RS         );
-//RS     }
-//RS 
-//RS     /// A daily job fires when `unix_secs` lands inside its target minute,
-//RS     /// stays quiet outside that window, and does not re-fire later the same
-//RS     /// day even if checked again inside the window.
-//RS     #[test]
-//RS     fn daily_fires_in_window_then_dedupes_same_day() {
-//RS         let mut clock = JobClock::new();
-//RS         let jobs = vec![(
-//RS             "nightly".to_string(),
-//RS             jet::AST::EverySchedule::WallClockTime { hour: 3, minute: 0 },
-//RS         )];
-//RS         let day0_before_window = 10 * 86_400 + 2 * 3600 + 59 * 60; // 02:59 on day 10
-//RS         let day0_in_window = 10 * 86_400 + 3 * 3600 + 0 * 60 + 30; // 03:00:30 on day 10
-//RS         let day0_after_window = 10 * 86_400 + 3 * 3600 + 5 * 60; // 03:05 on day 10
-//RS         let day1_in_window = 11 * 86_400 + 3 * 3600; // 03:00 on day 11
-//RS 
-//RS         assert!(
-//RS             clock.due_at(&jobs, day0_before_window).is_empty(),
-//RS             "must not fire before the target minute"
-//RS         );
-//RS         assert_eq!(
-//RS             clock.due_at(&jobs, day0_in_window),
-//RS             vec!["nightly".to_string()],
-//RS             "must fire inside the target minute"
-//RS         );
-//RS         assert!(
-//RS             clock.due_at(&jobs, day0_after_window).is_empty(),
-//RS             "must not re-fire later the same day, even outside the window"
-//RS         );
-//RS         assert_eq!(
-//RS             clock.due_at(&jobs, day1_in_window),
-//RS             vec!["nightly".to_string()],
-//RS             "must fire again the next day's matching window"
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 0683 Source/CmdDevTools.rs:7220-9719
+use core.files as fs
+use core.process.[Command, exit]
+use core.term.[println, eprintln]
+use std.time.[Duration, SystemTime, UNIX_EPOCH]
+use jet_foundation.ExitCodes
+use jet.AST as AST
+use jet.Sema as Sema
+
+// Rust: Source/CmdDevTools.rs:7220
+fn run_com_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind com <library.tlb> --pkg <lib>\n       {jet.Syntax.BINARY_NAME} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>")
+    // GATE #4483: COM is dispatched by selected OS.
+    if core.sys.target.selected_os() != "windows" {
+        eprintln("Error [E3260]: `com.*` needs a Windows host.")
+        eprintln(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.")
+        eprintln(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.")
+        eprintln("More: jet-lang.dev/e/E3260")
+        exit(ExitCodes.USER_ERROR)
+    }
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) {
+        usage()
+        exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK)
+    }
+    file := String?{None}
+    guid := String?{None}
+    major := U16?{None}
+    minor := U16?{None}
+    lcid := 0 as U32
+    pkg := String?{None}
+    i := 0
+    loop i < args.len() {
+        if args[i] == {
+            "--registered" -> { guid = args.get(i + 1).map(fn(v) -> v.to_string()); i += 2 }
+            "--major" -> { major = args.get(i + 1).and_then(fn(v) -> U16.parse(v).ok()); i += 2 }
+            "--minor" -> { minor = args.get(i + 1).and_then(fn(v) -> U16.parse(v).ok()); i += 2 }
+            "--lcid" -> { lcid = args.get(i + 1).and_then(fn(v) -> U32.parse(v).ok()) ?? U32.MAX; i += 2 }
+            "--pkg" -> { pkg = args.get(i + 1).map(fn(v) -> v.to_string()); i += 2 }
+            "-o" -> {
+                cli_error("E2102", "`inspect bind com` writes the checked binding to `.jet/bindings/com`; custom output paths are not supported")
+                usage(); exit(ExitCodes.USAGE)
+            }
+            "--out" -> {
+                cli_error("E2102", "`inspect bind com` writes the checked binding to `.jet/bindings/com`; custom output paths are not supported")
+                usage(); exit(ExitCodes.USAGE)
+            }
+            value -> {
+                if !value.starts_with("-") && file.is_none() -> { file = .Val(value.to_string()); i += 1 }
+                else -> { usage(); exit(ExitCodes.USAGE) }
+            }
+        }
+    }
+    lib :: pkg ?? { usage(); exit(ExitCodes.USAGE) }
+    binding_root_path :: file ?? "package.jet"
+    input :: if file == .Val(path) -> {
+        if guid.is_some() -> { usage(); exit(ExitCodes.USAGE) }
+        jet.ComBind.TypeLibraryInput.File(OSPath.new(path))
+    } else -> {
+        guid :: guid ?? { usage(); exit(ExitCodes.USAGE) }
+        major :: major ?? { usage(); exit(ExitCodes.USAGE) }
+        minor :: minor ?? { usage(); exit(ExitCodes.USAGE) }
+        if lcid == U32.MAX -> { usage(); exit(ExitCodes.USAGE) }
+        jet.ComBind.TypeLibraryInput.Registered(guid: guid, major: major, minor: minor, lcid: lcid)
+    }
+    out_path :: default_binding_output(binding_root_path, jet.Syntax.COM_MODULE_ROOT, lib)
+    cache :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.ComBind.bind(input, lib, cache) ?? com_bind_error(err.to_string())
+    provenance_path :: cache.join("{lib}.provenance")
+    publish_com_binding_artifacts(OSPath.new(out_path), result.source, provenance_path, result.provenance) ?? com_bind_error(err)
+    suffix :: if result.methods.len() == 1 -> "" else -> "s"
+    println("bound {result.methods.len()} typed COM member{suffix} → {out_path}")
+}
+// Rust: Source/CmdDevTools.rs:7338
+fn com_bind_error(why: String) -> Never {
+    bind_e3208("Could not generate COM bindings.", "{why}.", "select a registered or file-backed type library with IDispatch metadata and rerun on Windows.")
+}
+// Rust: Source/CmdDevTools.rs:7345
+// Publish source and provenance as a recoverable pair, rolling both back on failure.
+fn publish_com_binding_artifacts(source_path: &OSPath, source: String, provenance_path: &OSPath, provenance: String) -> Void Err! {
+    if source_path == provenance_path -> return Err("generated COM source and provenance paths must differ")
+    // GATE #4494: native process identity, timestamp, metadata and rename.
+    nanos :: (SystemTime.now().duration_since(UNIX_EPOCH) ?? return Err("could not create COM output transaction: {err}")).as_nanos()
+    suffix :: "{std.process.id()}-{nanos}"
+    source_name :: source_path.file_name().and_then(fn(name) -> name.to_str()) ?? return Err("generated COM source has no valid file name")
+    provenance_name :: provenance_path.file_name().and_then(fn(name) -> name.to_str()) ?? return Err("generated COM provenance has no valid file name")
+    source_stage :: source_path.with_file_name(".{source_name}..com-stage-{suffix}")
+    provenance_stage :: provenance_path.with_file_name(".{provenance_name}..com-stage-{suffix}")
+    source_backup :: source_path.with_file_name(".{source_name}..com-previous-{suffix}")
+    provenance_backup :: provenance_path.with_file_name(".{provenance_name}..com-previous-{suffix}")
+    cleanup_staged :: fn() -> { _ :: fs.remove_file(source_stage); _ :: fs.remove_file(provenance_stage) }
+    cleanup_backups :: fn() -> { _ :: fs.remove_file(source_backup); _ :: fs.remove_file(provenance_backup) }
+    fs.write(source_stage, source) ?? { cleanup_staged(); return Err("the generated COM cache could not be staged ({err})") }
+    fs.write(provenance_stage, provenance) ?? { cleanup_staged(); return Err("the COM provenance could not be staged ({err})") }
+    // GATE #4409: only NotFound means an absent previous artifact.
+    had_source :: if fs.symlink_metadata(source_path) == {
+        .Ok(metadata) -> {
+            if !metadata.file_type().is_file() -> { cleanup_staged(); return Err("the generated COM cache path is not a regular file") }
+            fs.rename(source_path, source_backup) ?? { cleanup_staged(); return Err("could not stage the previous COM cache ({err})") }
+            true
+        }
+        .Err(error) -> {
+            if error.kind() == .NotFound -> false
+            else -> { cleanup_staged(); return Err("could not inspect the generated COM cache ({error})") }
+        }
+    }
+    had_provenance :: if fs.symlink_metadata(provenance_path) == {
+        .Ok(metadata) -> {
+            if !metadata.file_type().is_file() {
+                if had_source -> _ :: fs.rename(source_backup, source_path)
+                cleanup_staged()
+                return Err("the generated COM provenance path is not a regular file")
+            }
+            fs.rename(provenance_path, provenance_backup) ?? {
+                if had_source -> _ :: fs.rename(source_backup, source_path)
+                cleanup_staged()
+                return Err("could not stage the previous COM provenance ({err})")
+            }
+            true
+        }
+        .Err(error) -> {
+            if error.kind() == .NotFound -> false
+            else {
+                if had_source -> _ :: fs.rename(source_backup, source_path)
+                cleanup_staged()
+                return Err("could not inspect the generated COM provenance ({error})")
+            }
+        }
+    }
+    fs.rename(source_stage, source_path) ?? {
+        if had_source -> _ :: fs.rename(source_backup, source_path)
+        if had_provenance -> _ :: fs.rename(provenance_backup, provenance_path)
+        cleanup_staged()
+        return Err("could not publish the generated COM cache ({err})")
+    }
+    fs.rename(provenance_stage, provenance_path) ?? {
+        _ :: fs.remove_file(source_path)
+        if had_source -> _ :: fs.rename(source_backup, source_path)
+        if had_provenance -> _ :: fs.rename(provenance_backup, provenance_path)
+        cleanup_staged()
+        return Err("could not publish the COM provenance ({err})")
+    }
+    cleanup_staged()
+    cleanup_backups()
+}
+// Rust: Source/CmdDevTools.rs:7489
+fn run_java_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]")
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) -> { usage(); exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK) }
+    source_path :: args[0]
+    pkg := String?{None}
+    out := String?{None}
+    i := 1
+    loop i < args.len() {
+        if args[i] == {
+            "--pkg" -> {
+                pkg = args.get(i + 1).map(fn(v) -> v.to_string())
+                if pkg.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+                i += 2
+            }
+            "-o" -> {
+                out = args.get(i + 1).map(fn(v) -> v.to_string())
+                if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+                i += 2
+            }
+            "--out" -> {
+                out = args.get(i + 1).map(fn(v) -> v.to_string())
+                if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+                i += 2
+            }
+            flag -> { cli_error("E2102", "unknown `inspect bind java` flag `{flag}`"); usage(); exit(ExitCodes.USAGE) }
+        }
+    }
+    base :: source_path.rsplit("/").next() ?? source_path
+    lib :: pkg ?? (base.rsplit_once(".").map(fn(v) -> v.0) ?? base).to_string()
+    source :: fs.read_to_string(source_path) ?? java_bind_error(source_path, "the source file could not be read ({err})")
+    out_path :: out ?? default_binding_output(source_path, jet.Syntax.JAVA_MODULE_ROOT, lib)
+    cache :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.JavaBind.bind(OSPath.new(source_path), source, lib, cache) ?? java_bind_error(source_path, err.to_string())
+    fs.write(out_path, result.source) ?? java_bind_error(source_path, "the generated cache could not be written ({err})")
+    fs.write(cache.join("{lib}.jvm-path"), "{result.jvm_dir.display()}\n") ?? java_bind_error(source_path, "the JVM runtime identity could not be written ({err})")
+    fs.write(cache.join("{lib}.provenance"), result.provenance) ?? java_bind_error(source_path, "the binding provenance could not be written ({err})")
+    suffix :: if result.bound.len() == 1 -> "" else -> "s"
+    println("bound {result.bound.len()} JVM member{suffix} from `{source_path}` → {out_path}")
+}
+// Rust: Source/CmdDevTools.rs:7584
+fn java_bind_error(source: String, why: String) -> Never {
+    bind_e3208("Could not generate bindings from `{source}`.", "{why}.", "use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.")
+}
+
+// Rust: Source/CmdDevTools.rs:7590
+fn run_dotnet_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]")
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) -> { usage(); exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK) }
+    path :: args[0]
+    pkg := String?{None}
+    out := String?{None}
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--pkg" {
+            pkg = args.get(i + 1).map(fn(v) -> v.to_string())
+            if pkg.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else if flag == "-o" || flag == "--out" {
+            out = args.get(i + 1).map(fn(v) -> v.to_string())
+            if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else -> { cli_error("E2102", "unknown `inspect bind cs` flag `{flag}`"); usage(); exit(ExitCodes.USAGE) }
+        i += 2
+    }
+    base :: path.rsplit("/").next() ?? path
+    lib :: pkg ?? (base.rsplit_once(".").map(fn(v) -> v.0) ?? base).to_ascii_lowercase()
+    source :: fs.read_to_string(path) ?? dotnet_bind_error(path, "the C# source could not be read ({err})")
+    out_path :: out ?? default_binding_output(path, jet.Syntax.CS_MODULE_ROOT, lib)
+    cache :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.DotNetBind.bind(OSPath.new(path), source, lib, cache) ?? dotnet_bind_error(path, err.to_string())
+    fs.write(out_path, result.source) ?? dotnet_bind_error(path, "the generated cache could not be written ({err})")
+    fs.write(cache.join("{lib}.provenance"), result.provenance) ?? dotnet_bind_error(path, "the provenance could not be written ({err})")
+    suffix :: if result.bound.len() == 1 -> "" else -> "s"
+    println("bound {result.bound.len()} .NET member{suffix} from `{path}` → {out_path}")
+}
+// Rust: Source/CmdDevTools.rs:7667
+fn dotnet_bind_error(path: String, why: String) -> Never {
+    bind_e3208("Could not generate bindings from `{path}`.", "{why}.", "use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.")
+}
+// Rust: Source/CmdDevTools.rs:7673
+fn run_go_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]")
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) {
+        usage(); eprintln("")
+        eprintln("Generate typed Jet bindings for scalar and uintptr //export Go functions.")
+        exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK)
+    }
+    source_path :: args[0]
+    pkg := String?{None}
+    out := String?{None}
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--pkg" {
+            pkg = args.get(i + 1).map(fn(v) -> v.to_string())
+            if pkg.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else if flag == "-o" || flag == "--out" {
+            out = args.get(i + 1).map(fn(v) -> v.to_string())
+            if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else -> { cli_error("E2102", "unknown `inspect bind go` flag `{flag}`"); usage(); exit(ExitCodes.USAGE) }
+        i += 2
+    }
+    base :: source_path.rsplit("/").next() ?? source_path
+    lib :: pkg ?? (base.rsplit_once(".").map(fn(v) -> v.0) ?? base).to_string()
+    source :: fs.read_to_string(source_path) ?? go_bind_error(source_path, "the source file could not be read ({err})")
+    out_path :: out ?? default_binding_output(source_path, jet.Syntax.GO_MODULE_ROOT, lib)
+    cache_dir :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.GoBind.bind(OSPath.new(source_path), source, lib, cache_dir) ?? go_bind_error(source_path, err.to_string())
+    fs.write(out_path, result.source) ?? go_bind_error(source_path, "the generated cache could not be written ({err})")
+    fs.write(cache_dir.join("{lib}.provenance"), result.provenance) ?? go_bind_error(source_path, "the binding provenance could not be written ({err})")
+    suffix :: if result.bound.len() == 1 -> "" else -> "s"
+    println("bound {result.bound.len()} Go export{suffix} from `{source_path}` → {out_path}")
+}
+// Rust: Source/CmdDevTools.rs:7764
+fn go_bind_error(source: String, why: String) -> Never {
+    bind_e3208("Could not generate bindings from `{source}`.", "{why}.", "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.")
+}
+// Rust: Source/CmdDevTools.rs:7775
+fn run_fortran_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]")
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) {
+        usage(); eprintln("")
+        eprintln("Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions.")
+        exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK)
+    }
+    source_path :: args[0]
+    pkg := String?{None}
+    out := String?{None}
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--pkg" {
+            pkg = args.get(i + 1).map(fn(v) -> v.to_string())
+            if pkg.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else if flag == "-o" || flag == "--out" {
+            out = args.get(i + 1).map(fn(v) -> v.to_string())
+            if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else -> { cli_error("E2102", "unknown `inspect bind fortran` flag `{flag}`"); usage(); exit(ExitCodes.USAGE) }
+        i += 2
+    }
+    base :: source_path.rsplit("/").next() ?? source_path
+    lib :: pkg ?? (base.rsplit_once(".").map(fn(v) -> v.0) ?? base).to_string()
+    source :: fs.read_to_string(source_path) ?? fortran_bind_error(source_path, "the source file could not be read ({err})")
+    out_path :: out ?? default_binding_output(source_path, jet.Syntax.FORTRAN_MODULE_ROOT, lib)
+    cache_dir :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.FortranBind.bind(OSPath.new(source_path), source, lib, cache_dir) ?? fortran_bind_error(source_path, err.to_string())
+    fs.write(out_path, result.source) ?? fortran_bind_error(source_path, "the generated cache could not be written ({err})")
+    fs.write(cache_dir.join("{lib}.provenance"), result.provenance) ?? fortran_bind_error(source_path, "the binding provenance could not be written ({err})")
+    suffix :: if result.bound.len() == 1 -> "" else -> "s"
+    println("bound {result.bound.len()} ISO_C_BINDING routine{suffix} from `{source_path}` → {out_path}")
+    loop layout in result.layouts -> println("  layout: {layout.routine}.{layout.parameter} {layout.order} {layout.extents.iter().map(fn(n) -> n.to_string()).collect().join("x")}")
+}
+// Rust: Source/CmdDevTools.rs:7887
+fn fortran_bind_error(source: String, why: String) -> Never {
+    bind_e3208("Could not generate bindings from `{source}`.", "{why}.", "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.")
+}
+// Rust: Source/CmdDevTools.rs:7895
+fn run_cobol_bind(args: &[String]) -> Void {
+    usage :: fn() -> eprintln("usage: {jet.Syntax.BINARY_NAME} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]")
+    if args.is_empty() || jet.CLI.is_help_flag(args[0]) -> { usage(); exit(if args.is_empty() -> ExitCodes.USAGE else -> ExitCodes.OK) }
+    source_path :: args[0]
+    copybook := String?{None}
+    pkg := String?{None}
+    out := String?{None}
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--copybook" {
+            copybook = args.get(i + 1).map(fn(v) -> v.to_string())
+            if copybook.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else if flag == "--pkg" {
+            pkg = args.get(i + 1).map(fn(v) -> v.to_string())
+            if pkg.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else if flag == "-o" || flag == "--out" {
+            out = args.get(i + 1).map(fn(v) -> v.to_string())
+            if out.is_none() -> { usage(); exit(ExitCodes.USAGE) }
+        } else -> { cli_error("E2102", "unknown `inspect bind cobol` flag `{flag}`"); usage(); exit(ExitCodes.USAGE) }
+        i += 2
+    }
+    copybook_path :: copybook ?? { usage(); exit(ExitCodes.USAGE) }
+    base :: source_path.rsplit("/").next() ?? source_path
+    lib :: pkg ?? (base.rsplit_once(".").map(fn(v) -> v.0) ?? base).to_ascii_lowercase().replace("-", "_")
+    source :: fs.read_to_string(source_path) ?? cobol_bind_error(source_path, "the program could not be read ({err})")
+    copybook :: fs.read_to_string(copybook_path) ?? cobol_bind_error(copybook_path, "the copybook could not be read ({err})")
+    out_path :: out ?? default_binding_output(source_path, jet.Syntax.COBOL_MODULE_ROOT, lib)
+    cache :: OSPath.new(out_path).parent() ?? OSPath.new(".")
+    result :: jet.CobolBind.bind(OSPath.new(source_path), source, OSPath.new(copybook_path), copybook, lib, cache) ?? cobol_bind_error(source_path, err.to_string())
+    fs.write(out_path, result.source) ?? cobol_bind_error(source_path, "the generated cache could not be written ({err})")
+    fs.write(cache.join("{lib}.provenance"), result.provenance) ?? cobol_bind_error(source_path, "the binding provenance could not be written ({err})")
+    fs.write(cache.join("{lib}.cobol-path"), "{result.runtime_dir.display()}\n") ?? cobol_bind_error(source_path, "the libcob runtime identity could not be written ({err})")
+    println("bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out_path}")
+    loop field in result.layout.fields -> println("  layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}")
+}
+// Rust: Source/CmdDevTools.rs:8017
+fn cobol_bind_error(path: String, why: String) -> Never {
+    bind_e3208("Could not generate bindings from `{path}`.", "{why}.", "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.")
+}
+// Rust: Source/CmdDevTools.rs:8031
+pub fn run_eval(file: String, pure_required: Bool, mode: OutputMode) -> Void {
+    src :: fs.read_to_string(file) ?? { cli_error("E2105", "couldn't read `{file}`: {err}"); exit(ExitCodes.USER_ERROR) }
+    (source_for_parse, _) :: jet.Package.mask_inline_package_source(src) ?? {
+        core.term.eprint(jet.render_all_colored(file, src, [err.diagnostic()], mode.color_stderr()))
+        exit(ExitCodes.USER_ERROR)
+    }
+    (toks, lex_diags) :: jet.Lexer.lex(source_for_parse)
+    if !lex_diags.is_empty() -> { core.term.eprint(jet.render_all_colored(file, src, lex_diags, mode.color_stderr())); exit(ExitCodes.USER_ERROR) }
+    prog :: jet.Parser.parse_with_source(toks, source_for_parse) ?? {
+        core.term.eprint(jet.render_all_colored(file, src, err, mode.color_stderr()))
+        exit(ExitCodes.USER_ERROR)
+    }
+    if pure_required {
+        funcs_sig := [String:Sema.FuncSig]{}
+        ast_funcs := [String:&AST.Func]{}
+        loop item in prog.items {
+            if item == .Func(f) {
+                provenance := AST.ViewProvenanceCell.new()
+                if f.return_view_provenance == .Val(value) -> provenance.set(value.clone())
+                &funcs_sig.insert(f.name.clone(), Sema.FuncSig{
+                    deprecation: None, params: f.params.iter().map(fn(p) -> (p.convention.clone(), p.ty.clone())).collect(),
+                    root_param: f.params.first().is_some_and(fn(p) -> p.root), return_type: f.return_type.clone(),
+                    return_view_provenance: provenance, is_extern: false, is_c_abi: false, c_abi_name: None,
+                    callback_transport: None, callback_plan_digest: None, callback_identity: None, foreign_effect_root: None,
+                    undo: None, is_unsafe: f.is_unsafe, is_pure: f.is_pure, memo_bound: None, is_foreign_thread_safe: false,
+                    is_sanitizer: f.is_sanitizer, is_must_use: f.is_must_use,
+                    param_info: f.params.iter().map(fn(p) -> (p.name.clone(), p.default.is_some())).collect(),
+                    param_call: f.params.iter().map(fn(p) -> (p.call_label().to_string(), p.zone)).collect(),
+                    defaults: f.params.iter().map(fn(p) -> p.default.map(fn(d) -> d.clone())).collect(),
+                    param_variadic: f.params.iter().map(fn(p) -> p.variadic).collect(),
+                    variadic_bounds: f.params.last().and_then(fn(p) -> p.variadic_bound_list.clone()),
+                    param_view_from_names: f.params.iter().map(fn(p) -> p.declared_view_from_names.clone()).collect(),
+                    callable_policies: Sema.CallablePolicies.default(),
+                })
+                &ast_funcs.insert(f.name.clone(), &f)
+            }
+        }
+        diags :: jet.check_pure_program_root("run", funcs_sig, ast_funcs)
+        if !diags.is_empty() -> { core.term.eprint(jet.render_all_colored(file, src, diags, mode.color_stderr())); exit(ExitCodes.USER_ERROR) }
+    }
+    type_diags :: jet.check_for_eval(source_for_parse, file)
+    if !type_diags.is_empty() -> { core.term.eprint(jet.render_all_colored(file, src, type_diags, mode.color_stderr())); exit(ExitCodes.USER_ERROR) }
+    (value, printed) :: jet.eval_pure_program_value(source_for_parse, file) ?? {
+        core.term.eprint(jet.render_all_colored(file, src, err, mode.color_stderr()))
+        exit(ExitCodes.USER_ERROR)
+    }
+    if mode.json -> { core.term.eprint(printed); println("{render_eval_json(value)}") }
+    else {
+        core.term.print(printed)
+        if render_eval_value(value) == .Val(value) -> println("{value}")
+    }
+}
+// Rust: Source/CmdDevTools.rs:8196
+fn render_eval_value(value: &jet.CtValue) -> String? {
+    if value == {
+        .Present(inner) -> render_eval_value(inner)
+        .Unit -> None
+        value -> .Val(value.jet_show())
+    }
+}
+// Rust: Source/CmdDevTools.rs:8206
+EVAL_EXPRESSION_LABEL :: "<eval>"
+// Rust: Source/CmdDevTools.rs:8208
+fn render_eval_json(value: &jet.CtValue) -> String {
+    value :: StatusValue.parse(value.to_json()).expect("evaluated value must be valid JSON")
+    StatusEnvelope.new("eval", true).with_field("value", value).json()
+}
+// Rust: Source/CmdDevTools.rs:8230
+pub fn run_eval_expression(source: String, mode: OutputMode) -> Void {
+    base_dir :: std.env.current_dir() ?? OSPath.new(".")
+    evaluated :: jet.REPL.eval_once(source, base_dir, jet.REPL.ReplFlags.default()) ?? {
+        core.term.eprint(jet.render_all_colored(EVAL_EXPRESSION_LABEL, source, err, mode.color_stderr()))
+        exit(ExitCodes.USER_ERROR)
+    }
+    value :: evaluated.value ?? jet.CtValue.Unit
+    if mode.json -> { core.term.eprint("{evaluated.stdout}{evaluated.stderr}"); println("{render_eval_json(value)}") }
+    else -> { core.term.print(evaluated.stdout); core.term.eprint(evaluated.stderr); println("{value.render_pretty()}") }
+}
+
+// Rust: Source/CmdDevTools.rs:8262
+A11Y_LINT_CODES :: ["E2930", "E2931"]
+// Rust: Source/CmdDevTools.rs:8264
+pub fn visible_lints(lints: &[jet.Diagnostics.Diagnostic]) -> [jet.Diagnostics.Diagnostic] {
+    lints.iter().filter(fn(d) -> !A11Y_LINT_CODES.contains(d.code)).cloned().collect()
+}
+// Rust: Source/CmdDevTools.rs:8277
+pub fn run_emit_rust(file: String, mode: OutputMode, emit_metadata: Bool) -> Void {
+    src :: fs.read_to_string(file) ?? {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {jet.Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    (diagnostics, bundle, _) :: jet.Driver.check_file_with_effect_facts_for_run(file, "dev", [:])
+    (errors, lints) :: diagnostics.into_iter().partition(fn(diagnostic) -> diagnostic.severity == .Error)
+    if !errors.is_empty() -> { report_problems(mode, file, src, errors); exit(ExitCodes.USER_ERROR) }
+    bundle :: bundle ?? { report_problems(mode, file, src, []); exit(ExitCodes.USER_ERROR) }
+    lints :: visible_lints(lints)
+    if !lints.is_empty() -> core.term.eprint(jet.render_all_colored(file, src, lints, mode.color_stderr()))
+    // GATE #4494: canonical compiler-stack execution for recursive lowering.
+    rust :: jet.with_compiler_stack(fn() -> {
+        target :: if bundle.build_facts.target_triple.is_empty() -> jet_foundation.Layout.TargetLayout.host() else -> jet_foundation.Layout.TargetLayout.from_triple(bundle.build_facts.target_triple.clone())
+        (mir, artifact) :: jet.lower_checked_semantic_mir_program_for(bundle, jet_foundation.MIR.MirArtifactRequest.new(.RustAot, .NativeExecutable, .Dev))
+        mir_digest :: jet_foundation.MIR.mir_program_digest(mir)
+        execution := jet.Codegen.MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+        execution.emit_metadata = emit_metadata
+        execution.semantic_digest = if emit_metadata -> .Val(mir_digest) else -> None
+        jet.Codegen.MIRRust.emit_mir_program(mir, jet.Codegen.MIRRust.MirRustConfig{target: target, target_kind: .Native, root_prefix: "", execution: execution})
+    })
+    core.term.print(rust)
+}
+// Rust: Source/CmdDevTools.rs:8348
+pub fn cost_diagnostics(bundle: &AST.ProgramBundle, sema_diagnostics: &[jet.Diagnostics.Diagnostic]) -> [jet.Diagnostics.Diagnostic] jet.Codegen.TIR.TCostReportError! {
+    report :: jet.Codegen.TIR.cost_report(bundle)?
+    cost_diagnostics_from_report(report, sema_diagnostics)
+}
+// Rust: Source/CmdDevTools.rs:8356
+fn cost_diagnostics_from_report(report: &jet.Codegen.TIR.TCostReport, sema_diagnostics: &[jet.Diagnostics.Diagnostic]) -> [jet.Diagnostics.Diagnostic] {
+    diagnostics := sema_diagnostics.iter().filter(fn(diagnostic) -> is_cost_diagnostic(diagnostic)).cloned().collect()
+    loop site in report.sites {
+        if site.loop_depth > 0 && site.state == .SemanticRemainder && site.kind != .ViewMaterialization -> &diagnostics.push(jet.Diagnostics.Diagnostic.from_row("L2510", [("operation", site.kind.operation()), ("fix", site.kind.fix())], .Val(site.span)))
+    }
+    dedup_cost_diagnostics(&diagnostics)
+    diagnostics
+}
+// Rust: Source/CmdDevTools.rs:8389
+fn is_cost_diagnostic(diagnostic: &jet.Diagnostics.Diagnostic) -> Bool { diagnostic.code == "L2510" }
+// Rust: Source/CmdDevTools.rs:8393
+fn same_cost_diagnostic(left: &jet.Diagnostics.Diagnostic, right: &jet.Diagnostics.Diagnostic) -> Bool {
+    left.code == right.code && left.severity == right.severity && left.span == right.span && left.what == right.what && left.why == right.why && left.fix == right.fix
+}
+// Rust: Source/CmdDevTools.rs:8405
+fn dedup_cost_diagnostics(diagnostics: &[jet.Diagnostics.Diagnostic]) -> Void {
+    seen := [jet.Diagnostics.Diagnostic]{}
+    &diagnostics.retain(fn(diagnostic) -> {
+        if !is_cost_diagnostic(diagnostic) -> return true
+        if seen.iter().any(fn(previous) -> same_cost_diagnostic(previous, diagnostic)) -> return false
+        &seen.push(diagnostic.clone())
+        true
+    })
+}
+// Rust: Source/CmdDevTools.rs:8423
+pub fn merge_cost_diagnostics(bundle: &AST.ProgramBundle, diagnostics: &[jet.Diagnostics.Diagnostic]) -> Void jet.Codegen.TIR.TCostReportError! {
+    dedup_cost_diagnostics(diagnostics)
+    costs :: cost_diagnostics(bundle, diagnostics)?
+    loop diagnostic in costs {
+        if !diagnostics.iter().any(fn(existing) -> same_cost_diagnostic(existing, diagnostic)) -> &diagnostics.push(diagnostic)
+    }
+}
+// Rust: Source/CmdDevTools.rs:8442
+pub fn run_lint_cost(file: String, mode: OutputMode) -> Void {
+    src :: fs.read_to_string(file) ?? {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {jet.Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    projection :: CmdInspect.check_projection_for_effects(OSPath.new(file), "dev", [:]) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    lints :: cost_diagnostics(projection.bundle, projection.diagnostics) ?? exit_cost_projection_error(file, err)
+    if lints.is_empty() {
+        if mode.json -> core.term.print(jet.render_all_json(machine_report_path_for_process(file), src, []))
+        else -> println("ok: `{file}` has no hidden dynamic costs in loops")
+        return
+    }
+    if mode.json -> core.term.eprint(jet.render_all_json(machine_report_path_for_process(file), src, lints))
+    else {
+        core.term.eprint(jet.render_all_colored(file, src, lints, mode.color_stderr()))
+        suffix :: if lints.len() == 1 -> "" else -> "s"
+        eprintln("\n{lints.len()} hidden dynamic cost warning{suffix} found")
+    }
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdDevTools.rs:8497
+pub fn run_lint_a11y(file: String, mode: OutputMode) -> Void {
+    src :: fs.read_to_string(file) ?? {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {jet.Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    diags :: jet.check_with_path(file)
+    errors :: diags.iter().filter(fn(d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> { report_problems(mode, file, src, errors); exit(ExitCodes.USER_ERROR) }
+    a11y_lints :: diags.into_iter().filter(fn(d) -> A11Y_LINT_CODES.contains(d.code)).collect()
+    if a11y_lints.is_empty() {
+        if mode.json -> core.term.print(jet.render_all_json(machine_report_path_for_process(file), src, []))
+        else -> println("ok: `{file}` has no accessibility problems")
+        return
+    }
+    if mode.json -> core.term.eprint(jet.render_all_json(machine_report_path_for_process(file), src, a11y_lints))
+    else {
+        core.term.eprint(jet.render_all_colored(file, src, a11y_lints, mode.color_stderr()))
+        suffix :: if a11y_lints.len() == 1 -> "" else -> "s"
+        eprintln("\n{a11y_lints.len()} accessibility warning{suffix} found")
+    }
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdDevTools.rs:8553
+pub fn run_lint_complexity(file: String, mode: OutputMode, max_budget: U32?) -> Void {
+    src :: fs.read_to_string(file) ?? {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {jet.Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    diags :: jet.check_with_path(file)
+    errors :: diags.iter().filter(fn(d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> { report_problems(mode, file, src, errors); exit(ExitCodes.USER_ERROR) }
+    (source_for_parse, _) :: jet.Package.mask_inline_package_source(src) ?? {
+        report_problems(mode, file, src, [err.diagnostic()])
+        exit(ExitCodes.USER_ERROR)
+    }
+    (tokens, lex_errors) :: jet.Lexer.lex(source_for_parse)
+    if !lex_errors.is_empty() -> { report_problems(mode, file, src, lex_errors); exit(ExitCodes.USER_ERROR) }
+    program :: jet.Parser.parse_with_source(tokens, source_for_parse) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    reports :: Sema.cognitive_complexity_reports(program)
+    rows :: reports.iter().map(fn(report) -> {
+        line :: src.slice(0..<report.span.start).bytes().filter(fn(byte) -> byte == 10).count() + 1
+        (line, max_budget.is_some_and(fn(budget) -> report.score > budget))
+    }).collect()
+    if mode.json {
+        json_rows :: reports.iter().zip(rows).map(fn(pair) -> {
+            report :: pair.0
+            (line, over) :: pair.1
+            budget :: max_budget.map(fn(value) -> value.to_string()) ?? "null"
+            "{{\"file\":{json_string(file)},\"fn\":{json_string(report.name)},\"line\":{line},\"score\":{report.score},\"budget\":{budget},\"over\":{over}}}"
+        }).collect()
+        if max_budget.is_none() {
+            inspection :: collect_architecture_inspection(file)
+            envelope := StatusEnvelope.new("lint.complexity", true).with_field("contract", ARCH_ADVICE_SCHEMA).with_field("file", file).with_field("local_complexity", complexity_rows_value(file, reports, rows)).with_field("architecture_advice", architecture_inspection_value(inspection)).with_field("measurement", StatusValue.object(StatusFields.new().with("benchmark", "not_run").with("change_task", "not_measured").with("claim", "none")))
+            if inspection.check == .Val(check) -> envelope = envelope.with_field("check", check.clone())
+            println("{envelope.json()}")
+        } else -> println("[{json_rows.join(",")}]")
+    } else {
+        loop (report, pair) in reports.iter().zip(rows) {
+            line :: pair.0
+            if max_budget == .Val(budget) -> println("{file}:{line} fn {report.name} — score {report.score} (budget {budget})")
+            else -> println("{file}:{line} fn {report.name} — score {report.score}")
+        }
+        if max_budget.is_none() -> render_architecture_inspection(collect_architecture_inspection(file))
+    }
+    budget :: max_budget ?? return
+    exceeded :: reports.iter().filter(fn(report) -> report.score > budget).map(fn(report) -> jet.Diagnostics.Diagnostic.lint("L2902", "function `{report.name}` has cognitive complexity {report.score} above budget {budget}", "the function's control flow is harder to read and maintain than the selected budget allows", "split the function, reduce nesting, or replace mixed control flow with a focused helper", .Val(report.span))).collect()
+    if exceeded.is_empty() -> return
+    if !mode.json -> core.term.eprint(jet.render_all_colored(file, src, exceeded, mode.color_stderr()))
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdDevTools.rs:8695
+ARCH_ADVICE_SCHEMA :: "jet.architecture-advice/v1"
+// Rust: Source/CmdDevTools.rs:8696
+ARCH_ADVICE_MAX_ROWS :: 64
+// Rust: Source/CmdDevTools.rs:8699
+struct ArchitectureSourceEvidence { role: String, module_path: String, start: USize, end: USize }
+// Rust: Source/CmdDevTools.rs:8707
+struct ArchitectureBehaviorCheck { name: String, status: String, detail: String }
+// Rust: Source/CmdDevTools.rs:8714
+struct ArchitectureAdviceRow { kind: String, subject: String, scope: String, evidence: [ArchitectureSourceEvidence], boundaries: [String], behavior: [ArchitectureBehaviorCheck], uncertainty: [String] }
+// Rust: Source/CmdDevTools.rs:8725
+struct ArchitectureCall {
+    caller_key: String, caller_name: String, caller_module: String, caller_span: (USize, USize),
+    callee_key: String, callee_name: String, callee_module: String, callee_span: (USize, USize),
+    callee_return: String?, call_span: (USize, USize),
+}
+// Rust: Source/CmdDevTools.rs:8740
+struct ArchitectureInspection { status: String, check: StatusValue?, rows: [ArchitectureAdviceRow], reason: String? }
+// Rust: Source/CmdDevTools.rs:8746
+fn complexity_rows_value(file: String, reports: &[Sema.CognitiveComplexityReport], rows: &[(USize, Bool)]) -> StatusValue {
+    StatusValue.array(reports.iter().zip(rows).map(fn(pair) -> StatusValue.object(StatusFields.new().with("file", file).with("fn", pair.0.name).with("line", pair.1.0).with("score", pair.0.score).with("budget", StatusValue.Null).with("over", pair.1.1))))
+}
+// Rust: Source/CmdDevTools.rs:8764
+fn collect_architecture_inspection(file: String) -> ArchitectureInspection {
+    projection :: CmdInspect.check_projection(OSPath.new(file)) ?? {
+        reason :: err.iter().map(fn(diagnostic) -> "{diagnostic.code}: {diagnostic.what}").collect().join("; ")
+        return ArchitectureInspection{status: "unavailable", check: None, rows: [], reason: .Val("the checked semantic projection was unavailable; no architecture claim was emitted ({reason})")}
+    }
+    check :: CmdInspect.check_result_value(projection.check)
+    calls :: architecture_calls(projection.index())
+    rows := architecture_advice_rows(projection.index(), calls)
+    &rows.sort_by(fn(left, right) -> left.subject.cmp(right.subject).then(left.kind.cmp(right.kind)).then(left.scope.cmp(right.scope)))
+    &rows.truncate(ARCH_ADVICE_MAX_ROWS)
+    ArchitectureInspection{status: "advisory", check: .Val(check), rows: rows, reason: None}
+}
+// Rust: Source/CmdDevTools.rs:8801
+fn architecture_calls(index: &jet_semindex.SemIndex) -> [ArchitectureCall] {
+    calls := [ArchitectureCall]{}
+    loop edge in index.call_edges() {
+        caller :: index.definitions().iter().find(fn(definition) -> definition.module_path == edge.module_path && function_definition_matches(definition.name, edge.caller)) ?? next
+        reference :: index.references().iter().filter(fn(reference) -> reference.module_path == edge.module_path && spans_overlap((reference.span.start, reference.span.end), (edge.call_span.start, edge.call_span.end)) && reference.target.is_some()).min_by_key(fn(reference) -> reference.span.end.saturating_sub(reference.span.start)) ?? next
+        target :: reference.target ?? next
+        callee :: index.definitions().iter().find(fn(definition) -> definition.module_path == target.module_path && definition.def_span.start == target.def_span.start && definition.def_span.end == target.def_span.end) ?? next
+        callee_return :: if callee.kind == { .Function(_, ret, _) -> ret.clone(); _ -> next }
+        &calls.push(ArchitectureCall{
+            caller_key: definition_key(caller), caller_name: caller.qualified_name.clone(), caller_module: caller.module_path.clone(),
+            caller_span: (caller.def_span.start, caller.def_span.end), callee_key: definition_key(callee),
+            callee_name: callee.qualified_name.clone(), callee_module: callee.module_path.clone(),
+            callee_span: (callee.def_span.start, callee.def_span.end), callee_return: callee_return,
+            call_span: (edge.call_span.start, edge.call_span.end),
+        })
+    }
+    calls
+}
+// Rust: Source/CmdDevTools.rs:8850
+fn function_definition_matches(name: String, key: String) -> Bool {
+    key == name || key.rsplit("::").next().is_some_and(fn(short) -> short == name)
+}
+// Rust: Source/CmdDevTools.rs:8854
+fn definition_key(definition: &jet_semindex.SymbolDef) -> String {
+    "{definition.module_path}:{definition.def_span.start}..{definition.def_span.end}"
+}
+// Rust: Source/CmdDevTools.rs:8861
+fn spans_overlap(left: (USize, USize), right: (USize, USize)) -> Bool { left.0 <= right.1 && right.0 <= left.1 }
+// Rust: Source/CmdDevTools.rs:8865
+fn architecture_advice_rows(index: &jet_semindex.SemIndex, calls: &[ArchitectureCall]) -> [ArchitectureAdviceRow] {
+    rows := [ArchitectureAdviceRow]{}
+    seen := [String:Bool]{}
+    by_callee := [String:[ArchitectureCall]]{}
+    by_caller := [String:[ArchitectureCall]]{}
+    loop call in calls {
+        &by_callee.entry(call.callee_key.clone()).or_default().push(call.clone())
+        &by_caller.entry(call.caller_key.clone()).or_default().push(call.clone())
+    }
+    callee_keys := by_callee.keys().cloned().collect()
+    &callee_keys.sort()
+    loop key in callee_keys {
+        calls :: by_callee[key]
+        callers := [String:Bool]{}
+        loop call in calls -> &callers.insert(call.caller_key, true)
+        if callers.len() < 2 -> next
+        subject :: calls[0].callee_name.clone()
+        key :: "shared-callee:{subject}"
+        if seen.contains_key(key) -> next
+        &seen.insert(key, true)
+        &rows.push(make_architecture_advice_row(index, "shared-callee", subject, calls, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
+    }
+    caller_keys := by_caller.keys().cloned().collect()
+    &caller_keys.sort()
+    loop key in caller_keys {
+        calls :: by_caller[key]
+        callees := [String:Bool]{}
+        return_types := [String:Bool]{}
+        loop call in calls {
+            &callees.insert(call.callee_key, true)
+            if call.callee_return == .Val(ret) -> &return_types.insert(ret, true)
+        }
+        if callees.len() < 2 || return_types.len() != 1 -> next
+        subject :: calls[0].caller_name.clone()
+        key :: "consumer-agreement:{subject}"
+        if seen.contains_key(key) -> next
+        &seen.insert(key, true)
+        &rows.push(make_architecture_advice_row(index, "consumer-agreement", subject, calls, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
+    }
+    rows
+}
+// Rust: Source/CmdDevTools.rs:8932
+fn make_architecture_advice_row(index: &jet_semindex.SemIndex, kind: String, subject: String, calls: &[ArchitectureCall], note: String) -> ArchitectureAdviceRow {
+    evidence := [ArchitectureSourceEvidence]{}
+    evidence_keys := [String:Bool]{}
+    boundary_set := [String:Bool]{}
+    loop call in calls {
+        &boundary_set.insert("{call.caller_module} -> {call.callee_module}", true)
+        entries :: [("caller-definition", call.caller_module, call.caller_span), ("callee-definition", call.callee_module, call.callee_span), ("checked-call-site", call.caller_module, call.call_span)]
+        loop (role, module_path, span) in entries {
+            (start, end) :: span
+            key :: "{role}:{module_path}:{start}:{end}"
+            if !evidence_keys.contains_key(key) {
+                &evidence_keys.insert(key, true)
+                &evidence.push(ArchitectureSourceEvidence{role: role, module_path: module_path.to_string(), start: start, end: end})
+            }
+        }
+    }
+    &evidence.sort_by(fn(left, right) -> left.module_path.cmp(right.module_path).then(left.start.cmp(right.start)).then(left.role.cmp(right.role)))
+    cross_module :: calls.iter().any(fn(call) -> call.caller_module != call.callee_module)
+    scope :: if cross_module -> "cross-module" else -> "same-module"
+    boundaries := boundary_set.keys().cloned().collect()
+    loop call in calls {
+        if index.effect_of(call.caller_name) == .Val(effect) {
+            if !effect.inferred.is_empty() -> &boundaries.push("effects {call.caller_name}: {effect.inferred.join(", ")}")
+        }
+    }
+    &boundaries.sort()
+    &boundaries.dedup()
+    ArchitectureAdviceRow{
+        kind: kind, subject: subject, scope: scope, evidence: evidence, boundaries: boundaries,
+        behavior: [
+            ArchitectureBehaviorCheck{name: "checked_reference_resolution", status: "passed", detail: "the compiler semantic index resolved the definitions and call sites"},
+            ArchitectureBehaviorCheck{name: "consumer_behavior", status: "not_run", detail: "this read-only inspection does not execute user code"},
+            ArchitectureBehaviorCheck{name: "cross_mode_agreement", status: "unknown", detail: "no runtime or change-task receipt was supplied"},
+        ],
+        uncertainty: [note.to_string(), "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"],
+    }
+}
+// Rust: Source/CmdDevTools.rs:9031
+fn architecture_source_value(evidence: &ArchitectureSourceEvidence) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("role", evidence.role).with("module", evidence.module_path).with("span", StatusValue.object(StatusFields.new().with("start", evidence.start).with("end", evidence.end))))
+}
+// Rust: Source/CmdDevTools.rs:9047
+fn architecture_row_value(row: &ArchitectureAdviceRow) -> StatusValue {
+    behavior :: StatusValue.array(row.behavior.iter().map(fn(check) -> StatusValue.object(StatusFields.new().with("name", check.name).with("status", check.status).with("detail", check.detail))))
+    StatusValue.object(StatusFields.new().with("kind", row.kind).with("subject", row.subject).with("scope", row.scope).with("source_evidence", StatusValue.array(row.evidence.iter().map(fn(evidence) -> architecture_source_value(evidence)))).with("affected_boundaries", StatusValue.array(row.boundaries.iter().map(fn(value) -> StatusValue.from(value)))).with("behavioral_checks", behavior).with("uncertainty", StatusValue.array(row.uncertainty.iter().map(fn(value) -> StatusValue.from(value)))).with("operator_action", "review_or_reject"))
+}
+// Rust: Source/CmdDevTools.rs:9078
+fn architecture_inspection_value(inspection: &ArchitectureInspection) -> StatusValue {
+    fields := StatusFields.new().with("status", inspection.status).with("rows", StatusValue.array(inspection.rows.iter().map(fn(row) -> architecture_row_value(row)))).with("operator_action", "review_or_reject")
+    if inspection.reason == .Val(reason) -> fields = fields.with("reason", reason)
+    StatusValue.object(fields)
+}
+// Rust: Source/CmdDevTools.rs:9092
+fn render_architecture_inspection(inspection: &ArchitectureInspection) -> Void {
+    println("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):")
+    if inspection.reason == .Val(reason) -> println("  status: unavailable — {reason}")
+    else if inspection.rows.is_empty() -> println("  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant")
+    else {
+        loop row in inspection.rows {
+            println("  {row.kind} `{row.subject}` [{row.scope}]")
+            loop evidence in row.evidence -> println("    evidence: {evidence.role} {evidence.module_path}:{evidence.start}..{evidence.end}")
+            loop boundary in row.boundaries -> println("    boundary: {boundary}")
+            loop check in row.behavior -> println("    check: {check.name}={check.status} ({check.detail})")
+            loop uncertainty in row.uncertainty -> println("    uncertainty: {uncertainty}")
+        }
+    }
+    println("  measurement: benchmark/change-task not measured; no advantage claim")
+}
+// Rust: Source/CmdDevTools.rs:9130
+pub struct BenchEvidence {
+    name: String
+    samples: [(U128, U64)]
+    // Exact allocation events, requested bytes, iterations for each trial.
+    // Calibration and warmup are outside the reset boundary.
+    allocation_samples: [(U128, U128, U64)]
+}
+
+// Rust: Source/CmdDevTools.rs:9142
+// Collect the twenty exact samples emitted by the canonical measurement harness.
+pub fn collect_measure_evidence(file: String, src: String, mode: OutputMode, filter: String?) -> [BenchEvidence] {
+    (rust_code, ffi_link) :: jet.compile_tests_with_path(src, file) ?? {
+        report_problems(mode, file, src, err); exit(ExitCodes.USER_ERROR)
+    }
+    project_root :: jet.build_project_root(file) ?? {
+        report_problems(mode, file, src, err); exit(ExitCodes.USER_ERROR)
+    }
+    bin :: project_root.join(".jet").join("build").join("test_measure_{stem(file)}")
+    build(file, rust_code, None, bin.clone(), .Release, ffi_link, [], false, None, None, None, mode, false, None)
+    // GATE #4494: native subprocess and environment, exact U128 sample parsing.
+    command := Command.new(bin)
+    &command.env("JET_TEST_MEASURE", "1").env("JET_TEST_MEASURE_EVIDENCE", "1")
+    if filter == .Val(filter) -> &command.env("JET_TEST_FILTER", filter)
+    output :: command.output() ?? {
+        eprintln("measure: couldn't run `{bin.display()}`: {err}"); exit(ExitCodes.USER_ERROR)
+    }
+    if !output.stderr.is_empty() -> core.term.eprint(String.from_utf8_lossy(output.stderr))
+    if !output.status.success() -> exit(CmdCompile.child_exit_code(output.status))
+    stdout :: String.from_utf8(output.stdout) ?? {
+        eprintln("measure: harness emitted non-UTF-8 evidence"); exit(ExitCodes.USER_ERROR)
+    }
+    evidence := [BenchEvidence]{}
+    loop line in stdout.lines() {
+        if line.strip_prefix("JETALLOC1\t") == .Val(wire) {
+            fields := wire.split("\t")
+            name :: fields.next().and_then(fn(value) -> decode_hex(value)) ?? {
+                eprintln("measure: harness emitted malformed allocation identity"); exit(ExitCodes.USER_ERROR)
+            }
+            tier :: fields.next().filter(fn(value) -> !value.is_empty()) ?? {
+                eprintln("measure: harness emitted no execution tier for allocation evidence"); exit(ExitCodes.USER_ERROR)
+            }
+            profile :: fields.next().filter(fn(value) -> !value.is_empty()) ?? {
+                eprintln("measure: harness emitted no build profile for allocation evidence"); exit(ExitCodes.USER_ERROR)
+            }
+            warmups :: fields.next().and_then(fn(value) -> U64.parse(value).ok()).filter(fn(value) -> value > 0) ?? {
+                eprintln("measure: harness emitted invalid warmup count for allocation evidence"); exit(ExitCodes.USER_ERROR)
+            }
+            iters :: fields.next().and_then(fn(value) -> U64.parse(value).ok()).filter(fn(value) -> value > 0) ?? {
+                eprintln("measure: harness emitted invalid allocation iteration count"); exit(ExitCodes.USER_ERROR)
+            }
+            serial :: fields.next().and_then(fn(value) -> Bool.parse(value).ok()) ?? {
+                eprintln("measure: harness emitted non-serial allocation evidence"); exit(ExitCodes.USER_ERROR)
+            }
+            if tier != "aot" || profile != "release" || warmups != 5 || !serial -> {
+                eprintln("measure: harness emitted allocation evidence without the optimized serial AOT profile"); exit(ExitCodes.USER_ERROR)
+            }
+            samples := [(U128, U128, U64)]{}
+            loop value in fields {
+                (count, bytes) :: value.split_once(":") ?? {
+                    eprintln("measure: harness emitted malformed allocation evidence"); exit(ExitCodes.USER_ERROR)
+                }
+                count :: U128.parse(count) ?? { eprintln("measure: harness emitted malformed allocation evidence"); exit(ExitCodes.USER_ERROR) }
+                bytes :: U128.parse(bytes) ?? { eprintln("measure: harness emitted malformed allocation evidence"); exit(ExitCodes.USER_ERROR) }
+                &samples.push((count, bytes, iters))
+            }
+            if samples.len() != 20 -> {
+                eprintln("measure: harness emitted {samples.len()} allocation samples; policy requires 20"); exit(ExitCodes.USER_ERROR)
+            }
+            entry :: evidence.iter_mut().find(fn(entry) -> entry.name == name) ?? {
+                eprintln("measure: allocation evidence preceded its named claim"); exit(ExitCodes.USER_ERROR)
+            }
+            entry.allocation_samples = ^samples
+            next
+        }
+        wire :: line.strip_prefix("JETTESTMEASURE1\t") ?? next
+        fields := wire.split("\t")
+        name :: fields.next().and_then(fn(value) -> decode_hex(value)) ?? {
+            eprintln("measure: harness emitted malformed claim identity"); exit(ExitCodes.USER_ERROR)
+        }
+        tier :: fields.next().filter(fn(value) -> !value.is_empty()) ?? {
+            eprintln("measure: harness emitted no execution tier"); exit(ExitCodes.USER_ERROR)
+        }
+        profile :: fields.next().filter(fn(value) -> !value.is_empty()) ?? {
+            eprintln("measure: harness emitted no build profile"); exit(ExitCodes.USER_ERROR)
+        }
+        warmups :: fields.next().and_then(fn(value) -> U64.parse(value).ok()).filter(fn(value) -> value > 0) ?? {
+            eprintln("measure: harness emitted invalid warmup count"); exit(ExitCodes.USER_ERROR)
+        }
+        iters :: fields.next().and_then(fn(value) -> U64.parse(value).ok()).filter(fn(value) -> value > 0) ?? {
+            eprintln("measure: harness emitted invalid iteration count"); exit(ExitCodes.USER_ERROR)
+        }
+        serial :: fields.next().and_then(fn(value) -> Bool.parse(value).ok()) ?? {
+            eprintln("measure: harness emitted non-serial timing evidence"); exit(ExitCodes.USER_ERROR)
+        }
+        if tier != "aot" || profile != "release" || warmups != 5 || !serial -> {
+            eprintln("measure: harness emitted timing evidence without the optimized serial AOT profile"); exit(ExitCodes.USER_ERROR)
+        }
+        samples := [(U128, U64)]{}
+        loop value in fields {
+            elapsed :: U128.parse(value) ?? { eprintln("measure: harness emitted invalid exact sample"); exit(ExitCodes.USER_ERROR) }
+            &samples.push((elapsed, iters))
+        }
+        if samples.len() != 20 -> {
+            eprintln("measure: harness emitted {samples.len()} samples; policy requires 20"); exit(ExitCodes.USER_ERROR)
+        }
+        &evidence.push(BenchEvidence{name: name, samples: samples, allocation_samples: []})
+    }
+    evidence
+}
+// Rust: Source/CmdDevTools.rs:9362
+pub fn collect_service_evidence(root: &OSPath, specs: &[Sema.LocatedBudgetSpec]) -> [CmdBudget.ServiceEvidence] {
+    service_names := [String:Bool]{}
+    loop s in specs {
+        kind :: s.spec.provider.split_once("(").map(fn(pair) -> pair.0) ?? s.spec.provider
+        if kind == "ServiceProbe" -> &service_names.insert(s.spec.provider.split_once("(").and_then(fn(pair) -> pair.1.strip_suffix(")")) ?? "", true)
+    }
+    if service_names.is_empty() -> return []
+    names := service_names.keys().cloned().collect()
+    &names.sort()
+    result := [CmdBudget.ServiceEvidence]{}
+    loop name in names {
+        argv :: ["__service-probe", name.clone(), "--no-color"]
+        output :: EngineDispatch.capture(jet.Syntax.JETPACK_BINARY_NAME, "ServiceProbe", argv, root) ?? next
+        if !output.status.success() {
+            stderr := String.from_utf8_lossy(output.stderr).trim() // #4303
+            eprintln("budget: ServiceProbe `{name}` measurement failed: {stderr}")
+            next
+        }
+        stdout :: String.from_utf8(output.stdout) ?? {
+            eprintln("budget: ServiceProbe `{name}` returned non-UTF-8 evidence"); next
+        }
+        expected_name :: name.bytes().map(fn(byte) -> "{byte:02x}").collect()
+        rows := stdout.lines()
+        row :: rows.next() ?? { eprintln("budget: ServiceProbe `{name}` returned no evidence"); next }
+        if rows.next().is_some() -> { eprintln("budget: ServiceProbe `{name}` returned extra evidence rows"); next }
+        fields := row.split("\t")
+        if fields.next() != .Val("JETSERVICE1") || fields.next() != .Val(expected_name) -> {
+            eprintln("budget: ServiceProbe `{name}` returned incompatible evidence"); next
+        }
+        samples_ns := [U64]{}
+        malformed := false
+        loop field in fields {
+            value :: U64.parse(field) ?? { malformed = true; break }
+            &samples_ns.push(value)
+        }
+        if malformed || samples_ns.len() != 20 -> { eprintln("budget: ServiceProbe `{name}` did not return exactly 20 samples"); next }
+        &result.push(CmdBudget.ServiceEvidence{name: name.clone(), samples_ns: samples_ns})
+    }
+    result
+}
+// Rust: Source/CmdDevTools.rs:9454
+pub fn collect_scene_evidence(file: String, src: String, mode: OutputMode, specs: &[Sema.LocatedBudgetSpec]) -> [CmdBudget.SceneEvidence] {
+    scene_names := [String:Bool]{}
+    loop s in specs {
+        kind :: s.spec.provider.split_once("(").map(fn(pair) -> pair.0) ?? s.spec.provider
+        if kind == "SceneProbe" -> &scene_names.insert(s.spec.provider.split_once("(").and_then(fn(pair) -> pair.1.strip_suffix(")")) ?? "", true)
+    }
+    if scene_names.is_empty() -> return []
+    compiled :: jet.compile_with_path(src, file) ?? { report_problems(mode, file, src, err); return [] }
+    project_root :: jet.build_project_root(file) ?? { report_problems(mode, file, src, err); return [] }
+    bin :: project_root.join(".jet").join("build").join("scene_probe_{stem(file)}")
+    build(file, compiled.rust, None, bin.clone(), .Release, compiled.ffi, [], false, None, None, None, mode, false, None)
+    names := scene_names.keys().cloned().collect()
+    &names.sort()
+    result := [CmdBudget.SceneEvidence]{}
+    loop scene_name in names {
+        out :: Command.new(bin).env("JET_SCENE_PROBE", scene_name).output() ?? {
+            eprintln("budget: SceneProbe `{scene_name}` run failed: {err}"); next
+        }
+        if !out.status.success() -> { eprintln("budget: SceneProbe `{scene_name}` exited with non-zero status"); next }
+        stdout :: String.from_utf8(out.stdout) ?? ""
+        frame_ns := [U64]{}
+        draw_calls := [U64]{}
+        asset_bytes := [U64]{}
+        rss_hwm := [U64]{}
+        expected_hex :: scene_name.bytes().map(fn(byte) -> "{byte:02x}").collect()
+        loop line in stdout.lines() {
+            wire :: line.strip_prefix("JETSCENE1\t") ?? next
+            fields := wire.splitn(4, "\t")
+            hex :: fields.next() ?? ""
+            metric :: fields.next() ?? ""
+            value_str :: fields.next() ?? ""
+            if hex != expected_hex -> next
+            value :: U64.parse(value_str) ?? {
+                eprintln("budget: SceneProbe `{scene_name}` malformed value `{value_str}`"); next
+            }
+            if metric == {
+                "FrameTime" -> &frame_ns.push(value)
+                "DrawCalls" -> &draw_calls.push(value)
+                "SceneAssetBytes" -> &asset_bytes.push(value)
+                "MemoryHighWater" -> &rss_hwm.push(value)
+                _ -> {}
+            }
+        }
+        // Exactly 600 measured samples per metric; 120 warmup frames omitted.
+        if frame_ns.len() != 600 || draw_calls.len() != 600 || asset_bytes.len() != 600 || rss_hwm.len() != 600 -> {
+            eprintln("budget: SceneProbe `{scene_name}` emitted {frame_ns.len()}/{draw_calls.len()}/{asset_bytes.len()}/{rss_hwm.len()} samples; need 600 for each metric")
+            next
+        }
+        &result.push(CmdBudget.SceneEvidence{name: scene_name.clone(), frame_ns: frame_ns, draw_calls: draw_calls, asset_bytes: asset_bytes, rss_hwm: rss_hwm})
+    }
+    result
+}
+// Rust: Source/CmdDevTools.rs:9597
+pub fn run_devtools_probe(args: &[String]) -> Void {
+    file :: args.first() ?? { eprintln("usage: jet devtools probe <file.jet>"); exit(ExitCodes.USAGE) }
+    src :: fs.read_to_string(file) ?? { eprintln("probe: cannot read `{file}`: {err}"); exit(ExitCodes.USER_ERROR) }
+    mode :: OutputMode{json: false, color: .Never, quiet: false}
+    bundle := jet.Loader.load_entry(file) ?? { report_problems(mode, file, src, err); exit(ExitCodes.USER_ERROR) }
+    _ :: Sema.check_bundle(&bundle, .Run)
+    specs :: Sema.collect_located_budget_specs_bundle(bundle) ?? exit(ExitCodes.USER_ERROR)
+    root :: OSPath.new(file).canonicalize().ok().and_then(fn(p) -> p.parent().map(fn(d) -> d.to_path_buf())).and_then(fn(d) -> .Val(jet.Loader.find_manifest_root(d) ?? d)) ?? OSPath.new(".")
+    service_evidence :: collect_service_evidence(root, specs)
+    scene_evidence :: collect_scene_evidence(file, src, mode, specs)
+    status :: CmdBudget.run_dev_refresh(file, service_evidence, scene_evidence)
+    exit(status)
+}
+// Rust: Source/CmdDevTools.rs:9646
+fn decode_hex(value: String) -> String? {
+    if value.len() % 2 != 0 -> return None
+    nibble :: fn(byte: U8) -> U8? {
+        if byte >= 48 && byte <= 57 -> return .Val(byte - 48)
+        if byte >= 97 && byte <= 102 -> return .Val(byte - 97 + 10)
+        None
+    }
+    bytes := [U8].with_capacity(value.len() / 2)
+    loop pair in value.bytes().chunks_exact(2) {
+        high :: nibble(pair[0]) ?? return None
+        low :: nibble(pair[1]) ?? return None
+        &bytes.push((high << 4) | low)
+    }
+    String.from_utf8(bytes).ok()
+}
 

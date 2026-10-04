@@ -1,0 +1,20 @@
+use jetpack.Build.[is_safe_component, rust_string]
+
+// Rust: crates/jetpack/build.rs:119
+#Test("battery_component_rejects_controls_and_separators") {
+    assert(is_safe_component("hello-world.jet"))
+    assert(!is_safe_component("line\nbreak"))
+    assert(!is_safe_component("parent/child"))
+    assert(!is_safe_component("parent\\child"))
+    // Empty and dot names are rejected by main, not by this helper.
+    assert(is_safe_component(""))
+    assert(is_safe_component("."))
+    assert(is_safe_component(".."))
+}
+
+// Rust: crates/jetpack/build.rs:124
+#Test("battery_registry_strings_are_debug_quoted") {
+    assert_eq(rust_string("package.jet"), "\"package.jet\"")
+    assert_eq(rust_string("a\nb"), "\"a\\nb\"")
+    assert_eq(rust_string("\"\\"), "\"\\\"\\\\\"")
+}

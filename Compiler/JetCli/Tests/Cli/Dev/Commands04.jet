@@ -1,0 +1,38 @@
+use jet_cli.[update_binding_package_config, read_c_bind_overlay]
+use jet.[Bindgen, AST]
+use std.[fs, env, process]
+
+// Rust: Source/CmdDevTools.rs:5466-5511
+#Test("binding_package_update_retains_shape_policy_and_existing_text") {
+    // GATE #4494: real native temporary filesystem fixture.
+    root :: env.temp_dir().join("jet-binding-config-{process.id()}")
+    fs.create_dir_all(&root).unwrap()
+    defer { _ :: fs.remove_dir_all(&root) }
+    path :: root.join("package.jet")
+    original :: "name: \"binding-test\"\n"
+    fs.write(&path, original).unwrap()
+    update_binding_package_config(path, .Val("demo"), .Val(Bindgen.BindingShape.Native), .Val(Bindgen.BindingPolicy.Frozen)).unwrap()
+    source :: fs.read_to_string(&path).unwrap()
+    assert(source.starts_with(original))
+    assert(source.contains("demo: .{ shape: .Native, frozen: true }"))
+    assert(source.contains("policy: .{ bindings: .Frozen }"))
+    update_binding_package_config(path, .Val("second"), .Val(Bindgen.BindingShape.Automatic), .None).unwrap()
+    second :: fs.read_to_string(&path).unwrap()
+    assert(second.contains("// binding plan: second shape={Bindgen.BindingShape.Automatic.as_str()}"))
+    fs.write(&path, "").unwrap()
+    assert(update_binding_package_config(path, .None, .None, .None).expect_err("empty manifest") == "`{path.display()}` is not a package manifest")
+}
+// Rust: Source/CmdDevTools.rs:5513-5558
+#Test("binding_overlay_requires_matching_extern_module") {
+    // GATE #4494: actual overlay read; real lexer/parser, no providers mocked.
+    root :: env.temp_dir().join("jet-binding-overlay-{process.id()}")
+    fs.create_dir_all(&root).unwrap()
+    defer { _ :: fs.remove_dir_all(&root) }
+    path :: root.join("overlay.jet")
+    fs.write(&path, "fn run() {}\n").unwrap()
+    error :: read_c_bind_overlay(path.to_string_lossy().into_owned(), "demo").expect_err("missing extern module")
+    assert(error == "the overlay has no `#Import module c.demo { … }` block")
+    fs.write(&path, "#Import module c.other {}\n").unwrap()
+    mismatch :: read_c_bind_overlay(path.to_string_lossy().into_owned(), "demo").expect_err("wrong library")
+    assert(mismatch == "the overlay declares `c.other` but this bind targets `c.demo`")
+}

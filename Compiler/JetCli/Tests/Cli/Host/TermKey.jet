@@ -1,0 +1,55 @@
+use std.io.[Cursor]
+
+// Rust: crates/jet-repl/src/Term.rs:400
+#Test("decodes_plain_char_and_enter") {
+    reader := KeyReader.new(Cursor.new("a\r".bytes()))
+    assert_eq(reader.read_key(), JetCLITermKey.Char('a'))
+    assert_eq(reader.read_key(), JetCLITermKey.Enter)
+}
+// Rust: crates/jet-repl/src/Term.rs:407
+#Test("decodes_escape_enter_as_forced_newline") {
+    cr := KeyReader.new(Cursor.new([U8]{U8{27}, U8{13}}))
+    assert_eq(cr.read_key(), JetCLITermKey.EscapeEnter)
+    lf := KeyReader.new(Cursor.new([U8]{U8{27}, U8{10}}))
+    assert_eq(lf.read_key(), JetCLITermKey.EscapeEnter)
+}
+// Rust: crates/jet-repl/src/Term.rs:415
+#Test("decodes_control_keys") {
+    reader := KeyReader.new(Cursor.new([U8]{U8{2}, U8{16}, U8{6}, U8{18}}))
+    assert_eq(reader.read_key(), JetCLITermKey.CtrlB)
+    assert_eq(reader.read_key(), JetCLITermKey.CtrlP)
+    assert_eq(reader.read_key(), JetCLITermKey.CtrlF)
+    assert_eq(reader.read_key(), JetCLITermKey.CtrlR)
+}
+// Rust: crates/jet-repl/src/Term.rs:424
+#Test("decodes_arrow_escape_sequences") {
+    reader := KeyReader.new(Cursor.new([U8]{U8{27}, U8{91}, U8{65}, U8{27}, U8{91}, U8{66}, U8{27}, U8{91}, U8{67}, U8{27}, U8{91}, U8{68}}))
+    assert_eq(reader.read_key(), JetCLITermKey.Up)
+    assert_eq(reader.read_key(), JetCLITermKey.Down)
+    assert_eq(reader.read_key(), JetCLITermKey.Right)
+    assert_eq(reader.read_key(), JetCLITermKey.Left)
+}
+// Rust: crates/jet-repl/src/Term.rs:433
+#Test("decodes_f1_ss3_escape") {
+    f1 := KeyReader.new(Cursor.new([U8]{U8{27}, U8{79}, U8{80}}))
+    assert_eq(f1.read_key(), JetCLITermKey.F1)
+    f3 := KeyReader.new(Cursor.new([U8]{U8{27}, U8{79}, U8{82}}))
+    assert_eq(f3.read_key(), JetCLITermKey.F3)
+}
+// Rust: crates/jet-repl/src/Term.rs:441
+#Test("bare_escape_with_no_continuation_is_escape_not_a_hang") {
+    reader := KeyReader.new(Cursor.new([U8]{U8{27}}))
+    assert_eq(reader.read_key(), JetCLITermKey.Escape)
+}
+// Rust: crates/jet-repl/src/Term.rs:447
+#Test("decodes_multibyte_utf8_char") {
+    reader := KeyReader.new(Cursor.new("é".bytes()))
+    assert_eq(reader.read_key(), JetCLITermKey.Char('é'))
+}
+// Rust: crates/jet-repl/src/Term.rs:453
+#Test("empty_stream_is_idle_then_eof_is_distinct") {
+    reader := KeyReader.new(Cursor.new([U8]{}))
+    // Zero-byte reads cannot distinguish EOF from raw min-0 timeout; Ctrl-D
+    // remains its own explicitly decoded event, just as in the reference.
+    assert_eq(reader.read_key(), JetCLITermKey.Idle)
+}

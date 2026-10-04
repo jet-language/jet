@@ -1,0 +1,30 @@
+use jet_cli.[render_json_value, status_data_value, status_value_json_len, db_output_name, DbOutput, OutputMode, jet_cli_db_split_sql_statements, jet_cli_db_csv_escape]
+use jet_foundation.[Value, StatusValue, StatusFields, json_str]
+
+// Rust: Source/CmdDb.rs:1806-1840
+#Test("db_value_rendering_preserves_number_text_and_nested_values") {
+    assert(render_json_value(Value.Number("1e+20")) == "1e+20")
+    assert(render_json_value(Value.Float(2.0)) == "2.0")
+    assert(render_json_value(Value.TypedText("a\nb")) == json_str("a\nb"))
+    assert(render_json_value(Value.Bytes([1, 2, 255])) == "[1,2,255]")
+    assert(render_json_value(Value.Array([Value.Null, Value.Bool(true), Value.Int(3)])) == "[null,true,3]")
+}
+// Rust: Source/CmdDb.rs:2213-2231
+#Test("db_status_length_is_utf8_json_bytes") {
+    value :: StatusValue.object(StatusFields.new().with("é", StatusValue.array([StatusValue.Null, StatusValue.String("a\nb"), StatusValue.Integer(12)])))
+    assert(status_value_json_len(value) == "{\"é\":[null,\"a\\nb\",12]}".bytes().len())
+    assert(status_value_json_len(StatusValue.array([])) == 2)
+    assert(status_value_json_len(StatusValue.object(StatusFields.new())) == 2)
+}
+// Rust: Source/CmdDb.rs:2492-2515
+#Test("db_number_status_retains_large_exact_lexeme") {
+    assert(status_data_value(Value.Number("12")) == StatusValue.Integer(12))
+    assert(status_data_value(Value.Number("1e+20")) == StatusValue.Float("1e+20"))
+}
+// Rust: Source/CmdDb.rs:2688-2694,3029-3093
+#Test("db_csv_quotes_and_sql_split_boundaries") {
+    assert(jet_cli_db_csv_escape("a,\"b\"\n") == "\"a,\"\"b\"\"\n\"")
+    assert(jet_cli_db_split_sql_statements("SELECT 'a;b', count(x) FROM source; SELECT \"a\"\";b\" FROM source;").unwrap() == ["SELECT 'a;b', count(x) FROM source", "SELECT \"a\"\";b\" FROM source"])
+    assert(jet_cli_db_split_sql_statements("SELECT )").expect_err("unopened parenthesis").message == "SQL statement closes a parenthesis that it did not open")
+    assert(jet_cli_db_split_sql_statements("SELECT 'x").expect_err("unclosed quote").message == "SQL string literal is missing its closing quote")
+}

@@ -14,6 +14,7 @@
 fn publication_diff_test_item(kind: String, name: String, signature: String) -> PublicAPIItem Never! {
     PublicAPIItem{kind: kind, name: name, signature: signature}
 }
+// Rust: Source/Publish/Diff.rs:63 — function.
 fn publication_diff_test_function(name: String, signature: String) -> PublicAPIItem Never! {
     publication_diff_test_item("fn", name, signature)
 }
@@ -27,7 +28,8 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     publication_parse_semver(text) ?? panic("invalid test version: {text}")
 }
 
-#Test("publication duplicate_legacy_names_match_as_signature_multisets") {
+// Rust: Source/Publish/Diff.rs:72
+#Test("duplicate_legacy_names_match_as_signature_multisets") {
     old :: [PublicAPIItem]{publication_diff_test_function("report", "fn report()"), publication_diff_test_function("report", "fn report(x: Int)")}
     new :: [PublicAPIItem]{publication_diff_test_function("report", "fn report(x: Int)"), publication_diff_test_function("report", "fn report()")}
     assert_eq(publication_diff_public_api(old, new).len(), 0)

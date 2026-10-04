@@ -1,1336 +1,458 @@
-// PORT-PENDING 0678 source-cmddb-slice-1806: Source/CmdDb.rs:1806-3137
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn render_json_value(value: &Value) -> String {
-//RS     match value {
-//RS         Value::Null => "null".to_string(),
-//RS         Value::Bool(value) => value.to_string(),
-//RS         Value::Int(value) => value.to_string(),
-//RS         Value::Float(value) => render_float(*value),
-//RS         Value::Number(value) => value.clone(),
-//RS         Value::TypedText(value) | Value::Text(value) => json_str(value),
-//RS         Value::Bytes(values) => format!(
-//RS             "[{}]",
-//RS             values.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")
-//RS         ),
-//RS         Value::Array(values) => format!(
-//RS             "[{}]",
-//RS             values.iter().map(render_json_value).collect::<Vec<_>>().join(",")
-//RS         ),
-//RS         Value::Object(entries) => format!(
-//RS             "{{{}}}",
-//RS             entries
-//RS                 .iter()
-//RS                 .map(|(name, value)| format!("{}:{}", json_str(name), render_json_value(value)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn render_float(value: f64) -> String {
-//RS     let rendered = value.to_string();
-//RS     if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-//RS         rendered
-//RS     } else {
-//RS         format!("{rendered}.0")
-//RS     }
-//RS }
-//RS 
-//RS fn prepare_session(session: &mut SqlSession, source: &LoadedSource) -> Result<(), DbError> {
-//RS     for import in ["use core.data as data", "use core.encoding.json as json"] {
-//RS         session
-//RS             .execute(import)
-//RS             .map_err(|diagnostics| DbError::diagnostics("import", &source.path, &diagnostics))?;
-//RS     }
-//RS     session
-//RS         .define_item(&generated_row_item(&source.columns))
-//RS         .map_err(|diagnostics| DbError::diagnostics("schema", &source.path, &diagnostics))
-//RS }
-//RS 
-//RS fn generated_row_item(columns: &[Column]) -> String {
-//RS     let mut source = format!("#Codable\nstruct {ROW_TYPE_NAME} {{\n");
-//RS     for column in columns {
-//RS         source.push_str("    ");
-//RS         source.push_str(&column.name);
-//RS         source.push_str(": ");
-//RS         source.push_str(column.kind.jet_name());
-//RS         if column.nullable {
-//RS             source.push('?');
-//RS         }
-//RS         source.push('\n');
-//RS     }
-//RS     source.push_str("}\n");
-//RS     source
-//RS }
-//RS 
-//RS fn process_inputs(
-//RS     inputs: &[String],
-//RS     interactive: bool,
-//RS     source: Option<&LoadedSource>,
-//RS     session: &mut SqlSession,
-//RS     state: &mut DbState,
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> i32 {
-//RS     let mut status = 0;
-//RS     for input in inputs {
-//RS         if input.trim().is_empty() {
-//RS             continue;
-//RS         }
-//RS         let result = if input.trim_start().starts_with('.') {
-//RS             handle_dot(input.trim(), source, state, options, mode)
-//RS         } else {
-//RS             run_query(input.trim(), source, session, state, options, mode)
-//RS                 .map(|()| true)
-//RS         };
-//RS         match result {
-//RS             Ok(true) => {}
-//RS             Ok(false) => return 0,
-//RS             Err(error) => {
-//RS                 emit_error(mode, options.output, &error);
-//RS                 status = ExitCodes::USER_ERROR;
-//RS                 if !interactive {
-//RS                     return status;
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     status
-//RS }
-//RS fn db_sql_value(value: &Value) -> sql_kernel::JetSqlValue {
-//RS     match value {
-//RS         Value::Null => sql_kernel::JetSqlValue::Null,
-//RS         Value::Bool(value) => sql_kernel::JetSqlValue::Bool(*value),
-//RS         Value::Int(value) => sql_kernel::JetSqlValue::Int(*value),
-//RS         Value::Float(value) => sql_kernel::JetSqlValue::Float(*value),
-//RS         Value::Number(value) => sql_kernel::JetSqlValue::literal(value),
-//RS         Value::Text(value) => sql_kernel::JetSqlValue::Text(value.clone()),
-//RS         other => sql_kernel::JetSqlValue::Text(value_text(other)),
-//RS     }
-//RS }
-//RS 
-//RS fn db_sql_json_value(value: sql_kernel::JetSqlValue) -> Value {
-//RS     match value {
-//RS         sql_kernel::JetSqlValue::Null => Value::Null,
-//RS         sql_kernel::JetSqlValue::Bool(value) => Value::Bool(value),
-//RS         sql_kernel::JetSqlValue::Int(value) => Value::Int(value),
-//RS         sql_kernel::JetSqlValue::Float(value) => Value::Float(value),
-//RS         sql_kernel::JetSqlValue::Text(value) => Value::Text(value),
-//RS     }
-//RS }
-//RS 
-//RS fn run_dynamic_query(
-//RS     source: &LoadedSource,
-//RS     query: &sql_kernel::JetSqlQuery,
-//RS ) -> Result<(SqlEval, Value, String, usize), DbError> {
-//RS     let parsed = parse_json(&source.json, false).map_err(|error| {
-//RS         DbError::new(
-//RS             "E2600",
-//RS             "query",
-//RS             &source.path,
-//RS             format!("normalized source could not be decoded: {}", error.message),
-//RS             "reload the local source before querying it",
-//RS         )
-//RS     })?;
-//RS     let Value::Array(values) = parsed else {
-//RS         return Err(DbError::new(
-//RS             "E2600",
-//RS             "query",
-//RS             &source.path,
-//RS             "normalized source is not a row array",
-//RS             "reload a local JSON, JSONL, or CSV source",
-//RS         ));
-//RS     };
-//RS     let fields = source
-//RS         .columns
-//RS         .iter()
-//RS         .map(|column| column.name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     let result = sql_kernel::execute_sql_rows(&fields, values.len(), query, |index, field| {
-//RS         values.get(index).and_then(|row| match row {
-//RS             Value::Object(entries) => entries
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == field)
-//RS                 .map(|(_, value)| db_sql_value(value)),
-//RS             _ => None,
-//RS         })
-//RS     })
-//RS     .map_err(|message| {
-//RS         DbError::new(
-//RS             "E2702",
-//RS             "query",
-//RS             &source.path,
-//RS             message,
-//RS             "use declared source columns and the supported SELECT query surface",
-//RS         )
-//RS     })?;
-//RS     let result_values = result
-//RS         .into_iter()
-//RS         .map(|row| {
-//RS             Value::Object(
-//RS                 row.fields
-//RS                     .into_iter()
-//RS                     .map(|(name, value)| (name, db_sql_json_value(value)))
-//RS                     .collect(),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let result_tree = Value::Array(result_values);
-//RS     let rows = match &result_tree {
-//RS         Value::Array(values) => values.len(),
-//RS         _ => unreachable!("query result tree is always an array"),
-//RS     };
-//RS     let rendered = render_json_value(&result_tree);
-//RS     Ok((
-//RS         SqlEval {
-//RS             value: None,
-//RS             stdout: String::new(),
-//RS             stderr: String::new(),
-//RS         },
-//RS         result_tree,
-//RS         rendered,
-//RS         rows,
-//RS     ))
-//RS }
-//RS fn query_result_columns(source: &LoadedSource, query: &sql_kernel::JetSqlQuery) -> Vec<Column> {
-//RS     query
-//RS         .projection
-//RS         .iter()
-//RS         .flat_map(|item| match item {
-//RS             sql_kernel::JetSqlSelectItem::Wildcard => source
-//RS                 .columns
-//RS                 .iter()
-//RS                 .map(|column| Column {
-//RS                     name: column.name.clone(),
-//RS                     kind: column.kind,
-//RS                     nullable: column.nullable,
-//RS                 })
-//RS                 .collect::<Vec<_>>(),
-//RS             sql_kernel::JetSqlSelectItem::Field { field, alias } => {
-//RS                 let source_column = source.columns.iter().find(|column| column.name == *field);
-//RS                 vec![Column {
-//RS                     name: alias.clone().unwrap_or_else(|| field.clone()),
-//RS                     kind: source_column.map(|column| column.kind).unwrap_or(ColumnKind::String),
-//RS                     nullable: source_column.map(|column| column.nullable).unwrap_or(true),
-//RS                 }]
-//RS             }
-//RS             sql_kernel::JetSqlSelectItem::Aggregate {
-//RS                 function,
-//RS                 field,
-//RS                 alias,
-//RS             } => {
-//RS                 let source_column = field
-//RS                     .as_deref()
-//RS                     .and_then(|field| source.columns.iter().find(|column| column.name == field));
-//RS                 let default_name = field
-//RS                     .as_ref()
-//RS                     .map(|field| format!("{}_{}", function.as_str(), field))
-//RS                     .unwrap_or_else(|| function.as_str().to_string());
-//RS                 let (kind, nullable) = match function {
-//RS                     sql_kernel::JetSqlAggregate::Count => (ColumnKind::Int, false),
-//RS                     sql_kernel::JetSqlAggregate::Sum => (
-//RS                         source_column.map(|column| column.kind).unwrap_or(ColumnKind::Float),
-//RS                         true,
-//RS                     ),
-//RS                     sql_kernel::JetSqlAggregate::Avg => (ColumnKind::Float, true),
-//RS                     sql_kernel::JetSqlAggregate::Min => (
-//RS                         source_column.map(|column| column.kind).unwrap_or(ColumnKind::String),
-//RS                         true,
-//RS                     ),
-//RS                     sql_kernel::JetSqlAggregate::Max => (
-//RS                         source_column.map(|column| column.kind).unwrap_or(ColumnKind::String),
-//RS                         true,
-//RS                     ),
-//RS                 };
-//RS                 vec![Column {
-//RS                     name: alias.clone().unwrap_or(default_name),
-//RS                     kind,
-//RS                     nullable,
-//RS                 }]
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS 
-//RS 
-//RS fn result_row_count(value: &CtValue) -> Option<usize> {
-//RS     match value {
-//RS         CtValue::Present(value) => result_row_count(value),
-//RS         CtValue::List(values) => Some(values.len()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn run_query(
-//RS     sql: &str,
-//RS     source: Option<&LoadedSource>,
-//RS     session: &mut SqlSession,
-//RS     state: &mut DbState,
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> Result<(), DbError> {
-//RS     let source = source.ok_or_else(|| {
-//RS         DbError::new(
-//RS             "E2600",
-//RS             "query",
-//RS             "",
-//RS             "a SQL query needs a local typed source",
-//RS             "pass `jet db source.json --allow=FS.Read --query 'SELECT * FROM source'`",
-//RS         )
-//RS     })?;
-//RS     let query = sql_kernel::parse_sql_query(sql).map_err(|message| {
-//RS         DbError::new(
-//RS             "E2702",
-//RS             "query",
-//RS             &source.path,
-//RS             message,
-//RS             "use SELECT ... FROM source with optional WHERE, GROUP BY, ORDER BY, and LIMIT clauses",
-//RS         )
-//RS     })?;
-//RS     if query.source != source.name {
-//RS         return Err(DbError::new(
-//RS             "E2702",
-//RS             "query",
-//RS             &source.path,
-//RS             format!("query source `{}` does not match loaded source `{}`", query.source, source.name),
-//RS             format!("use `FROM {}` or pass `--table {}` with the desired identity", source.name, source.name),
-//RS         ));
-//RS     }
-//RS     sql_kernel::validate_sql_query_schema(
-//RS         &query,
-//RS         |field| source.columns.iter().any(|column| column.name == field),
-//RS         "SQL query",
-//RS     )
-//RS     .map_err(|message| {
-//RS         DbError::new(
-//RS             "E2702",
-//RS             "query",
-//RS             &source.path,
-//RS             message,
-//RS             "use only columns declared by the loaded source",
-//RS         )
-//RS     })?;
-//RS     let plan = render_plan(&source.name, &query);
-//RS     let result_columns = query_result_columns(source, &query);
-//RS     let started = Instant::now();
-//RS     let (evaluated, result_value, rendered, rows) = if query.needs_projection_execution() {
-//RS         let (evaluated, result_tree, rendered, rows) = run_dynamic_query(source, &query)?;
-//RS         (
-//RS             evaluated,
-//RS             status_data_value(&result_tree),
-//RS             rendered,
-//RS             rows,
-//RS         )
-//RS     } else {
-//RS         let expression = format!(
-//RS             "data.query(json.decode<[{ROW_TYPE_NAME}]>({}) ?? panic(\"input\"), SQL{{{}}})",
-//RS             json_str(&source.json),
-//RS             json_str(sql),
-//RS         );
-//RS         let evaluated = session
-//RS             .execute(&expression)
-//RS             .map_err(|diagnostics| DbError::diagnostics("query", &source.path, &diagnostics))?;
-//RS         let value = evaluated.value.as_ref().ok_or_else(|| {
-//RS             DbError::new(
-//RS                 "E2600",
-//RS                 "query",
-//RS                 &source.path,
-//RS                 "the SQL query produced no result value",
-//RS                 "keep the query as a SELECT expression",
-//RS             )
-//RS         })?;
-//RS         let rendered = jet::Comptime::render_datatree_for_tir(value);
-//RS         let rows = result_row_count(value).ok_or_else(|| {
-//RS             DbError::new(
-//RS                 "E2600",
-//RS                 "query",
-//RS                 &source.path,
-//RS                 "query result was not a typed row list",
-//RS                 "use the local typed-table query surface rather than a scalar expression",
-//RS             )
-//RS         })?;
-//RS         let result_value = status_ct_value(value);
-//RS         (evaluated, result_value, rendered, rows)
-//RS     };
-//RS     let elapsed_ms = started.elapsed().as_millis();
-//RS     let final_output_bytes = final_output_bytes(
-//RS         sql,
-//RS         source,
-//RS         &evaluated,
-//RS         &result_value,
-//RS         &rendered,
-//RS         rows,
-//RS         elapsed_ms,
-//RS         &plan,
-//RS         &result_columns,
-//RS         options,
-//RS         mode,
-//RS     )?;
-//RS     state.last_sql = Some(sql.to_string());
-//RS     state.last_plan = Some(plan.clone());
-//RS     state.last_result = Some(rendered.to_string());
-//RS     state.last_rows = rows;
-//RS     state.last_elapsed_ms = elapsed_ms;
-//RS     state.last_output_bytes = final_output_bytes;
-//RS     emit_result(
-//RS         sql,
-//RS         source,
-//RS         &evaluated,
-//RS         &result_value,
-//RS         &rendered,
-//RS         rows,
-//RS         elapsed_ms,
-//RS         &plan,
-//RS         &result_columns,
-//RS         options,
-//RS         mode,
-//RS     )
-//RS }
-//RS 
-//RS fn db_output_name(output: DbOutput, mode: OutputMode) -> &'static str {
-//RS     match output {
-//RS         DbOutput::Csv => "csv",
-//RS         DbOutput::Jsonl => "jsonl",
-//RS         DbOutput::Json => "json",
-//RS         DbOutput::Human if mode.json => "json",
-//RS         DbOutput::Human => "human",
-//RS     }
-//RS }
-//RS 
-//RS fn status_trust(transport: &str, authority: &str, remote: bool) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("transport", transport)
-//RS             .with("authority", authority)
-//RS             .with("remote", remote),
-//RS     )
-//RS }
-//RS 
-//RS fn status_value_json_len(value: &StatusValue) -> usize {
-//RS     match value {
-//RS         StatusValue::Null => 4,
-//RS         StatusValue::Bool(value) => value.to_string().len(),
-//RS         StatusValue::Integer(value) => value.to_string().len(),
-//RS         StatusValue::Float(value) => value.len(),
-//RS         StatusValue::String(value) => json_str(value).len(),
-//RS         StatusValue::Array(values) => {
-//RS             2 + values.iter().map(status_value_json_len).sum::<usize>() + values.len().saturating_sub(1)
-//RS         }
-//RS         StatusValue::Object(fields) => {
-//RS             2 + fields
-//RS                 .iter()
-//RS                 .map(|(name, value)| json_str(name).len() + 1 + status_value_json_len(value))
-//RS                 .sum::<usize>()
-//RS                 + fields.iter().count().saturating_sub(1)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn db_row_status(
-//RS     source: &LoadedSource,
-//RS     index: usize,
-//RS     output_mode: &str,
-//RS     plan: &str,
-//RS     rows: usize,
-//RS     row: &StatusValue,
-//RS ) -> StatusEnvelope {
-//RS     db_status(
-//RS         "row",
-//RS         true,
-//RS         StatusFields::new()
-//RS             .with("source", source.name.as_str())
-//RS             .with("index", index)
-//RS             .with("output_mode", output_mode)
-//RS             .with("plan", plan)
-//RS             .with(
-//RS                 "result_size",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("bytes", status_value_json_len(row))
-//RS                         .with("rows", rows),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "trust",
-//RS                 status_trust(
-//RS                     "local",
-//RS                     "same authorized local session",
-//RS                     false,
-//RS                 ),
-//RS             )
-//RS             .with("row", row.clone()),
-//RS     )
-//RS }
-//RS 
-//RS fn db_query_status(
-//RS     sql: &str,
-//RS     source: &LoadedSource,
-//RS     evaluated: &SqlEval,
-//RS     result: &StatusValue,
-//RS     rows: usize,
-//RS     elapsed_ms: u128,
-//RS     plan: &str,
-//RS     columns: &[Column],
-//RS     output_mode: &str,
-//RS ) -> StatusEnvelope {
-//RS     db_status(
-//RS         "query",
-//RS         true,
-//RS         StatusFields::new()
-//RS             .with("source", source.name.as_str())
-//RS             .with("sql", sql)
-//RS             .with("rows", rows)
-//RS             .with("elapsed_ms", elapsed_ms as i128)
-//RS             .with("input_bytes", source.input_bytes)
-//RS             .with("output_mode", output_mode)
-//RS             .with("plan", plan)
-//RS             .with(
-//RS                 "result_size",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("bytes", status_value_json_len(result))
-//RS                         .with("rows", rows),
-//RS                 ),
-//RS             )
-//RS             .with(
-//RS                 "trust",
-//RS                 status_trust(
-//RS                     "local",
-//RS                     "same authorized local session",
-//RS                     false,
-//RS                 ),
-//RS             )
-//RS             .with("columns", columns_value(columns))
-//RS             .with("result", result.clone())
-//RS             .with("stdout", evaluated.stdout.as_str())
-//RS             .with("stderr", evaluated.stderr.as_str()),
-//RS     )
-//RS }
-//RS 
-//RS fn final_output_bytes(
-//RS     sql: &str,
-//RS     source: &LoadedSource,
-//RS     evaluated: &SqlEval,
-//RS     result: &StatusValue,
-//RS     rendered: &str,
-//RS     rows: usize,
-//RS     elapsed_ms: u128,
-//RS     plan: &str,
-//RS     columns: &[Column],
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> Result<usize, DbError> {
-//RS     let output = if mode.json && options.output == DbOutput::Jsonl {
-//RS         let StatusValue::Array(values) = result else {
-//RS             return Err(DbError::new(
-//RS                 "E2600",
-//RS                 "query",
-//RS                 &source.path,
-//RS                 "result is not an array for JSONL output",
-//RS                 "use `--json` for the bounded envelope",
-//RS             ));
-//RS         };
-//RS         values
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| {
-//RS                 db_row_status(
-//RS                     source,
-//RS                     index,
-//RS                     db_output_name(options.output, mode),
-//RS                     plan,
-//RS                     rows,
-//RS                     value,
-//RS                 )
-//RS                 .json_line()
-//RS                 .len()
-//RS             })
-//RS             .sum::<usize>()
-//RS     } else if mode.json {
-//RS         db_query_status(
-//RS             sql,
-//RS             source,
-//RS             evaluated,
-//RS             result,
-//RS             rows,
-//RS             elapsed_ms,
-//RS             plan,
-//RS             columns,
-//RS             db_output_name(options.output, mode),
-//RS         )
-//RS         .json_line()
-//RS         .len()
-//RS     } else if options.output == DbOutput::Csv {
-//RS         result_csv(rendered, columns, &source.path)?.len()
-//RS     } else {
-//RS         rendered.len()
-//RS             + evaluated.stdout.len()
-//RS             + evaluated.stderr.len()
-//RS             + 1
-//RS             + if mode.quiet {
-//RS                 0
-//RS             } else {
-//RS                 format!("rows: {rows} time: {elapsed_ms}ms source: {}\n", source.name).len()
-//RS             }
-//RS     };
-//RS     if output > options.max_output_bytes {
-//RS         return Err(DbError::new(
-//RS             "E2603",
-//RS             "query",
-//RS             &source.path,
-//RS             format!(
-//RS                 "final rendered output is {output} bytes, over the {}-byte output limit",
-//RS                 options.max_output_bytes
-//RS             ),
-//RS             "raise `--max-output-bytes` or add a smaller SQL LIMIT",
-//RS         ));
-//RS     }
-//RS     Ok(output)
-//RS }
-//RS 
-//RS fn emit_result(
-//RS     sql: &str,
-//RS     source: &LoadedSource,
-//RS     evaluated: &SqlEval,
-//RS     result: &StatusValue,
-//RS     rendered: &str,
-//RS     rows: usize,
-//RS     elapsed_ms: u128,
-//RS     plan: &str,
-//RS     columns: &[Column],
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> Result<(), DbError> {
-//RS     if mode.json {
-//RS         if options.output == DbOutput::Jsonl {
-//RS             let StatusValue::Array(values) = result else {
-//RS                 return Err(DbError::new(
-//RS                     "E2600",
-//RS                     "query",
-//RS                     &source.path,
-//RS                     "result is not an array for JSONL output",
-//RS                     "use `--json` for the bounded envelope",
-//RS                 ));
-//RS             };
-//RS             for (index, value) in values.iter().enumerate() {
-//RS                 let status = db_row_status(
-//RS                     source,
-//RS                     index,
-//RS                     db_output_name(options.output, mode),
-//RS                     plan,
-//RS                     rows,
-//RS                     value,
-//RS                 )
-//RS                 .json_line();
-//RS                 write_mode_machine(mode, &status);
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS         let status = db_query_status(
-//RS             sql,
-//RS             source,
-//RS             evaluated,
-//RS             result,
-//RS             rows,
-//RS             elapsed_ms,
-//RS             plan,
-//RS             columns,
-//RS             db_output_name(options.output, mode),
-//RS         )
-//RS         .json_line();
-//RS         write_mode_machine(mode, &status);
-//RS         return Ok(());
-//RS     }
-//RS     if options.output == DbOutput::Csv {
-//RS         let csv = result_csv(rendered, columns, &source.path)?;
-//RS         write_mode_renderable(mode, &csv);
-//RS     } else {
-//RS         write_mode_renderable(mode, &format!("{rendered}\n"));
-//RS     }
-//RS     if !evaluated.stdout.is_empty() {
-//RS         write_mode_renderable(mode, &evaluated.stdout);
-//RS     }
-//RS     if !evaluated.stderr.is_empty() {
-//RS         write_mode_diagnostic(mode, &evaluated.stderr);
-//RS     }
-//RS     write_mode_status(mode, &format!("rows: {rows} time: {elapsed_ms}ms source: {}\n", source.name));
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn columns_json(columns: &[Column]) -> String {
-//RS     format!(
-//RS         "[{}]",
-//RS         columns
-//RS             .iter()
-//RS             .map(|column| {
-//RS                 format!(
-//RS                     "{{\"name\":{},\"type\":{},\"nullable\":{}}}",
-//RS                     json_str(&column.name),
-//RS                     json_str(column.kind.jet_name()),
-//RS                     column.nullable
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn columns_value(columns: &[Column]) -> StatusValue {
-//RS     StatusValue::array(columns.iter().map(|column| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("name", column.name.as_str())
-//RS                 .with("type", column.kind.jet_name())
-//RS                 .with("nullable", column.nullable),
-//RS         )
-//RS     }))
-//RS }
-//RS fn status_data_value(value: &Value) -> StatusValue {
-//RS     match value {
-//RS         Value::Null => StatusValue::Null,
-//RS         Value::Bool(value) => StatusValue::from(*value),
-//RS         Value::Int(value) => StatusValue::from(*value),
-//RS         Value::Float(value) => StatusValue::Float(value.to_string()),
-//RS         Value::Number(value) => value
-//RS             .parse::<i128>()
-//RS             .map(StatusValue::Integer)
-//RS             .unwrap_or_else(|_| StatusValue::Float(value.clone())),
-//RS         Value::TypedText(value) | Value::Text(value) => StatusValue::from(value.as_str()),
-//RS         Value::Bytes(values) => {
-//RS             StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
-//RS         }
-//RS         Value::Array(values) => StatusValue::array(values.iter().map(status_data_value)),
-//RS         Value::Object(fields) => StatusValue::object(
-//RS             fields
-//RS                 .iter()
-//RS                 .fold(StatusFields::new(), |fields, (name, value)| {
-//RS                     fields.with(name.as_str(), status_data_value(value))
-//RS                 }),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn status_map_key(key: &CtKey) -> String {
-//RS     match key {
-//RS         CtKey::Int(value) => value.to_string(),
-//RS         CtKey::Str(value) => value.clone(),
-//RS         CtKey::Bool(value) => value.to_string(),
-//RS         CtKey::Char(value) => value.to_string(),
-//RS         CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
-//RS             key.to_value().to_json()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn status_ct_value(value: &CtValue) -> StatusValue {
-//RS     if let CtValue::Enum {
-//RS         type_name,
-//RS         variant,
-//RS         args,
-//RS     } = value
-//RS     {
-//RS         if matches!(
-//RS             type_name.as_str(),
-//RS             "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-//RS         ) {
-//RS             return match variant.as_str() {
-//RS                 "Null" => StatusValue::Null,
-//RS                 "Number" => match args.first().map(|(_, value)| value) {
-//RS                     Some(CtValue::Str(value)) => value
-//RS                         .parse::<i128>()
-//RS                         .map(StatusValue::Integer)
-//RS                         .unwrap_or_else(|_| StatusValue::Float(value.clone())),
-//RS                     _ => StatusValue::Null,
-//RS                 },
-//RS                 _ => args
-//RS                     .first()
-//RS                     .map(|(_, value)| status_ct_value(value))
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             };
-//RS         }
-//RS     }
-//RS     match value {
-//RS         CtValue::Int(value) => StatusValue::from(*value),
-//RS         CtValue::Float(value) => StatusValue::Float(value.to_json()),
-//RS         CtValue::Bool(value) => StatusValue::from(*value),
-//RS         CtValue::Char(value) => StatusValue::from(value.to_string()),
-//RS         CtValue::Str(value) => StatusValue::from(value.as_str()),
-//RS         CtValue::BigInt(value) => StatusValue::from(value.to_string_rep().as_str()),
-//RS         CtValue::Bytes(values) => {
-//RS             StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
-//RS         }
-//RS         CtValue::List(values) => StatusValue::array(values.iter().map(status_ct_value)),
-//RS         CtValue::Map(values) => StatusValue::object(
-//RS             values.iter().fold(StatusFields::new(), |fields, (key, value)| {
-//RS                 fields.with(status_map_key(key), status_ct_value(value))
-//RS             }),
-//RS         ),
-//RS         CtValue::Struct { fields, .. } => StatusValue::object(
-//RS             fields
-//RS                 .iter()
-//RS                 .filter(|(name, _)| !jet::Syntax::is_memo_storage_name(name))
-//RS                 .fold(StatusFields::new(), |fields, (name, value)| {
-//RS                     fields.with(name.as_str(), status_ct_value(value))
-//RS                 }),
-//RS         ),
-//RS         CtValue::Enum {
-//RS             variant, args, ..
-//RS         } if args.is_empty() => StatusValue::from(variant.as_str()),
-//RS         CtValue::Enum {
-//RS             variant, args, ..
-//RS         } if args.iter().all(|(label, _)| label.is_some()) => {
-//RS             let fields = args.iter().fold(StatusFields::new(), |fields, (label, value)| {
-//RS                 fields.with(
-//RS                     label.as_deref().expect("checked enum label"),
-//RS                     status_ct_value(value),
-//RS                 )
-//RS             });
-//RS             StatusValue::object(
-//RS                 StatusFields::new().with(variant.as_str(), StatusValue::object(fields)),
-//RS             )
-//RS         }
-//RS         CtValue::Enum { variant, args, .. } => StatusValue::object(
-//RS             StatusFields::new().with(
-//RS                 variant.as_str(),
-//RS                 StatusValue::array(args.iter().map(|(_, value)| status_ct_value(value))),
-//RS             ),
-//RS         ),
-//RS         CtValue::Present(value) => status_ct_value(value),
-//RS         CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
-//RS             StatusValue::Null
-//RS         }
-//RS         CtValue::Failed(CtReport::Told(value)) => {
-//RS             StatusValue::object(StatusFields::new().with("err", status_ct_value(value)))
-//RS         }
-//RS     }
-//RS }
-//RS fn result_csv(rendered: &str, columns: &[Column], path: &str) -> Result<String, DbError> {
-//RS     let parsed = parse_json(rendered, false).map_err(|error| {
-//RS         DbError::new(
-//RS             "E2600",
-//RS             "csv",
-//RS             path,
-//RS             format!("result is not valid JSON: {}", error.message),
-//RS             "use `--json` for the canonical result envelope",
-//RS         )
-//RS     })?;
-//RS     let Value::Array(rows) = parsed else {
-//RS         return Err(DbError::new(
-//RS             "E2600",
-//RS             "csv",
-//RS             path,
-//RS             "result is not an array",
-//RS             "use `--json` for the canonical result envelope",
-//RS         ));
-//RS     };
-//RS 
-//RS     let inferred = rows.first().and_then(|row| match row {
-//RS         Value::Object(fields) => Some(fields),
-//RS         _ => None,
-//RS     });
-//RS     let inferred_columns = inferred
-//RS         .filter(|fields| {
-//RS             fields.len() != columns.len()
-//RS                 || fields
-//RS                     .iter()
-//RS                     .zip(columns)
-//RS                     .any(|((name, _), column)| name != &column.name)
-//RS         })
-//RS         .map(|fields| {
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, _)| Column {
-//RS                     name: name.clone(),
-//RS                     kind: ColumnKind::String,
-//RS                     nullable: true,
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS         });
-//RS     let columns = inferred_columns.as_deref().unwrap_or(columns);
-//RS     let mut lines = Vec::new();
-//RS     lines.push(
-//RS         columns
-//RS             .iter()
-//RS             .map(|column| csv_escape(&column.name))
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     for row in rows {
-//RS         let Value::Object(fields) = row else {
-//RS             return Err(DbError::new(
-//RS                 "E2600",
-//RS                 "csv",
-//RS                 path,
-//RS                 "a result row is not an object",
-//RS                 "use `--json` for nested result values",
-//RS             ));
-//RS         };
-//RS         let line = columns
-//RS             .iter()
-//RS             .map(|column| {
-//RS                 let value = fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == &column.name)
-//RS                     .map(|(_, value)| value);
-//RS                 csv_escape(value.map(value_text).unwrap_or_default().as_str())
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         lines.push(line);
-//RS     }
-//RS     Ok(format!("{}\n", lines.join("\n")))
-//RS }
-//RS 
-//RS fn csv_escape(value: &str) -> String {
-//RS     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
-//RS         format!("\"{}\"", value.replace('"', "\"\""))
-//RS     } else {
-//RS         value.to_string()
-//RS     }
-//RS }
-//RS 
-//RS fn render_plan(source: &str, query: &sql_kernel::JetSqlQuery) -> String {
-//RS     let mut steps = vec![format!("scan {source}")];
-//RS     if let Some((field, operator, value)) = &query.filter {
-//RS         steps.push(format!("filter {field} {operator} {value}"));
-//RS     }
-//RS     if !query.group_by.is_empty() {
-//RS         let keys = query
-//RS             .group_by
-//RS             .iter()
-//RS             .map(|key| match key {
-//RS                 sql_kernel::JetSqlGroupKey::Field(field) => field.clone(),
-//RS                 sql_kernel::JetSqlGroupKey::Ordinal(ordinal) => format!("#{ordinal}"),
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         steps.push(format!("group {keys}"));
-//RS     }
-//RS     let projection = query
-//RS         .projection
-//RS         .iter()
-//RS         .map(|item| match item {
-//RS             sql_kernel::JetSqlSelectItem::Wildcard => "*".to_string(),
-//RS             sql_kernel::JetSqlSelectItem::Field { field, alias } => alias
-//RS                 .as_ref()
-//RS                 .map(|alias| format!("{field} AS {alias}"))
-//RS                 .unwrap_or_else(|| field.clone()),
-//RS             sql_kernel::JetSqlSelectItem::Aggregate {
-//RS                 function,
-//RS                 field,
-//RS                 alias,
-//RS             } => {
-//RS                 let function = match function {
-//RS                     sql_kernel::JetSqlAggregate::Count => "COUNT",
-//RS                     sql_kernel::JetSqlAggregate::Sum => "SUM",
-//RS                     sql_kernel::JetSqlAggregate::Avg => "AVG",
-//RS                     sql_kernel::JetSqlAggregate::Min => "MIN",
-//RS                     sql_kernel::JetSqlAggregate::Max => "MAX",
-//RS                 };
-//RS                 let argument = field.as_deref().unwrap_or("*");
-//RS                 let expression = format!("{function}({argument})");
-//RS                 alias
-//RS                     .as_ref()
-//RS                     .map(|alias| format!("{expression} AS {alias}"))
-//RS                     .unwrap_or(expression)
-//RS             }
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(", ");
-//RS     steps.push(format!("project {projection}"));
-//RS     if let Some((field, descending)) = &query.order {
-//RS         steps.push(format!("sort {field} {}", if *descending { "desc" } else { "asc" }));
-//RS     }
-//RS     if let Some(limit) = query.limit {
-//RS         steps.push(format!("limit {limit}"));
-//RS     }
-//RS     steps.join(" -> ")
-//RS }
-//RS 
-//RS fn handle_dot(
-//RS     input: &str,
-//RS     source: Option<&LoadedSource>,
-//RS     state: &DbState,
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> Result<bool, DbError> {
-//RS     let mut parts = input.splitn(2, char::is_whitespace);
-//RS     let command = parts.next().unwrap_or(input);
-//RS     let argument = parts.next().map(str::trim).filter(|value| !value.is_empty());
-//RS     match command {
-//RS         ".quit" | ".exit" => Ok(false),
-//RS         ".help" => {
-//RS             if mode.json {
-//RS                 write_db_status(
-//RS                     mode,
-//RS                     "help",
-//RS                     true,
-//RS                     StatusFields::new().with("usage", usage()),
-//RS                 );
-//RS             } else {
-//RS                 write_mode_renderable(mode, usage());
-//RS             }
-//RS             Ok(true)
-//RS         }
-//RS         ".tables" => {
-//RS             let source = source.ok_or_else(|| {
-//RS                 DbError::new(
-//RS                     "E2600",
-//RS                     "tables",
-//RS                     "",
-//RS                     "no source is loaded",
-//RS                     "pass a local source path first",
-//RS                 )
-//RS             })?;
-//RS             if mode.json {
-//RS                 write_db_status(
-//RS                     mode,
-//RS                     "tables",
-//RS                     true,
-//RS                     StatusFields::new().with(
-//RS                         "tables",
-//RS                         StatusValue::array([StatusValue::from(source.name.as_str())]),
-//RS                     ),
-//RS                 );
-//RS             } else {
-//RS                 write_mode_renderable(mode, &format!("{}\n", source.name));
-//RS             }
-//RS             Ok(true)
-//RS         }
-//RS         ".schema" => {
-//RS             let source = source.ok_or_else(|| {
-//RS                 DbError::new(
-//RS                     "E2600",
-//RS                     "schema",
-//RS                     "",
-//RS                     "no source is loaded",
-//RS                     "pass a local source path first",
-//RS                 )
-//RS             })?;
-//RS             if mode.json {
-//RS                 write_db_status(
-//RS                     mode,
-//RS                     "schema",
-//RS                     true,
-//RS                     StatusFields::new()
-//RS                         .with("source", source.name.as_str())
-//RS                         .with("rows", source.rows)
-//RS                         .with("columns", columns_value(&source.columns)),
-//RS                 );
-//RS             } else {
-//RS                 for column in &source.columns {
-//RS                     write_mode_renderable(
-//RS                         mode,
-//RS                         &format!(
-//RS                             "{}: {}{}\n",
-//RS                             column.name,
-//RS                             column.kind.jet_name(),
-//RS                             if column.nullable { "?" } else { "" }
-//RS                         ),
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Ok(true)
-//RS         }
-//RS         ".plan" => {
-//RS             let plan = state.last_plan.as_deref().ok_or_else(|| {
-//RS                 DbError::new(
-//RS                     "E2600",
-//RS                     "plan",
-//RS                     "",
-//RS                     "no query plan is available",
-//RS                     "run a SELECT query before `.plan`",
-//RS                 )
-//RS             })?;
-//RS             if mode.json {
-//RS                 write_db_status(
-//RS                     mode,
-//RS                     "plan",
-//RS                     true,
-//RS                     StatusFields::new().with("plan", plan),
-//RS                 );
-//RS             } else {
-//RS                 write_mode_renderable(mode, &format!("{plan}\n"));
-//RS             }
-//RS             Ok(true)
-//RS         }
-//RS         ".stats" => {
-//RS             let statement = state.last_sql.as_deref().unwrap_or("");
-//RS             if mode.json {
-//RS                 write_db_status(
-//RS                     mode,
-//RS                     "stats",
-//RS                     true,
-//RS                     StatusFields::new()
-//RS                         .with("statement", statement)
-//RS                         .with("rows", state.last_rows)
-//RS                         .with(
-//RS                             "elapsed_ms",
-//RS                             StatusValue::from(
-//RS                                 i128::try_from(state.last_elapsed_ms).unwrap_or(i128::MAX),
-//RS                             ),
-//RS                         )
-//RS                         .with("output_bytes", state.last_output_bytes),
-//RS                 );
-//RS             } else {
-//RS                 write_mode_renderable(
-//RS                     mode,
-//RS                     &format!(
-//RS                         "statement: {statement}\nrows: {} time: {}ms output: {} bytes\n",
-//RS                         state.last_rows, state.last_elapsed_ms, state.last_output_bytes
-//RS                     ),
-//RS                 );
-//RS             }
-//RS             Ok(true)
-//RS         }
-//RS         ".export" => {
-//RS             let argument = argument.ok_or_else(|| {
-//RS                 DbError::new(
-//RS                     "E2104",
-//RS                     "export",
-//RS                     "",
-//RS                     "`.export` needs a destination path",
-//RS                     "use `.export report.json json` or `.export report.csv csv`",
-//RS                 )
-//RS             })?;
-//RS             export_result(argument, source, state, options, mode)
-//RS         }
-//RS         _ => Err(DbError::new(
-//RS             "E2104",
-//RS             "dot-command",
-//RS             "",
-//RS             format!("unknown db console command `{command}`"),
-//RS             "use `.help`, `.tables`, `.schema`, `.plan`, `.stats`, `.export`, or `.quit`",
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn export_result(
-//RS     argument: &str,
-//RS     source: Option<&LoadedSource>,
-//RS     state: &DbState,
-//RS     options: &DbOptions,
-//RS     mode: OutputMode,
-//RS ) -> Result<bool, DbError> {
-//RS     if !options.allow_write || options.deny_write {
-//RS         return Err(DbError::new(
-//RS             "E1803",
-//RS             "export",
-//RS             argument,
-//RS             "export writes need explicit FS.Write authority",
-//RS             "start `jet db --allow=FS.Write` (and `--allow=FS.Read` to load a source); denied writes never fall back to stdout",
-//RS         ));
-//RS     }
-//RS     let mut parts = argument.split_whitespace();
-//RS     let path = parts.next().unwrap_or_default();
-//RS     if path.is_empty() {
-//RS         return Err(DbError::new("E2104", "export", "", "`.export` needs a destination path", "use `.export report.json json`"));
-//RS     }
-//RS     let format = parts.next().unwrap_or("json");
-//RS     let result = state.last_result.as_deref().ok_or_else(|| DbError::new("E2600", "export", path, "no query result is available", "run a SELECT query before exporting"))?;
-//RS     let bytes = match format {
-//RS         "json" => result.to_string(),
-//RS         "csv" => {
-//RS             let source = source.ok_or_else(|| DbError::new("E2600", "export", path, "CSV export needs a loaded source schema", "load a typed source before exporting"))?;
-//RS             result_csv(result, &source.columns, path)?
-//RS         }
-//RS         _ => return Err(DbError::new("E2104", "export", path, format!("unknown export format `{format}`"), "choose json or csv")),
-//RS     };
-//RS     if bytes.len() > options.max_output_bytes {
-//RS         return Err(DbError::new(
-//RS             "E2603",
-//RS             "export",
-//RS             path,
-//RS             format!(
-//RS                 "export output is {} bytes, over the {}-byte output limit",
-//RS                 bytes.len(),
-//RS                 options.max_output_bytes
-//RS             ),
-//RS             "raise `--max-output-bytes` or export a smaller query result",
-//RS         ));
-//RS     }
-//RS     let destination = PathBuf::from(path);
-//RS     fs::write(&destination, bytes.as_bytes()).map_err(|error| DbError::new("E2105", "export", path, format!("could not write `{path}`: {error}"), "check the destination and explicit FS authority"))?;
-//RS     if mode.json {
-//RS         write_db_status(
-//RS             mode,
-//RS             "export",
-//RS             true,
-//RS             StatusFields::new()
-//RS                 .with("path", path)
-//RS                 .with("bytes", bytes.len()),
-//RS         );
-//RS     } else {
-//RS         write_mode_status(mode, &format!("exported {} bytes to {path}\n", bytes.len()));
-//RS     }
-//RS     Ok(true)
-//RS }
-//RS 
-//RS fn split_console_inputs(text: &str) -> Result<Vec<String>, String> {
-//RS     let mut inputs = Vec::new();
-//RS     let mut pending = String::new();
-//RS     for line in text.lines() {
-//RS         if pending.trim().is_empty() && line.trim_start().starts_with('.') {
-//RS             inputs.push(line.trim().to_string());
-//RS             continue;
-//RS         }
-//RS         pending.push_str(line);
-//RS         pending.push('\n');
-//RS         if has_complete_sql_statement(&pending) {
-//RS             inputs.extend(split_sql_statements(&pending)?);
-//RS             pending.clear();
-//RS         }
-//RS     }
-//RS     if !pending.trim().is_empty() {
-//RS         inputs.extend(split_sql_statements(&pending)?);
-//RS     }
-//RS     Ok(inputs)
-//RS }
-//RS 
-//RS fn has_complete_sql_statement(text: &str) -> bool {
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     let mut depth = 0_i32;
-//RS     let mut characters = text.chars().peekable();
-//RS     while let Some(character) = characters.next() {
-//RS         if escaped {
-//RS             escaped = false;
-//RS             continue;
-//RS         }
-//RS         if quote.is_some() && character == '\\' {
-//RS             escaped = true;
-//RS             continue;
-//RS         }
-//RS         if let Some(delimiter) = quote {
-//RS             if character == delimiter {
-//RS                 if characters.peek() == Some(&delimiter) {
-//RS                     characters.next();
-//RS                 } else {
-//RS                     quote = None;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match character {
-//RS             '\'' | '"' => quote = Some(character),
-//RS             '(' => depth += 1,
-//RS             ')' => depth -= 1,
-//RS             ';' if depth == 0 => return true,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn split_sql_statements(text: &str) -> Result<Vec<String>, String> {
-//RS     let mut statements = Vec::new();
-//RS     let mut current = String::new();
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     let mut depth = 0_i32;
-//RS     let mut characters = text.chars().peekable();
-//RS     while let Some(character) = characters.next() {
-//RS         if escaped {
-//RS             current.push(character);
-//RS             escaped = false;
-//RS             continue;
-//RS         }
-//RS         if quote.is_some() && character == '\\' {
-//RS             current.push(character);
-//RS             escaped = true;
-//RS             continue;
-//RS         }
-//RS         if let Some(delimiter) = quote {
-//RS             current.push(character);
-//RS             if character == delimiter {
-//RS                 if characters.peek() == Some(&delimiter) {
-//RS                     current.push(characters.next().unwrap_or(delimiter));
-//RS                 } else {
-//RS                     quote = None;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match character {
-//RS             '\'' | '"' => {
-//RS                 quote = Some(character);
-//RS                 current.push(character);
-//RS             }
-//RS             '(' => {
-//RS                 depth += 1;
-//RS                 current.push(character);
-//RS             }
-//RS             ')' => {
-//RS                 depth -= 1;
-//RS                 if depth < 0 {
-//RS                     return Err("SQL statement closes a parenthesis that it did not open".to_string());
-//RS                 }
-//RS                 current.push(character);
-//RS             }
-//RS             ';' if depth == 0 => {
-//RS                 if !current.trim().is_empty() {
-//RS                     statements.push(current.trim().to_string());
-//RS                 }
-//RS                 current.clear();
-//RS             }
-//RS             _ => current.push(character),
-//RS         }
-//RS     }
-//RS     if quote.is_some() {
-//RS         return Err("SQL string literal is missing its closing quote".to_string());
-//RS     }
-//RS     if depth != 0 {
-//RS         return Err("SQL statement has unbalanced parentheses".to_string());
-//RS     }
-//RS     if !current.trim().is_empty() {
-//RS         statements.push(current.trim().to_string());
-//RS     }
-//RS     Ok(statements)
-//RS }
-//RS 
-//RS fn is_remote(value: &str) -> bool {
-//RS     value.contains("://") || value.starts_with("postgres:") || value.starts_with("mysql:")
-//RS }
-//RS 
-//RS fn source_name_from_path(path: &Path) -> String {
-//RS     let raw = path
-//RS         .file_stem()
-//RS         .and_then(|stem| stem.to_str())
-//RS         .unwrap_or("source");
-//RS     let mut name = raw
-//RS         .chars()
-//RS         .map(|character| if character.is_ascii_alphanumeric() || character == '_' { character } else { '_' })
-//RS         .collect::<String>();
-//RS     if name.is_empty() {
-//RS         name.push_str("source");
-//RS     }
-//RS     if name.chars().next().is_some_and(|character| character.is_ascii_digit()) {
-//RS         name.insert_str(0, "table_");
-//RS     }
-//RS     name
-//RS }
-//RS 
-//RS fn valid_table_name(value: &str) -> bool {
-//RS     !value.is_empty()
-//RS         && value
-//RS             .chars()
-//RS             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '$'))
-//RS         && value
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
-//RS }
-//RS 
-//RS fn valid_column_name(value: &str) -> bool {
-//RS     !value.is_empty()
-//RS         && value
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
-//RS         && value
-//RS             .chars()
-//RS             .all(|character| character.is_ascii_alphanumeric() || character == '_')
-//RS }
-// END-PORT-PENDING 0678 Source/CmdDb.rs:1806-3137
+// Extension of the canonical Cli/Dev/DbRows owner.
+use jet_cli.[DbError, DbState, DbOptions, DbOutput, OutputMode, db_status, write_db_status, emit_error, usage, write_mode_machine, write_mode_renderable, write_mode_diagnostic, write_mode_status]
+use jet_cli.JetCLIDBLoadedSource as LoadedSource
+use jet_cli.JetCLIDBColumn as Column
+use jet_cli.JetCLIDBColumnKind as ColumnKind
+use jet_foundation.[Value, parse_json, json_str, StatusValue, StatusFields, StatusEnvelope]
+use jet.[SqlSession, SqlEval, CtValue, CtKey, CtReport, ExitCodes, Comptime, Syntax]
+use jet_foundation.SqlKernel as sql_kernel
+use std.[fs, time]
+use jet_cli.[value_text, ROW_TYPE_NAME, jet_cli_db_generated_row_item, jet_cli_db_column_kind_name, jet_cli_db_result_csv, jet_cli_db_render_float]
 
+// Rust: Source/CmdDb.rs:1806
+fn render_json_value(value: Value) -> String {
+    out := String.new()
+    write_json_value(&out, value)
+    out
+}
+// Rust: Source/CmdDb.rs:1806-1831; one buffer preserves linear nested rendering.
+fn write_json_value(out: &String, value: Value) -> {
+    if value == {
+        .Null -> out.push_str("null")
+        .Bool(v) -> out.push_str(v.to_string())
+        .Int(v) -> out.push_str(v.to_string())
+        .Float(v) -> out.push_str(jet_cli_db_render_float(v))
+        .Number(v) -> out.push_str(v)
+        .TypedText(v) | .Text(v) -> out.push_str(json_str(v))
+        .Bytes(values) -> {
+            out.push('[')
+            for (index, v) in values.iter().enumerate() {
+                if index > 0 { out.push(',') }
+                out.push_str(v.to_string())
+            }
+            out.push(']')
+        }
+        .Array(values) -> {
+            out.push('[')
+            for (index, v) in values.iter().enumerate() {
+                if index > 0 { out.push(',') }
+                write_json_value(out, v)
+            }
+            out.push(']')
+        }
+        .Object(entries) -> {
+            out.push('{')
+            for (index, (name, v)) in entries.iter().enumerate() {
+                if index > 0 { out.push(',') }
+                out.push_str(json_str(name))
+                out.push(':')
+                write_json_value(out, v)
+            }
+            out.push('}')
+        }
+    }
+}
+// Rust: Source/CmdDb.rs:1833 — canonical jet_cli_db_render_float in DbRows.jet.
+// Rust: Source/CmdDb.rs:1842
+fn prepare_session(session: &SqlSession, source: LoadedSource) -> DbError! {
+    for import in ["use core.data as data", "use core.encoding.json as json"] {
+        session.execute(import) ?? return Err(DbError.diagnostics("import", source.path, &err))
+    }
+    session.define_item(jet_cli_db_generated_row_item(source.columns)) ?? return Err(DbError.diagnostics("schema", source.path, &err))
+}
+// Rust: Source/CmdDb.rs:1853 — canonical jet_cli_db_generated_row_item in DbRows.jet.
+// Rust: Source/CmdDb.rs:1869
+fn process_inputs(inputs: [String], interactive: Bool, source: LoadedSource?, session: &SqlSession, state: &DbState, options: DbOptions, mode: OutputMode) -> Int {
+    status := 0
+    for input in inputs {
+        text := input.trim() // #4303
+        if text.is_empty() { continue }
+        keep_going :: if text.starts_with('.') {
+            handle_dot(text, source, state, options, mode) ?? {
+                emit_error(mode, options.output, &err)
+                status = ExitCodes.USER_ERROR
+                if !interactive { return status }
+                continue
+            }
+        } else {
+            run_query(text, source, session, state, options, mode) ?? {
+                emit_error(mode, options.output, &err)
+                status = ExitCodes.USER_ERROR
+                if !interactive { return status }
+                continue
+            }
+            true
+        }
+        if !keep_going { return 0 }
+    }
+    status
+}
+// Rust: Source/CmdDb.rs:1903
+fn db_sql_value(value: Value) -> sql_kernel.JetSqlValue {
+    if value == {
+        .Null -> .Null
+        .Bool(v) -> .Bool(v)
+        .Int(v) -> .Int(v)
+        .Float(v) -> .Float(v)
+        .Number(v) -> sql_kernel.JetSqlValue.literal(v)
+        .Text(v) -> .Text(v.clone())
+        else -> .Text(value_text(value))
+    }
+}
+// Rust: Source/CmdDb.rs:1915
+fn db_sql_json_value(value: sql_kernel.JetSqlValue) -> Value {
+    if value == {
+        .Null -> .Null
+        .Bool(v) -> .Bool(v)
+        .Int(v) -> .Int(v)
+        .Float(v) -> .Float(v)
+        .Text(v) -> .Text(^v)
+    }
+}
+// Rust: Source/CmdDb.rs:1925
+fn run_dynamic_query(source: LoadedSource, query: sql_kernel.JetSqlQuery) -> (SqlEval, Value, String, Int) DbError! {
+    parsed :: parse_json(source.json, false) ?? return Err(DbError.new("E2600", "query", source.path, "normalized source could not be decoded: {err.message}", "reload the local source before querying it"))
+    values :: if parsed == {
+        .Array(values) -> values
+        else -> return Err(DbError.new("E2600", "query", source.path, "normalized source is not a row array", "reload a local JSON, JSONL, or CSV source"))
+    }
+    fields :: source.columns.iter().map(column -> column.name.clone()).collect()
+    result :: sql_kernel.execute_sql_rows(fields, values.len(), query, (index, field) -> {
+        values.get(index).and_then(row -> if row == {
+            .Object(entries) -> entries.iter().find((name, _) -> name == field).map((_, value) -> db_sql_value(value))
+            else -> .None
+        })
+    }) ?? return Err(DbError.new("E2702", "query", source.path, err, "use declared source columns and the supported SELECT query surface"))
+    result_values :: result.into_iter().map(row -> Value.Object(row.fields.into_iter().map((name, value) -> (^name, db_sql_json_value(^value))).collect())).collect()
+    rows :: result_values.len()
+    result_tree :: Value.Array(^result_values)
+    rendered :: render_json_value(result_tree)
+    (SqlEval { value: .None, stdout: "", stderr: "" }, ^result_tree, ^rendered, rows)
+}
+// Rust: Source/CmdDb.rs:1998
+fn query_result_columns(source: LoadedSource, query: sql_kernel.JetSqlQuery) -> [Column] {
+    columns := [Column]{}
+    for item in query.projection {
+        if item == {
+            .Wildcard -> {
+                for column in source.columns { columns.push(Column { name: column.name.clone(), kind: column.kind, nullable: column.nullable }) }
+            }
+            .Field { field, alias } -> {
+                source_column :: source.columns.iter().find(column -> column.name == field)
+                columns.push(Column { name: alias.clone() ?? field.clone(), kind: source_column.map(column -> column.kind) ?? .String, nullable: source_column.map(column -> column.nullable) ?? true })
+            }
+            .Aggregate { function, field, alias } -> {
+                source_column :: field.and_then(field -> source.columns.iter().find(column -> column.name == field))
+                default_name :: field.map(field -> "{function.as_str()}_{field}") ?? function.as_str().to_string()
+                (kind, nullable) :: if function == {
+                    .Count -> (ColumnKind.Int, false)
+                    .Sum -> (source_column.map(column -> column.kind) ?? ColumnKind.Float, true)
+                    .Avg -> (ColumnKind.Float, true)
+                    .Min | .Max -> (source_column.map(column -> column.kind) ?? ColumnKind.String, true)
+                }
+                columns.push(Column { name: alias.clone() ?? ^default_name, kind: kind, nullable: nullable })
+            }
+        }
+    }
+    columns
+}
+// Rust: Source/CmdDb.rs:2060
+fn result_row_count(value: CtValue) -> Int? {
+    if value == {
+        .Present(value) -> result_row_count(value)
+        .List(values) -> .Val(values.len())
+        else -> .None
+    }
+}
+// Rust: Source/CmdDb.rs:2068
+fn run_query(sql: String, source: LoadedSource?, session: &SqlSession, state: &DbState, options: DbOptions, mode: OutputMode) -> DbError! {
+    loaded :: source ?? return Err(DbError.new("E2600", "query", "", "a SQL query needs a local typed source", "pass `jet db source.json --allow=FS.Read --query 'SELECT * FROM source'`"))
+    query :: sql_kernel.parse_sql_query(sql) ?? return Err(DbError.new("E2702", "query", loaded.path, err, "use SELECT ... FROM source with optional WHERE, GROUP BY, ORDER BY, and LIMIT clauses"))
+    if query.source != loaded.name {
+        return Err(DbError.new("E2702", "query", loaded.path, "query source `{query.source}` does not match loaded source `{loaded.name}`", "use `FROM {loaded.name}` or pass `--table {loaded.name}` with the desired identity"))
+    }
+    sql_kernel.validate_sql_query_schema(query, field -> loaded.columns.iter().any(column -> column.name == field), "SQL query") ?? return Err(DbError.new("E2702", "query", loaded.path, err, "use only columns declared by the loaded source"))
+    plan :: render_plan(loaded.name, query)
+    result_columns :: query_result_columns(loaded, query)
+    // GATE #4494: monotonic native clock.
+    started :: time.Instant.now()
+    (evaluated, result_value, rendered, rows) :: if query.needs_projection_execution() {
+        (evaluated, result_tree, rendered, rows) :: run_dynamic_query(loaded, query)
+        (^evaluated, status_data_value(result_tree), ^rendered, rows)
+    } else {
+        expression :: "data.query(json.decode<[{ROW_TYPE_NAME}]>({json_str(loaded.json)}) ?? panic(\"input\"), SQL{{{json_str(sql)}}})"
+        evaluated :: session.execute(expression) ?? return Err(DbError.diagnostics("query", loaded.path, &err))
+        value :: evaluated.value.as_ref() ?? return Err(DbError.new("E2600", "query", loaded.path, "the SQL query produced no result value", "keep the query as a SELECT expression"))
+        rendered :: Comptime.render_datatree_for_tir(value)
+        rows :: result_row_count(value) ?? return Err(DbError.new("E2600", "query", loaded.path, "query result was not a typed row list", "use the local typed-table query surface rather than a scalar expression"))
+        result_value :: status_ct_value(value)
+        (^evaluated, ^result_value, ^rendered, rows)
+    }
+    elapsed_ms :: started.elapsed().as_millis()
+    output_bytes :: final_output_bytes(sql, loaded, evaluated, result_value, rendered, rows, elapsed_ms, plan, result_columns, options, mode)
+    state.last_sql = .Val(sql.clone())
+    state.last_plan = .Val(plan.clone())
+    state.last_result = .Val(rendered.clone())
+    state.last_rows = rows
+    state.last_elapsed_ms = elapsed_ms
+    state.last_output_bytes = output_bytes
+    emit_result(sql, loaded, evaluated, result_value, rendered, rows, elapsed_ms, plan, result_columns, options, mode)
+}
+// Rust: Source/CmdDb.rs:2194
+fn db_output_name(output: DbOutput, mode: OutputMode) -> String {
+    if output == {
+        .Csv -> "csv"
+        .Jsonl -> "jsonl"
+        .Json -> "json"
+        .Human -> if mode.json { "json" } else { "human" }
+    }
+}
+// Rust: Source/CmdDb.rs:2204
+fn status_trust(transport: String, authority: String, remote: Bool) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("transport", transport).with("authority", authority).with("remote", remote))
+}
+// Rust: Source/CmdDb.rs:2213
+fn status_value_json_len(value: StatusValue) -> Int {
+    if value == {
+        .Null -> 4
+        .Bool(v) -> v.to_string().bytes().len()
+        .Integer(v) -> v.to_string().bytes().len()
+        .Float(v) -> v.bytes().len()
+        .String(v) -> json_str(v).bytes().len()
+        .Array(values) -> 2 + values.iter().map(status_value_json_len).sum() + values.len().saturating_sub(1)
+        .Object(fields) -> 2 + fields.iter().map((name, value) -> json_str(name).bytes().len() + 1 + status_value_json_len(value)).sum() + fields.iter().count().saturating_sub(1)
+    }
+}
+// Rust: Source/CmdDb.rs:2233
+fn db_row_status(source: LoadedSource, index: Int, output_mode: String, plan: String, rows: Int, row: StatusValue) -> StatusEnvelope {
+    db_status("row", true, StatusFields.new().with("source", source.name).with("index", index).with("output_mode", output_mode).with("plan", plan)
+        .with("result_size", StatusValue.object(StatusFields.new().with("bytes", status_value_json_len(row)).with("rows", rows)))
+        .with("trust", status_trust("local", "same authorized local session", false)).with("row", row.clone()))
+}
+// Rust: Source/CmdDb.rs:2269
+fn db_query_status(sql: String, source: LoadedSource, evaluated: SqlEval, result: StatusValue, rows: Int, elapsed_ms: U128, plan: String, columns: [Column], output_mode: String) -> StatusEnvelope {
+    db_status("query", true, StatusFields.new().with("source", source.name).with("sql", sql).with("rows", rows).with("elapsed_ms", elapsed_ms as I128)
+        .with("input_bytes", source.input_bytes).with("output_mode", output_mode).with("plan", plan)
+        .with("result_size", StatusValue.object(StatusFields.new().with("bytes", status_value_json_len(result)).with("rows", rows)))
+        .with("trust", status_trust("local", "same authorized local session", false)).with("columns", columns_value(columns))
+        .with("result", result.clone()).with("stdout", evaluated.stdout).with("stderr", evaluated.stderr))
+}
+// Rust: Source/CmdDb.rs:2314
+fn final_output_bytes(sql: String, source: LoadedSource, evaluated: SqlEval, result: StatusValue, rendered: String, rows: Int, elapsed_ms: U128, plan: String, columns: [Column], options: DbOptions, mode: OutputMode) -> Int DbError! {
+    output :: if mode.json && options.output == DbOutput.Jsonl {
+        if result == {
+            .Array(values) -> values.iter().enumerate().map((index, value) -> db_row_status(source, index, db_output_name(options.output, mode), plan, rows, value).json_line().bytes().len()).sum()
+            else -> return Err(DbError.new("E2600", "query", source.path, "result is not an array for JSONL output", "use `--json` for the bounded envelope"))
+        }
+    } else if mode.json {
+        db_query_status(sql, source, evaluated, result, rows, elapsed_ms, plan, columns, db_output_name(options.output, mode)).json_line().bytes().len()
+    } else if options.output == DbOutput.Csv {
+        jet_cli_db_result_csv(rendered, columns, source.path).bytes().len()
+    } else {
+        rendered.bytes().len() + evaluated.stdout.bytes().len() + evaluated.stderr.bytes().len() + 1 + if mode.quiet { 0 } else { "rows: {rows} time: {elapsed_ms}ms source: {source.name}\n".bytes().len() }
+    }
+    if output > options.max_output_bytes { return Err(DbError.new("E2603", "query", source.path, "final rendered output is {output} bytes, over the {options.max_output_bytes}-byte output limit", "raise `--max-output-bytes` or add a smaller SQL LIMIT")) }
+    output
+}
+// Rust: Source/CmdDb.rs:2395
+fn emit_result(sql: String, source: LoadedSource, evaluated: SqlEval, result: StatusValue, rendered: String, rows: Int, elapsed_ms: U128, plan: String, columns: [Column], options: DbOptions, mode: OutputMode) -> DbError! {
+    if mode.json {
+        if options.output == DbOutput.Jsonl {
+            if result == {
+                .Array(values) -> {
+                    for (index, value) in values.iter().enumerate() {
+                        status :: db_row_status(source, index, db_output_name(options.output, mode), plan, rows, value).json_line()
+                        write_mode_machine(mode, status)
+                    }
+                    return
+                }
+                else -> return Err(DbError.new("E2600", "query", source.path, "result is not an array for JSONL output", "use `--json` for the bounded envelope"))
+            }
+        }
+        status :: db_query_status(sql, source, evaluated, result, rows, elapsed_ms, plan, columns, db_output_name(options.output, mode)).json_line()
+        write_mode_machine(mode, status)
+        return
+    }
+    if options.output == DbOutput.Csv { write_mode_renderable(mode, jet_cli_db_result_csv(rendered, columns, source.path)) }
+    else { write_mode_renderable(mode, "{rendered}\n") }
+    if !evaluated.stdout.is_empty() { write_mode_renderable(mode, evaluated.stdout) }
+    if !evaluated.stderr.is_empty() { write_mode_diagnostic(mode, evaluated.stderr) }
+    write_mode_status(mode, "rows: {rows} time: {elapsed_ms}ms source: {source.name}\n")
+}
+// Rust: Source/CmdDb.rs:2464 — canonical jet_cli_db_columns_json in DbRows.jet.
+// Rust: Source/CmdDb.rs:2482
+fn columns_value(columns: [Column]) -> StatusValue {
+    StatusValue.array(columns.iter().map(column -> StatusValue.object(StatusFields.new().with("name", column.name).with("type", jet_cli_db_column_kind_name(column.kind)).with("nullable", column.nullable))))
+}
+// Rust: Source/CmdDb.rs:2492
+fn status_data_value(value: Value) -> StatusValue {
+    if value == {
+        .Null -> .Null
+        .Bool(v) -> StatusValue.from(v)
+        .Int(v) -> StatusValue.from(v)
+        .Float(v) -> .Float(v.to_string())
+        .Number(v) -> v.parse<I128>().map(StatusValue.Integer) ?? StatusValue.Float(v.clone())
+        .TypedText(v) | .Text(v) -> StatusValue.from(v)
+        .Bytes(values) -> StatusValue.array(values.iter().map(v -> StatusValue.from(v as I128)))
+        .Array(values) -> StatusValue.array(values.iter().map(status_data_value))
+        .Object(fields) -> StatusValue.object(fields.iter().fold(StatusFields.new(), (fields, (name, value)) -> fields.with(name, status_data_value(value))))
+    }
+}
+// Rust: Source/CmdDb.rs:2517
+fn status_map_key(key: CtKey) -> String {
+    if key == {
+        .Int(v) -> v.to_string()
+        .Str(v) -> v.clone()
+        .Bool(v) -> v.to_string()
+        .Char(v) -> v.to_string()
+        .Tuple(_) | .Struct { .. } | .Enum { .. } -> key.to_value().to_json()
+    }
+}
+// Rust: Source/CmdDb.rs:2529
+fn status_ct_value(value: CtValue) -> StatusValue {
+    if value == {
+        .Enum { type_name, variant, args } -> {
+            if ["DataTree", "JSON", "TOML", "YAML", "CSV"].contains(type_name) {
+                return if variant == {
+                    "Null" -> StatusValue.Null
+                    "Number" -> if args.first().map((_, value) -> value) == {
+                        .Val(CtValue.Str(v)) -> v.parse<I128>().map(StatusValue.Integer) ?? StatusValue.Float(v.clone())
+                        else -> StatusValue.Null
+                    }
+                    else -> args.first().map((_, v) -> status_ct_value(v)) ?? StatusValue.Null
+                }
+            }
+        }
+        else -> {}
+    }
+    if value == {
+        .Int(v) -> StatusValue.from(v)
+        .Float(v) -> .Float(v.to_json())
+        .Bool(v) -> StatusValue.from(v)
+        .Char(v) -> StatusValue.from(v.to_string())
+        .Str(v) -> StatusValue.from(v)
+        .BigInt(v) -> StatusValue.from(v.to_string_rep())
+        .Bytes(values) -> StatusValue.array(values.iter().map(v -> StatusValue.from(v as I128)))
+        .List(values) -> StatusValue.array(values.iter().map(status_ct_value))
+        // GATE #4499: iteration over canonical composite-key compile-time maps.
+        .Map(values) -> StatusValue.object(values.iter().fold(StatusFields.new(), (fields, (key, value)) -> fields.with(status_map_key(key), status_ct_value(value))))
+        .Struct { fields, .. } -> StatusValue.object(fields.iter().filter((name, _) -> !Syntax.is_memo_storage_name(name)).fold(StatusFields.new(), (fields, (name, value)) -> fields.with(name, status_ct_value(value))))
+        .Enum { variant, args, .. } -> {
+            if args.is_empty() { StatusValue.from(variant) }
+            else if args.iter().all((label, _) -> label.is_some()) {
+                fields :: args.iter().fold(StatusFields.new(), (fields, (label, value)) -> fields.with(label.expect("checked enum label"), status_ct_value(value)))
+                StatusValue.object(StatusFields.new().with(variant, StatusValue.object(fields)))
+            } else { StatusValue.object(StatusFields.new().with(variant, StatusValue.array(args.iter().map((_, value) -> status_ct_value(value))))) }
+        }
+        .Present(v) -> status_ct_value(v)
+        .Failed(CtReport.Clean(_)) | .Unit | .Closure(_) -> .Null
+        .Failed(CtReport.Told(v)) -> StatusValue.object(StatusFields.new().with("err", status_ct_value(v)))
+    }
+}
+// Rust: Source/CmdDb.rs:2611 — canonical jet_cli_db_result_csv in DbRows.jet.
+// Rust: Source/CmdDb.rs:2688 — canonical jet_cli_db_csv_escape in DbSession.jet.
+// Rust: Source/CmdDb.rs:2696
+fn render_plan(source: String, query: sql_kernel.JetSqlQuery) -> String {
+    steps := ["scan {source}"]
+    if (field, operator, value) :: query.filter { steps.push("filter {field} {operator} {value}") }
+    if !query.group_by.is_empty() {
+        keys :: query.group_by.iter().map(key -> if key == { .Field(field) -> field.clone(); .Ordinal(ordinal) -> "#{ordinal}" }).collect<[String]>().join(", ")
+        steps.push("group {keys}")
+    }
+    projection :: query.projection.iter().map(item -> if item == {
+        .Wildcard -> "*"
+        .Field { field, alias } -> alias.map(alias -> "{field} AS {alias}") ?? field.clone()
+        .Aggregate { function, field, alias } -> {
+            name :: if function == { .Count -> "COUNT"; .Sum -> "SUM"; .Avg -> "AVG"; .Min -> "MIN"; .Max -> "MAX" }
+            argument :: field ?? "*"
+            expression :: "{name}({argument})"
+            alias.map(alias -> "{expression} AS {alias}") ?? ^expression
+        }
+    }).collect<[String]>().join(", ")
+    steps.push("project {projection}")
+    if (field, descending) :: query.order { direction :: if descending { "desc" } else { "asc" }; steps.push("sort {field} {direction}") }
+    if limit :: query.limit { steps.push("limit {limit}") }
+    steps.join(" -> ")
+}
+// Rust: Source/CmdDb.rs:2754
+fn handle_dot(input: String, source: LoadedSource?, state: DbState, options: DbOptions, mode: OutputMode) -> Bool DbError! {
+    parts := input.splitn(2, character -> character.is_whitespace())
+    command :: parts.next() ?? input
+    argument :: parts.next().map(value -> value.trim()).filter(value -> !value.is_empty())
+    if command == {
+        ".quit" | ".exit" -> false
+        ".help" -> {
+            if mode.json { write_db_status(mode, "help", true, StatusFields.new().with("usage", usage())) }
+            else { write_mode_renderable(mode, usage()) }
+            true
+        }
+        ".tables" -> {
+            loaded :: source ?? return Err(DbError.new("E2600", "tables", "", "no source is loaded", "pass a local source path first"))
+            if mode.json { write_db_status(mode, "tables", true, StatusFields.new().with("tables", StatusValue.array([StatusValue.from(loaded.name)]))) }
+            else { write_mode_renderable(mode, "{loaded.name}\n") }
+            true
+        }
+        ".schema" -> {
+            loaded :: source ?? return Err(DbError.new("E2600", "schema", "", "no source is loaded", "pass a local source path first"))
+            if mode.json { write_db_status(mode, "schema", true, StatusFields.new().with("source", loaded.name).with("rows", loaded.rows).with("columns", columns_value(loaded.columns))) }
+            else {
+                for column in loaded.columns {
+                    suffix :: if column.nullable { "?" } else { "" }
+                    write_mode_renderable(mode, "{column.name}: {jet_cli_db_column_kind_name(column.kind)}{suffix}\n")
+                }
+            }
+            true
+        }
+        ".plan" -> {
+            plan :: state.last_plan ?? return Err(DbError.new("E2600", "plan", "", "no query plan is available", "run a SELECT query before `.plan`"))
+            if mode.json { write_db_status(mode, "plan", true, StatusFields.new().with("plan", plan)) }
+            else { write_mode_renderable(mode, "{plan}\n") }
+            true
+        }
+        ".stats" -> {
+            statement :: state.last_sql ?? ""
+            if mode.json {
+                write_db_status(mode, "stats", true, StatusFields.new().with("statement", statement).with("rows", state.last_rows).with("elapsed_ms", StatusValue.from(I128.try_from(state.last_elapsed_ms) ?? I128.MAX)).with("output_bytes", state.last_output_bytes))
+            } else { write_mode_renderable(mode, "statement: {statement}\nrows: {state.last_rows} time: {state.last_elapsed_ms}ms output: {state.last_output_bytes} bytes\n") }
+            true
+        }
+        ".export" -> {
+            destination :: argument ?? return Err(DbError.new("E2104", "export", "", "`.export` needs a destination path", "use `.export report.json json` or `.export report.csv csv`"))
+            export_result(destination, source, state, options, mode)
+        }
+        else -> Err(DbError.new("E2104", "dot-command", "", "unknown db console command `{command}`", "use `.help`, `.tables`, `.schema`, `.plan`, `.stats`, `.export`, or `.quit`"))
+    }
+}
+// Rust: Source/CmdDb.rs:2912
+fn export_result(argument: String, source: LoadedSource?, state: DbState, options: DbOptions, mode: OutputMode) -> Bool DbError! {
+    if !options.allow_write || options.deny_write {
+        return Err(DbError.new("E1803", "export", argument, "export writes need explicit FS.Write authority", "start `jet db --allow=FS.Write` (and `--allow=FS.Read` to load a source); denied writes never fall back to stdout"))
+    }
+    parts := argument.split_whitespace()
+    path := parts.next() ?? "" // #4303
+    if path.is_empty() { return Err(DbError.new("E2104", "export", "", "`.export` needs a destination path", "use `.export report.json json`")) }
+    format :: parts.next() ?? "json"
+    result :: state.last_result ?? return Err(DbError.new("E2600", "export", path, "no query result is available", "run a SELECT query before exporting"))
+    bytes :: if format == {
+        "json" -> result.clone()
+        "csv" -> {
+            loaded :: source ?? return Err(DbError.new("E2600", "export", path, "CSV export needs a loaded source schema", "load a typed source before exporting"))
+            jet_cli_db_result_csv(result, loaded.columns, path)
+        }
+        else -> return Err(DbError.new("E2104", "export", path, "unknown export format `{format}`", "choose json or csv"))
+    }
+    if bytes.bytes().len() > options.max_output_bytes { return Err(DbError.new("E2603", "export", path, "export output is {bytes.bytes().len()} bytes, over the {options.max_output_bytes}-byte output limit", "raise `--max-output-bytes` or export a smaller query result")) }
+    destination :: OSPath.new(path)
+    // GATE #4494: actual filesystem write with OSPath ingress; retain IO error text.
+    fs.write(&destination, bytes.bytes()) ?? return Err(DbError.new("E2105", "export", path, "could not write `{path}`: {err}", "check the destination and explicit FS authority"))
+    if mode.json { write_db_status(mode, "export", true, StatusFields.new().with("path", path).with("bytes", bytes.bytes().len())) }
+    else { write_mode_status(mode, "exported {bytes.bytes().len()} bytes to {path}\n") }
+    true
+}
+// Rust: Source/CmdDb.rs:2973 — canonical jet_cli_db_split_console_inputs in DbSession.jet.
+// Rust: Source/CmdDb.rs:2994 — canonical jet_cli_db_has_complete_sql_statement in DbSession.jet.
+// Rust: Source/CmdDb.rs:3029 — canonical jet_cli_db_split_sql_statements in DbSession.jet.
+// Rust: Source/CmdDb.rs:3095 — canonical jet_cli_db_is_remote in DbSession.jet.
+// Rust: Source/CmdDb.rs:3099 — canonical jet_cli_db_source_name_from_path in DbSession.jet.
+// Rust: Source/CmdDb.rs:3117 — canonical jet_cli_db_valid_table_name in DbSession.jet.
+// Rust: Source/CmdDb.rs:3128 — canonical jet_cli_db_valid_column_name in DbSession.jet.

@@ -1,1769 +1,799 @@
-// PORT-PENDING 0693 source-cmdinspect-slice-4041: Source/CmdInspect.rs:4041-5805
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn inspect_entry_path(scope: &jet::CLI::InspectScope) -> String {
-//RS     match scope {
-//RS         jet::CLI::InspectScope::Target(target) if !Path::new(target).is_dir() => target.clone(),
-//RS         jet::CLI::InspectScope::Target(target) => {
-//RS             let root = crate::require_manifest_root(
-//RS                 Path::new(target),
-//RS                 "error: no package.jet found for this inspect target",
-//RS             );
-//RS             crate::find_project_entry(&root)
-//RS                 .to_string_lossy()
-//RS                 .into_owned()
-//RS         }
-//RS         jet::CLI::InspectScope::Package
-//RS         | jet::CLI::InspectScope::Live(_)
-//RS         | jet::CLI::InspectScope::Replay(_) => {
-//RS             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS             let root = crate::require_manifest_root(
-//RS                 &cwd,
-//RS                 "error: no package.jet found — run inspect inside a project",
-//RS             );
-//RS             crate::find_project_entry(&root)
-//RS                 .to_string_lossy()
-//RS                 .into_owned()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn run_decisions_live(pid: u32, mode: crate::OutputMode) {
-//RS     let projection = match jet::DevServer::LiveInspect::read_plane(pid, "decisions") {
-//RS         Ok(projection) => projection,
-//RS         Err(message) => {
-//RS             crate::cli_error!(
-//RS                 @fix "E2105",
-//RS                 message,
-//RS                 format!("start the program with --observe, then run `jet inspect decisions --live {pid}`")
-//RS             );
-//RS             exit(jet::ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let has_ledger = projection.decision_ledger.is_some();
-//RS     let ledger = projection.decision_ledger.unwrap_or_else(|| {
-//RS         let identity = MirDecisionIdentity {
-//RS             source: projection.source_id.clone(),
-//RS             configuration: projection.build_id.clone(),
-//RS             profile: "live".to_string(),
-//RS             target: projection.world_id.clone(),
-//RS             implementation: projection.protocol.clone(),
-//RS             artifact: format!("pid:{pid}"),
-//RS             run: projection.revision.clone(),
-//RS         };
-//RS         MirDecisionLedger::from_rows(
-//RS             identity,
-//RS             [MirDecisionRow::new(
-//RS                 MirDecisionKind::Tier,
-//RS                 MirDecisionDisposition::Unavailable,
-//RS                 None,
-//RS                 "",
-//RS                 jet::Diagnostics::Span::new(0, 0),
-//RS                 "live-decision-ledger",
-//RS                 "the live runtime produced no compiler decision ledger for this run",
-//RS                 "live.inspect",
-//RS                 "runtime-snapshot",
-//RS             )],
-//RS         )
-//RS     });
-//RS     let record_status = if has_ledger { "current" } else { "unavailable" };
-//RS     if mode.json {
-//RS         let fields = StatusFields::new()
-//RS             .with("scope", "live")
-//RS             .with("pid", projection.pid)
-//RS             .with("protocol", projection.protocol)
-//RS             .with("session_id", projection.session_id)
-//RS             .with("source_id", projection.source_id)
-//RS             .with("build_id", projection.build_id)
-//RS             .with("revision", projection.revision)
-//RS             .with("world_id", projection.world_id)
-//RS             .with("record_status", record_status)
-//RS             .with("retention", "bounded")
-//RS             .with("redaction", "transport-safe")
-//RS             .with(
-//RS                 "rows",
-//RS                 StatusValue::array(ledger.rows.iter().map(decision_row_value)),
-//RS             )
-//RS             .with("kinds", decision_kind_status_value(&ledger.rows));
-//RS         println!("{}", render_status("inspect.decisions", true, fields));
-//RS         return;
-//RS     }
-//RS     let mut text = String::new();
-//RS     writeln!(
-//RS         text,
-//RS         "decisions: scope=live pid={} source={} build={} revision={} world={} record_status={} retention=bounded redaction=transport-safe",
-//RS         projection.pid,
-//RS         projection.source_id,
-//RS         projection.build_id,
-//RS         projection.revision,
-//RS         projection.world_id,
-//RS         record_status,
-//RS     )
-//RS     .expect("writing live decision inspect output cannot fail");
-//RS     for row in &ledger.rows {
-//RS         let derivation_ref = row
-//RS             .derivation
-//RS             .as_ref()
-//RS             .map_or("unavailable", |reference| reference.id.as_str());
-//RS         let derivation_disposition = row
-//RS             .derivation_disposition
-//RS             .map_or("unknown", |disposition| disposition.as_str());
-//RS         writeln!(
-//RS             text,
-//RS             "decision kind={} disposition={} derivation_disposition={} derivation_ref={} reason={} producer={}",
-//RS             row.kind.as_str(),
-//RS             row.disposition.as_str(),
-//RS             derivation_disposition,
-//RS             derivation_ref,
-//RS             row.reason,
-//RS             row.producer,
-//RS         )
-//RS         .expect("writing live decision inspect output cannot fail");
-//RS     }
-//RS     print!("{text}");
-//RS }
-//RS 
-//RS fn run_inspect_live(plane: jet::CLI::InspectPlane, pid: u32, mode: crate::OutputMode) {
-//RS     if plane == jet::CLI::InspectPlane::Decisions {
-//RS         run_decisions_live(pid, mode);
-//RS         return;
-//RS     }
-//RS     if mode.json {
-//RS         let projection = match jet::DevServer::LiveInspect::read_plane(pid, plane.name()) {
-//RS             Ok(projection) => projection,
-//RS             Err(message) => {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2105",
-//RS                     message,
-//RS                     format!("start the program with --observe, then run `jet inspect {} --live {pid}`", plane.name())
-//RS                 );
-//RS                 exit(jet::ExitCodes::USER_ERROR);
-//RS             }
-//RS         };
-//RS         let values = StatusValue::array(projection.values.iter().map(|value| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("value_id", value.value_id.as_str())
-//RS                     .with("type_identity", value.type_identity.as_str())
-//RS                     .with("disposition", value.disposition.as_str())
-//RS                     .with("reason", value.reason.as_str())
-//RS                     .with(
-//RS                         "rendered_value",
-//RS                         value
-//RS                             .rendered_value
-//RS                             .as_ref()
-//RS                             .map(|rendered| StatusValue::String(rendered.clone()))
-//RS                             .unwrap_or(StatusValue::Null),
-//RS                     ),
-//RS             )
-//RS         }));
-//RS         let shapes = StatusValue::array(projection.shapes.iter().map(|shape| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("type_identity", shape.type_identity.as_str())
-//RS                     .with(
-//RS                         "value_ids",
-//RS                         StatusValue::array(
-//RS                             shape
-//RS                                 .value_ids
-//RS                                 .iter()
-//RS                                 .map(|value_id| StatusValue::String(value_id.clone())),
-//RS                         ),
-//RS                     ),
-//RS             )
-//RS         }));
-//RS         let fields = StatusFields::new()
-//RS             .with("plane", projection.plane)
-//RS             .with("scope", projection.scope)
-//RS             .with("pid", projection.pid)
-//RS             .with("protocol", projection.protocol)
-//RS             .with("session_id", projection.session_id)
-//RS             .with("source_id", projection.source_id)
-//RS             .with("build_id", projection.build_id)
-//RS             .with("revision", projection.revision)
-//RS             .with("world_id", projection.world_id)
-//RS             .with("values", values)
-//RS             .with("shapes", shapes);
-//RS         println!(
-//RS             "{}",
-//RS             render_status(format!("inspect.{}", plane.name()), true, fields)
-//RS         );
-//RS     } else {
-//RS         let snapshot = match jet::DevServer::LiveInspect::read(pid) {
-//RS             Ok(snapshot) => snapshot,
-//RS             Err(message) => {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2105",
-//RS                     message,
-//RS                     format!("start the program with --observe, then run `jet inspect {} --live {pid}`", plane.name())
-//RS                 );
-//RS                 exit(jet::ExitCodes::USER_ERROR);
-//RS             }
-//RS         };
-//RS         print!("{}", jet::DevServer::LiveInspect::render(&snapshot));
-//RS     }
-//RS }
-//RS fn indexed_decision_record_state(artifact: &str) -> (&'static str, &'static str, &'static str) {
-//RS     let Ok(index) = jet::RecordIndex::RecordIndex::load_for_project(".") else {
-//RS         return ("unavailable", "unknown", "unknown");
-//RS     };
-//RS     let requested_path = Path::new(artifact);
-//RS     let requested_name = requested_path.file_name().and_then(|name| name.to_str());
-//RS     let matches_artifact = |entry: &jet::RecordIndex::RecordIndexEntry| {
-//RS         entry.artifact_id == artifact
-//RS             || entry.path == requested_path
-//RS             || requested_name.is_some_and(|name| {
-//RS                 entry.path.file_name().and_then(|value| value.to_str()) == Some(name)
-//RS             })
-//RS     };
-//RS     let visible = index.query(false).into_iter().find(|entry| {
-//RS         entry.kind == jet::RecordIndex::RecordKind::Replay && matches_artifact(entry)
-//RS     });
-//RS     if let Some(entry) = visible {
-//RS         return (
-//RS             "current",
-//RS             if entry.saved { "saved" } else { "bounded" },
-//RS             entry.capture.as_str(),
-//RS         );
-//RS     }
-//RS     let hidden = index.query(true).into_iter().any(|entry| {
-//RS         entry.kind == jet::RecordIndex::RecordKind::Replay && matches_artifact(&entry)
-//RS     });
-//RS     if hidden {
-//RS         ("redacted", "retained", "sensitive")
-//RS     } else {
-//RS         ("unavailable", "unknown", "unknown")
-//RS     }
-//RS }
-//RS 
-//RS fn run_decisions_replay(
-//RS     artifact: &str,
-//RS     authority: &crate::ProveReplay::ReplayAuthority,
-//RS     mode: crate::OutputMode,
-//RS ) {
-//RS     let has_ledger = authority.decision_ledger.is_some();
-//RS     let ledger = authority.decision_ledger.clone().unwrap_or_else(|| {
-//RS         let identity = MirDecisionIdentity {
-//RS             source: "replay-artifact".to_string(),
-//RS             configuration: "replay-receipt".to_string(),
-//RS             profile: "replay".to_string(),
-//RS             target: "replay".to_string(),
-//RS             implementation: "mir-v1".to_string(),
-//RS             artifact: artifact.to_string(),
-//RS             run: format!("replay:{artifact}"),
-//RS         };
-//RS         MirDecisionLedger::from_rows(
-//RS             identity,
-//RS             [MirDecisionRow::new(
-//RS                 MirDecisionKind::Tier,
-//RS                 MirDecisionDisposition::Unavailable,
-//RS                 None,
-//RS                 "",
-//RS                 jet::Diagnostics::Span::new(0, 0),
-//RS                 "replay-decision-ledger",
-//RS                 "the replay artifact has no retained compiler decision section",
-//RS                 "replay.inspect",
-//RS                 "replay-receipt",
-//RS             )],
-//RS         )
-//RS     });
-//RS     let (indexed_status, retention, redaction) = indexed_decision_record_state(artifact);
-//RS     let record_status = if has_ledger {
-//RS         "current"
-//RS     } else {
-//RS         indexed_status
-//RS     };
-//RS     if mode.json {
-//RS         let fields = StatusFields::new()
-//RS             .with("plane", "decisions")
-//RS             .with("scope", "replay")
-//RS             .with("artifact", artifact)
-//RS             .with("expected_outcome", authority.expected_outcome.clone())
-//RS             .with("expected_status", authority.expected_status)
-//RS             .with("record_status", record_status)
-//RS             .with("retention", retention)
-//RS             .with("redaction", redaction)
-//RS             .with(
-//RS                 "rows",
-//RS                 StatusValue::array(ledger.rows.iter().map(decision_row_value)),
-//RS             )
-//RS             .with("kinds", decision_kind_status_value(&ledger.rows));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.decisions", true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         println!("decisions replay");
-//RS         println!("artifact: {artifact}");
-//RS         println!("record_status: {record_status} retention: {retention} redaction: {redaction}");
-//RS         println!(
-//RS             "expected: {} ({})",
-//RS             authority.expected_outcome, authority.expected_status
-//RS         );
-//RS         for row in &ledger.rows {
-//RS             let derivation_ref = row
-//RS                 .derivation
-//RS                 .as_ref()
-//RS                 .map_or("unavailable", |reference| reference.id.as_str());
-//RS             let derivation_disposition = row
-//RS                 .derivation_disposition
-//RS                 .map_or("unknown", |disposition| disposition.as_str());
-//RS             println!(
-//RS                 "decision kind={} disposition={} derivation_disposition={} derivation_ref={} reason={} producer={}",
-//RS                 row.kind.as_str(),
-//RS                 row.disposition.as_str(),
-//RS                 derivation_disposition,
-//RS                 derivation_ref,
-//RS                 row.reason,
-//RS                 row.producer,
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn run_inspect_replay(
-//RS     plane: jet::CLI::InspectPlane,
-//RS     artifact: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     mode: crate::OutputMode,
-//RS ) {
-//RS     let file = inspect_entry_path(&jet::CLI::InspectScope::Replay(artifact.to_string()));
-//RS     let authority = crate::ProveReplay::open_named_replay(
-//RS         &file,
-//RS         artifact,
-//RS         profile,
-//RS         setting_overrides,
-//RS         mode.json,
-//RS     )
-//RS     .unwrap_or_else(|status| exit(status));
-//RS     if plane == jet::CLI::InspectPlane::Decisions {
-//RS         run_decisions_replay(artifact, &authority, mode);
-//RS         return;
-//RS     }
-//RS     let acts = StatusValue::array(authority.recorded_run.acts.iter().map(|act| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("sequence", act.sequence)
-//RS                 .with("function", act.function.as_str())
-//RS                 .with("line", act.line)
-//RS                 .with(
-//RS                     "locals",
-//RS                     StatusValue::array(act.locals.iter().map(|local| {
-//RS                         StatusValue::object(
-//RS                             StatusFields::new()
-//RS                                 .with("name", local.name.as_str())
-//RS                                 .with("type_name", local.type_name.as_str())
-//RS                                 .with("value", local.value.as_str()),
-//RS                         )
-//RS                     })),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     let values = StatusValue::array(
-//RS         authority
-//RS             .recorded_run
-//RS             .acts
-//RS             .iter()
-//RS             .flat_map(|act| act.locals.iter())
-//RS             .map(|local| {
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("value_id", local.name.as_str())
-//RS                         .with("type_identity", local.type_name.as_str())
-//RS                         .with("disposition", "captured")
-//RS                         .with("reason", "")
-//RS                         .with("rendered_value", local.value.as_str()),
-//RS                 )
-//RS             }),
-//RS     );
-//RS     let mut shape_values = BTreeMap::<String, BTreeSet<String>>::new();
-//RS     for act in &authority.recorded_run.acts {
-//RS         for local in &act.locals {
-//RS             shape_values
-//RS                 .entry(local.type_name.clone())
-//RS                 .or_default()
-//RS                 .insert(local.name.clone());
-//RS         }
-//RS     }
-//RS     let shapes = StatusValue::array(shape_values.into_iter().map(|(type_identity, value_ids)| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("type_identity", type_identity)
-//RS                 .with(
-//RS                     "value_ids",
-//RS                     StatusValue::array(value_ids.into_iter().map(StatusValue::String)),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     if mode.json {
-//RS         let fields = StatusFields::new()
-//RS             .with("plane", plane.name())
-//RS             .with("scope", "replay")
-//RS             .with("artifact", artifact)
-//RS             .with("expected_outcome", authority.expected_outcome.clone())
-//RS             .with("expected_status", authority.expected_status)
-//RS             .with("acts", acts)
-//RS             .with("values", values)
-//RS             .with("shapes", shapes);
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new(format!("inspect.{}", plane.name()), true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         println!("{} replay", plane.name());
-//RS         println!("artifact: {artifact}");
-//RS         println!(
-//RS             "expected: {} ({})",
-//RS             authority.expected_outcome, authority.expected_status
-//RS         );
-//RS         for act in &authority.recorded_run.acts {
-//RS             println!("  #{} {}:{}", act.sequence, act.function, act.line);
-//RS             for local in &act.locals {
-//RS                 println!("    {}: {} = {}", local.name, local.type_name, local.value);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, json: bool) {
-//RS     #[derive(Clone)]
-//RS     struct CallableView {
-//RS         key: String,
-//RS         name: String,
-//RS         source: String,
-//RS         span: jet_foundation::Diagnostics::Span,
-//RS         declared_effects: Option<Vec<String>>,
-//RS         is_pure: bool,
-//RS         is_comptime: bool,
-//RS         is_replayable: bool,
-//RS         inferred_seed: Option<String>,
-//RS     }
-//RS 
-//RS     struct CallableReport {
-//RS         view: CallableView,
-//RS         declared: jet_foundation::sema::RightsRow,
-//RS         inferred: jet_foundation::sema::RightsRow,
-//RS         inferred_effects: jet_foundation::Authority::Holds,
-//RS         direct_effects: jet_foundation::Authority::Holds,
-//RS         callees: Vec<String>,
-//RS         maximal: bool,
-//RS         walk: jet_foundation::sema::RightsWalk,
-//RS     }
-//RS 
-//RS     fn add_func(
-//RS         out: &mut Vec<CallableView>,
-//RS         alias: &str,
-//RS         namespace: &str,
-//RS         source: &str,
-//RS         owner: Option<&str>,
-//RS         function: &jet::AST::Func,
-//RS     ) {
-//RS         let identity = owner
-//RS             .map(|owner| format!("{namespace}{owner}::{}", function.name))
-//RS             .unwrap_or_else(|| format!("{namespace}{}", function.name));
-//RS         out.push(CallableView {
-//RS             key: format!("{alias}::{identity}"),
-//RS             name: function.name.clone(),
-//RS             source: source.to_string(),
-//RS             span: function.span,
-//RS             declared_effects: function
-//RS                 .declared_effects
-//RS                 .as_ref()
-//RS                 .map(|effects| effects.iter().map(|(name, _)| name.clone()).collect()),
-//RS             is_pure: function.is_pure,
-//RS             is_comptime: function.is_comptime,
-//RS             is_replayable: function.is_replayable,
-//RS             inferred_seed: None,
-//RS         });
-//RS     }
-//RS 
-//RS     fn add_trait_method(
-//RS         out: &mut Vec<CallableView>,
-//RS         alias: &str,
-//RS         namespace: &str,
-//RS         source: &str,
-//RS         trait_name: &str,
-//RS         method: &jet::AST::TraitMethodSig,
-//RS     ) {
-//RS         let identity = format!("{namespace}{trait_name}::{}", method.name);
-//RS         out.push(CallableView {
-//RS             key: format!("{alias}::{identity}"),
-//RS             name: method.name.clone(),
-//RS             source: source.to_string(),
-//RS             span: method.span,
-//RS             declared_effects: method
-//RS                 .declared_effects
-//RS                 .as_ref()
-//RS                 .map(|effects| effects.iter().map(|(name, _)| name.clone()).collect()),
-//RS             is_pure: method.is_pure,
-//RS             is_comptime: false,
-//RS             is_replayable: false,
-//RS             inferred_seed: None,
-//RS         });
-//RS     }
-//RS 
-//RS     fn add_extern(
-//RS         out: &mut Vec<CallableView>,
-//RS         alias: &str,
-//RS         namespace: &str,
-//RS         source: &str,
-//RS         function: &jet::AST::ExternFn,
-//RS     ) {
-//RS         out.push(CallableView {
-//RS             key: format!("{alias}::{namespace}{}", function.name),
-//RS             name: function.name.clone(),
-//RS             source: source.to_string(),
-//RS             span: function.span,
-//RS             declared_effects: None,
-//RS             is_pure: false,
-//RS             is_comptime: false,
-//RS             is_replayable: false,
-//RS             inferred_seed: Some(
-//RS                 function
-//RS                     .effect_root
-//RS                     .clone()
-//RS                     .unwrap_or_else(|| "FFI".to_string()),
-//RS             ),
-//RS         });
-//RS     }
-//RS 
-//RS     fn collect_items(
-//RS         items: &[jet::AST::Item],
-//RS         alias: &str,
-//RS         namespace: &str,
-//RS         source: &str,
-//RS         out: &mut Vec<CallableView>,
-//RS     ) {
-//RS         use jet::AST::Item;
-//RS         for item in items {
-//RS             match item {
-//RS                 Item::Func(function) => add_func(out, alias, namespace, source, None, function),
-//RS                 Item::Impl(definition) => {
-//RS                     for method in &definition.methods {
-//RS                         add_func(
-//RS                             out,
-//RS                             alias,
-//RS                             namespace,
-//RS                             source,
-//RS                             Some(&definition.type_name),
-//RS                             method,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 Item::Struct(definition) => {
-//RS                     for method in &definition.methods {
-//RS                         add_func(
-//RS                             out,
-//RS                             alias,
-//RS                             namespace,
-//RS                             source,
-//RS                             Some(&definition.name),
-//RS                             method,
-//RS                         );
-//RS                     }
-//RS                     for block in &definition.trait_impls {
-//RS                         for method in &block.methods {
-//RS                             add_func(
-//RS                                 out,
-//RS                                 alias,
-//RS                                 namespace,
-//RS                                 source,
-//RS                                 Some(&definition.name),
-//RS                                 method,
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Enum(definition) => {
-//RS                     for method in &definition.methods {
-//RS                         add_func(
-//RS                             out,
-//RS                             alias,
-//RS                             namespace,
-//RS                             source,
-//RS                             Some(&definition.name),
-//RS                             method,
-//RS                         );
-//RS                     }
-//RS                     for block in &definition.trait_impls {
-//RS                         for method in &block.methods {
-//RS                             add_func(
-//RS                                 out,
-//RS                                 alias,
-//RS                                 namespace,
-//RS                                 source,
-//RS                                 Some(&definition.name),
-//RS                                 method,
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Trait(definition) => {
-//RS                     for method in &definition.methods {
-//RS                         add_trait_method(out, alias, namespace, source, &definition.name, method);
-//RS                     }
-//RS                 }
-//RS                 Item::ExternRust(block) => {
-//RS                     for function in &block.functions {
-//RS                         add_extern(out, alias, namespace, source, function);
-//RS                     }
-//RS                 }
-//RS                 Item::CodeModule(module) => {
-//RS                     if let Some(body) = &module.body {
-//RS                         let nested = format!("{namespace}{}__", module.name);
-//RS                         collect_items(body, alias, &nested, source, out);
-//RS                     }
-//RS                 }
-//RS                 Item::GenericModule(module) => {
-//RS                     let nested = format!("{namespace}{}__", module.name);
-//RS                     collect_items(&module.body, alias, &nested, source, out);
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn holds_value(holds: &jet_foundation::Authority::Holds) -> StatusValue {
-//RS         StatusValue::array(holds.iter().cloned().map(StatusValue::String))
-//RS     }
-//RS 
-//RS     fn holds_text(holds: &jet_foundation::Authority::Holds) -> String {
-//RS         holds.iter().cloned().collect::<Vec<_>>().join(", ")
-//RS     }
-//RS 
-//RS     fn verdict_name(verdict: jet_foundation::Authority::Verdict) -> &'static str {
-//RS         match verdict {
-//RS             jet_foundation::Authority::Verdict::Allowed => "allowed",
-//RS             jet_foundation::Authority::Verdict::Denied => "denied",
-//RS             jet_foundation::Authority::Verdict::Missing => "missing",
-//RS         }
-//RS     }
-//RS 
-//RS     fn span_value(source: &str, start: usize, end: usize) -> StatusValue {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("source", source)
-//RS                 .with("start", start)
-//RS                 .with("end", end),
-//RS         )
-//RS     }
-//RS 
-//RS     fn frame_value(frame: &jet_foundation::sema::ScopeFrame) -> StatusValue {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("scope", frame.scope.name())
-//RS                 .with("name", frame.name.clone())
-//RS                 .with("grants", holds_value(&frame.grants))
-//RS                 .with(
-//RS                     "authority",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("source", frame.provenance.source.clone())
-//RS                             .with("reason", frame.provenance.reason.clone()),
-//RS                     ),
-//RS                 ),
-//RS         )
-//RS     }
-//RS 
-//RS     fn row_value(row: &jet_foundation::sema::RightsRow) -> StatusValue {
-//RS         let allow = row
-//RS             .allow
-//RS             .as_ref()
-//RS             .map(holds_value)
-//RS             .unwrap_or(StatusValue::Null);
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", row.kind.name())
-//RS                 .with("allow", allow)
-//RS                 .with("deny", holds_value(&row.deny))
-//RS                 .with(
-//RS                     "provenance",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("source", row.provenance.source.clone())
-//RS                             .with("reason", row.provenance.reason.clone()),
-//RS                     ),
-//RS                 ),
-//RS         )
-//RS     }
-//RS 
-//RS     fn row_text(row: &jet_foundation::sema::RightsRow) -> String {
-//RS         let allow = row
-//RS             .allow
-//RS             .as_ref()
-//RS             .map(holds_text)
-//RS             .unwrap_or_else(|| "unbounded".to_string());
-//RS         format!(
-//RS             "kind={} allow=[{}] deny=[{}]",
-//RS             row.kind.name(),
-//RS             allow,
-//RS             holds_text(&row.deny)
-//RS         )
-//RS     }
-//RS 
-//RS     fn declared_row(callable: &CallableView) -> jet_foundation::sema::RightsRow {
-//RS         let provenance = jet_foundation::sema::RightsProvenance::new(
-//RS             callable.key.clone(),
-//RS             if callable.is_comptime {
-//RS                 "comptime declaration"
-//RS             } else if callable.is_pure {
-//RS                 "pure declaration"
-//RS             } else if callable.is_replayable {
-//RS                 "replayable declaration"
-//RS             } else if callable.declared_effects.is_some() {
-//RS                 "declared effect row"
-//RS             } else {
-//RS                 "inferred callable declaration"
-//RS             },
-//RS         );
-//RS         if callable.is_comptime {
-//RS             jet_foundation::sema::RightsRow::comptime(provenance)
-//RS         } else if callable.is_pure {
-//RS             jet_foundation::sema::RightsRow::pure(provenance)
-//RS         } else if callable.is_replayable {
-//RS             jet_foundation::sema::RightsRow::replayable(provenance)
-//RS         } else if let Some(effects) = &callable.declared_effects {
-//RS             let allow = effects
-//RS                 .iter()
-//RS                 .filter(|name| !name.starts_with('!'))
-//RS                 .map(String::as_str);
-//RS             let deny = effects.iter().filter_map(|name| name.strip_prefix('!'));
-//RS             jet_foundation::sema::RightsRow::invocation(allow, deny, provenance)
-//RS         } else {
-//RS             jet_foundation::sema::RightsRow::callable(provenance)
-//RS         }
-//RS     }
-//RS 
-//RS     let selected_path = Path::new(target).canonicalize().ok();
-//RS     let mut callables = Vec::new();
-//RS     for (module_index, module) in projection.bundle.modules.iter().enumerate() {
-//RS         if scope == CheckScope::ExplicitFile {
-//RS             let module_path = module
-//RS                 .path
-//RS                 .canonicalize()
-//RS                 .unwrap_or_else(|_| module.path.clone());
-//RS             if module.display != target
-//RS                 && selected_path
-//RS                     .as_ref()
-//RS                     .is_none_or(|selected| selected != &module_path)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         let alias = projection
-//RS             .facts
-//RS             .name_ledger
-//RS             .module_alias(module_index)
-//RS             .unwrap_or(&module.alias);
-//RS         collect_items(&module.items, alias, "", &module.display, &mut callables);
-//RS     }
-//RS     callables.sort_by(|left, right| {
-//RS         left.key
-//RS             .cmp(&right.key)
-//RS             .then(left.span.start.cmp(&right.span.start))
-//RS             .then(left.span.end.cmp(&right.span.end))
-//RS     });
-//RS     callables.dedup_by(|left, right| left.key == right.key);
-//RS 
-//RS     let application = &projection.bundle.package_guarantees.application_authority;
-//RS     let scope_chain = vec![jet_foundation::sema::ScopeFrame::new(
-//RS         jet_foundation::Authority::Scope::Package,
-//RS         application.authority.clone(),
-//RS         application.granted_effects.clone(),
-//RS         jet_foundation::sema::RightsProvenance::new(
-//RS             application.authority.clone(),
-//RS             "selected application authority",
-//RS         ),
-//RS     )];
-//RS     let reports = callables
-//RS         .into_iter()
-//RS         .map(|view| {
-//RS             let declared = declared_row(&view);
-//RS             let summary = projection.facts.summaries.get(&view.key);
-//RS             let mut inferred_effects = projection
-//RS                 .facts
-//RS                 .solved
-//RS                 .get(&view.key)
-//RS                 .cloned()
-//RS                 .unwrap_or_default();
-//RS             if inferred_effects.is_empty() {
-//RS                 if let Some(summary) = summary {
-//RS                     inferred_effects.extend(summary.direct.iter().cloned());
-//RS                 }
-//RS             }
-//RS             if inferred_effects.is_empty() {
-//RS                 if let Some(seed) = &view.inferred_seed {
-//RS                     inferred_effects.insert(seed.clone());
-//RS                 }
-//RS             }
-//RS             let inferred = jet_foundation::sema::RightsRow::invocation(
-//RS                 inferred_effects.iter().map(String::as_str),
-//RS                 std::iter::empty::<&str>(),
-//RS                 jet_foundation::sema::RightsProvenance::new(
-//RS                     view.key.clone(),
-//RS                     "sema inferred effect facts",
-//RS                 ),
-//RS             );
-//RS             let call_chain = projection
-//RS                 .index()
-//RS                 .effect_of(&view.key)
-//RS                 .and_then(|fact| fact.provenance.first())
-//RS                 .map(|witness| witness.call_path.clone())
-//RS                 .filter(|path| !path.is_empty())
-//RS                 .unwrap_or_else(|| vec![view.key.clone()]);
-//RS             let walk = declared.walk(&inferred_effects, &call_chain, &scope_chain);
-//RS             CallableReport {
-//RS                 view,
-//RS                 declared,
-//RS                 inferred,
-//RS                 inferred_effects,
-//RS                 direct_effects: summary
-//RS                     .map(|summary| summary.direct.clone())
-//RS                     .unwrap_or_default(),
-//RS                 callees: summary
-//RS                     .map(|summary| summary.edges.iter().cloned().collect())
-//RS                     .unwrap_or_default(),
-//RS                 maximal: summary.is_some_and(|summary| summary.maximal),
-//RS                 walk,
-//RS             }
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS 
-//RS     let authority_facts = jet_foundation::Authority::effect_declarations()
-//RS         .iter()
-//RS         .map(|declaration| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("name", declaration.name)
-//RS                     .with("irreversible", declaration.irreversible),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let authority = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("source", application.authority.clone())
-//RS             .with("required", holds_value(&application.required_effects))
-//RS             .with("granted", holds_value(&application.granted_effects))
-//RS             .with("denied", holds_value(&application.denied_effects)),
-//RS     );
-//RS     let callable_values = reports
-//RS         .iter()
-//RS         .map(|report| {
-//RS             let denials = report
-//RS                 .walk
-//RS                 .denials
-//RS                 .iter()
-//RS                 .map(|denial| {
-//RS                     let witness = projection
-//RS                         .index()
-//RS                         .effect_of(&report.view.key)
-//RS                         .and_then(|fact| {
-//RS                             fact.provenance
-//RS                                 .iter()
-//RS                                 .find(|witness| witness.effect == denial.right)
-//RS                         });
-//RS                     let witness_spans =
-//RS                         witness
-//RS                             .map(|witness| {
-//RS                                 StatusValue::array(witness.spans.iter().map(|span| {
-//RS                                     span_value(&report.view.source, span.start, span.end)
-//RS                                 }))
-//RS                             })
-//RS                             .unwrap_or_else(|| StatusValue::array(Vec::<StatusValue>::new()));
-//RS                     let nearest = denial
-//RS                         .chain
-//RS                         .nearest_granting_scope
-//RS                         .as_ref()
-//RS                         .map(frame_value)
-//RS                         .unwrap_or(StatusValue::Null);
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("right", denial.right.clone())
-//RS                             .with("verdict", verdict_name(denial.verdict))
-//RS                             .with(
-//RS                                 "chain",
-//RS                                 StatusValue::object(
-//RS                                     StatusFields::new()
-//RS                                         .with("right", denial.chain.right.clone())
-//RS                                         .with(
-//RS                                             "call_chain",
-//RS                                             StatusValue::array(
-//RS                                                 denial
-//RS                                                     .chain
-//RS                                                     .call_chain
-//RS                                                     .iter()
-//RS                                                     .cloned()
-//RS                                                     .map(StatusValue::String),
-//RS                                             ),
-//RS                                         )
-//RS                                         .with(
-//RS                                             "scope_chain",
-//RS                                             StatusValue::array(
-//RS                                                 denial.chain.scope_chain.iter().map(frame_value),
-//RS                                             ),
-//RS                                         )
-//RS                                         .with("nearest_granting_scope", nearest),
-//RS                                 ),
-//RS                             )
-//RS                             .with("source_spans", witness_spans),
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             let summary = StatusFields::new()
-//RS                 .with("direct", holds_value(&report.direct_effects))
-//RS                 .with(
-//RS                     "callees",
-//RS                     StatusValue::array(report.callees.iter().cloned().map(StatusValue::String)),
-//RS                 )
-//RS                 .with("maximal", report.maximal);
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("callable", report.view.key.clone())
-//RS                     .with("name", report.view.name.clone())
-//RS                     .with(
-//RS                         "source_span",
-//RS                         span_value(
-//RS                             &report.view.source,
-//RS                             report.view.span.start,
-//RS                             report.view.span.end,
-//RS                         ),
-//RS                     )
-//RS                     .with("declared_row", row_value(&report.declared))
-//RS                     .with("inferred_row", row_value(&report.inferred))
-//RS                     .with("inferred_effects", holds_value(&report.inferred_effects))
-//RS                     .with("effects", StatusValue::object(summary))
-//RS                     .with("verdict", verdict_name(report.walk.verdict))
-//RS                     .with("denials", StatusValue::array(denials)),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     if json {
-//RS         let fields = StatusFields::new()
-//RS             .with("scope", scope_name(scope))
-//RS             .with("target", target)
-//RS             .with("authority", authority)
-//RS             .with("evidence", "checked_static")
-//RS             .with("runtime_observation", "not_run")
-//RS             .with("provenance_scope", "checked_semantic_index")
-//RS             .with("authority_facts", StatusValue::array(authority_facts))
-//RS             .with("callables", StatusValue::array(callable_values));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.rights", true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         println!("rights");
-//RS         println!("scope: {}", scope_name(scope));
-//RS         println!("target: {target}");
-//RS         println!("evidence: checked_static");
-//RS         println!("runtime observation: not_run");
-//RS         println!("provenance scope: checked_semantic_index");
-//RS         println!("authority: {}", application.authority);
-//RS         println!("granted: {}", holds_text(&application.granted_effects));
-//RS         println!("denied: {}", holds_text(&application.denied_effects));
-//RS         println!("authority facts:");
-//RS         for declaration in jet_foundation::Authority::effect_declarations() {
-//RS             println!(
-//RS                 "  {}{}",
-//RS                 declaration.name,
-//RS                 if declaration.irreversible {
-//RS                     " (irreversible)"
-//RS                 } else {
-//RS                     ""
-//RS                 }
-//RS             );
-//RS         }
-//RS         for report in reports {
-//RS             println!(
-//RS                 "callable: {} @ {}:{}-{}",
-//RS                 report.view.key, report.view.source, report.view.span.start, report.view.span.end
-//RS             );
-//RS             println!("  declared row: {}", row_text(&report.declared));
-//RS             println!("  inferred row: {}", row_text(&report.inferred));
-//RS             println!(
-//RS                 "  inferred effects: {}",
-//RS                 holds_text(&report.inferred_effects)
-//RS             );
-//RS             println!("  verdict: {}", verdict_name(report.walk.verdict));
-//RS             if report.walk.denials.is_empty() {
-//RS                 println!("  denials: none");
-//RS             } else {
-//RS                 for denial in report.walk.denials {
-//RS                     println!(
-//RS                         "  denial: {} ({}) via {}",
-//RS                         denial.right,
-//RS                         verdict_name(denial.verdict),
-//RS                         if denial.chain.call_chain.is_empty() {
-//RS                             "none".to_string()
-//RS                         } else {
-//RS                             denial.chain.call_chain.join(" -> ")
-//RS                         }
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS const HARDENING_SURFACE_SCHEMA: &str = "jet.hardening.surface.v1";
-//RS const HARDENING_SURFACE_VERSION: i128 = 1;
-//RS const CAPABILITY_RELATION_SCHEMA: &str = "jet.capability.relation.v1";
-//RS const CAPABILITY_RELATION_VERSION: i128 = 1;
-//RS const CAPABILITY_RELATION_DISPOSITIONS: &[&str] = &[
-//RS     "planned",
-//RS     "implemented-unqualified",
-//RS     "passed",
-//RS     "failed",
-//RS     "stale",
-//RS     "unavailable",
-//RS     "unsupported",
-//RS     "owner-ratified-not-applicable",
-//RS ];
-//RS 
-//RS fn capability_status_field<'a>(value: &'a StatusValue, name: &str) -> Option<&'a StatusValue> {
-//RS     match value {
-//RS         StatusValue::Object(fields) => fields
-//RS             .iter()
-//RS             .find_map(|(field, value)| (field == name).then_some(value)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn capability_status_string(value: &StatusValue) -> Option<&str> {
-//RS     match value {
-//RS         StatusValue::String(value) => Some(value.as_str()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn capability_status_integer(value: &StatusValue) -> Option<i128> {
-//RS     match value {
-//RS         StatusValue::Integer(value) => Some(*value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn capability_status_bool(value: &StatusValue) -> Option<bool> {
-//RS     match value {
-//RS         StatusValue::Bool(value) => Some(*value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn capability_digest(value: &StatusValue) -> Option<&str> {
-//RS     let value = capability_status_string(value)?;
-//RS     let hex = value.strip_prefix("sha256:")?;
-//RS     (hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit()))
-//RS         .then_some(value)
-//RS }
-//RS 
-//RS fn capability_canonical_json(value: &StatusValue) -> Result<String, String> {
-//RS     fn encode(value: &StatusValue, root: bool) -> Result<String, String> {
-//RS         match value {
-//RS             StatusValue::Null => Ok("null".to_string()),
-//RS             StatusValue::Bool(value) => Ok(value.to_string()),
-//RS             StatusValue::Integer(value) => Ok(value.to_string()),
-//RS             StatusValue::Float(_) => {
-//RS                 Err("canonical capability metadata cannot contain floating-point numbers".into())
-//RS             }
-//RS             StatusValue::String(value) => Ok(format!("\"{}\"", json_escape(value))),
-//RS             StatusValue::Array(values) => Ok(format!(
-//RS                 "[{}]",
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|value| encode(value, false))
-//RS                     .collect::<Result<Vec<_>, _>>()?
-//RS                     .join(",")
-//RS             )),
-//RS             StatusValue::Object(fields) => {
-//RS                 let mut entries = fields.iter().collect::<Vec<_>>();
-//RS                 entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
-//RS                 if entries
-//RS                     .windows(2)
-//RS                     .any(|window| window[0].0 == window[1].0)
-//RS                 {
-//RS                     return Err("canonical capability metadata has duplicate object keys".into());
-//RS                 }
-//RS                 let entries = entries
-//RS                     .into_iter()
-//RS                     .filter(|(name, _)| !(root && *name == "content_digest"))
-//RS                     .map(|(name, value)| {
-//RS                         Ok(format!(
-//RS                             "\"{}\":{}",
-//RS                             json_escape(name),
-//RS                             encode(value, false)?
-//RS                         ))
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, String>>()?;
-//RS                 Ok(format!("{{{}}}", entries.join(",")))
-//RS             }
-//RS         }
-//RS     }
-//RS     encode(value, true)
-//RS }
-//RS 
-//RS fn validate_capability_content_digest(value: &StatusValue, label: &str) -> Result<(), String> {
-//RS     let actual = capability_status_field(value, "content_digest")
-//RS         .and_then(capability_digest)
-//RS         .ok_or_else(|| format!("{label} content_digest is missing or invalid"))?;
-//RS     let canonical = capability_canonical_json(value)?;
-//RS     let expected = format!("sha256:{}", jet::SHA256::sha256_hex(canonical.as_bytes()));
-//RS     if actual != expected {
-//RS         return Err(format!("{label} content_digest does not match canonical content"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_hardening_manifest(manifest: &StatusValue) -> Result<(), String> {
-//RS     let mut errors = Vec::new();
-//RS     if capability_status_field(manifest, "schema").and_then(capability_status_string)
-//RS         != Some(HARDENING_SURFACE_SCHEMA)
-//RS     {
-//RS         errors.push(format!("schema must be {HARDENING_SURFACE_SCHEMA}"));
-//RS     }
-//RS     if capability_status_field(manifest, "schema_version")
-//RS         .and_then(capability_status_integer)
-//RS         != Some(HARDENING_SURFACE_VERSION)
-//RS     {
-//RS         errors.push(format!("schema_version must be {HARDENING_SURFACE_VERSION}"));
-//RS     }
-//RS     if let Err(error) = validate_capability_content_digest(manifest, "hardening manifest") {
-//RS         errors.push(error);
-//RS     }
-//RS     let Some(snapshot) = capability_status_field(manifest, "source_snapshot") else {
-//RS         errors.push("source_snapshot is required".to_string());
-//RS         return Err(errors.join("; "));
-//RS     };
-//RS     if capability_status_field(snapshot, "algorithm").and_then(capability_status_string)
-//RS         != Some("sha256")
-//RS     {
-//RS         errors.push("source_snapshot algorithm must be sha256".to_string());
-//RS     }
-//RS     if capability_status_field(snapshot, "hash")
-//RS         .and_then(capability_digest)
-//RS         .is_none() {
-//RS         errors.push("source_snapshot hash is missing or invalid".to_string());
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(errors.join("; "))
-//RS     }
-//RS }
-//RS 
-//RS fn validate_capability_relation(
-//RS     manifest: &StatusValue,
-//RS     relation: &StatusValue,
-//RS ) -> Result<(), String> {
-//RS     let mut errors = Vec::new();
-//RS     if capability_status_field(relation, "schema").and_then(capability_status_string)
-//RS         != Some(CAPABILITY_RELATION_SCHEMA)
-//RS     {
-//RS         errors.push(format!("schema must be {CAPABILITY_RELATION_SCHEMA}"));
-//RS     }
-//RS     if capability_status_field(relation, "schema_version")
-//RS         .and_then(capability_status_integer)
-//RS         != Some(CAPABILITY_RELATION_VERSION)
-//RS     {
-//RS         errors.push(format!("schema_version must be {CAPABILITY_RELATION_VERSION}"));
-//RS     }
-//RS     if let Err(error) = validate_capability_content_digest(relation, "capability relation") {
-//RS         errors.push(error);
-//RS     }
-//RS     let relation_source = capability_status_field(relation, "source_snapshot_hash")
-//RS         .and_then(capability_digest);
-//RS     let manifest_source = capability_status_field(manifest, "source_snapshot")
-//RS         .and_then(|snapshot| capability_status_field(snapshot, "hash"))
-//RS         .and_then(capability_digest);
-//RS     if relation_source.is_none() {
-//RS         errors.push("source_snapshot_hash is missing or invalid".to_string());
-//RS     } else if relation_source != manifest_source {
-//RS         errors.push("source_snapshot_hash does not match the manifest".to_string());
-//RS     }
-//RS     if capability_status_field(relation, "revision_rule")
-//RS         .and_then(capability_status_string)
-//RS         .is_none_or(|value| value.trim().is_empty())
-//RS     {
-//RS         errors.push("revision_rule is missing or empty".to_string());
-//RS     }
-//RS 
-//RS     let empty: &[StatusValue] = &[];
-//RS     let identity_rows = match capability_status_field(relation, "identities") {
-//RS         Some(StatusValue::Array(values)) => values.as_slice(),
-//RS         _ => {
-//RS             errors.push("identities are required".to_string());
-//RS             empty
-//RS         }
-//RS     };
-//RS     let mut identity_modes = BTreeMap::<String, BTreeSet<String>>::new();
-//RS     for identity in identity_rows {
-//RS         let Some(identity_id) =
-//RS             capability_status_field(identity, "capability_id").and_then(capability_status_string)
-//RS         else {
-//RS             errors.push("identity capability_id is missing".to_string());
-//RS             continue;
-//RS         };
-//RS         if identity_id.trim().is_empty() {
-//RS             errors.push("identity capability_id is empty".to_string());
-//RS             continue;
-//RS         }
-//RS         if identity_modes.contains_key(identity_id) {
-//RS             errors.push(format!("duplicate identity: {identity_id}"));
-//RS         }
-//RS         let modes = match capability_status_field(identity, "applicable_modes") {
-//RS             Some(StatusValue::Array(values)) => values.as_slice(),
-//RS             _ => {
-//RS                 errors.push(format!("identity has no applicable modes: {identity_id}"));
-//RS                 &[]
-//RS             }
-//RS         };
-//RS         let mut mode_set = BTreeSet::new();
-//RS         for mode in modes {
-//RS             let Some(mode) = capability_status_string(mode) else {
-//RS                 errors.push(format!("identity mode is malformed: {identity_id}"));
-//RS                 continue;
-//RS             };
-//RS             if mode.trim().is_empty() || !mode_set.insert(mode.to_string()) {
-//RS                 errors.push(format!("identity mode is empty or duplicated: {identity_id}"));
-//RS             }
-//RS         }
-//RS         let source_identity = capability_status_field(identity, "source_identity");
-//RS         if capability_status_field(identity, "source_identity")
-//RS             .and_then(|value| capability_status_field(value, "path"))
-//RS             .and_then(capability_status_string)
-//RS             .is_none_or(|value| value.trim().is_empty())
-//RS             || source_identity
-//RS                 .and_then(|value| capability_status_field(value, "digest"))
-//RS                 .and_then(capability_digest)
-//RS             .is_none()
-//RS         {
-//RS             errors.push(format!("identity source is invalid: {identity_id}"));
-//RS         }
-//RS         identity_modes.insert(identity_id.to_string(), mode_set);
-//RS     }
-//RS 
-//RS     let row_rows = match capability_status_field(relation, "rows") {
-//RS         Some(StatusValue::Array(values)) => values.as_slice(),
-//RS         _ => {
-//RS             errors.push("rows are required".to_string());
-//RS             empty
-//RS         }
-//RS     };
-//RS     let mut row_ids = BTreeSet::new();
-//RS     let mut disposition_counts = BTreeMap::<String, usize>::new();
-//RS     let mut counted_rows = 0usize;
-//RS     for (index, row) in row_rows.iter().enumerate() {
-//RS         let label = format!("row#{index}");
-//RS         let Some(row_id) =
-//RS             capability_status_field(row, "row_id").and_then(capability_status_string)
-//RS         else {
-//RS             errors.push(format!("{label} row_id is missing"));
-//RS             continue;
-//RS         };
-//RS         if row_id.trim().is_empty() || !row_ids.insert(row_id.to_string()) {
-//RS             errors.push(format!("duplicate or empty row_id: {row_id}"));
-//RS         }
-//RS         let capability_id =
-//RS             capability_status_field(row, "capability_id").and_then(capability_status_string);
-//RS         let mode = capability_status_field(row, "mode").and_then(capability_status_string);
-//RS         if let (Some(capability_id), Some(mode)) = (capability_id, mode) {
-//RS             if row_id != format!("{capability_id}@{mode}") {
-//RS                 errors.push(format!("row identity is not canonical: {row_id}"));
-//RS             }
-//RS             match identity_modes.get(capability_id) {
-//RS                 Some(modes) if modes.contains(mode) => {}
-//RS                 Some(_) => errors.push(format!("row has an inapplicable mode: {row_id}")),
-//RS                 None => errors.push(format!("row has no identity: {row_id}")),
-//RS             }
-//RS         } else {
-//RS             errors.push(format!("row capability_id or mode is missing: {row_id}"));
-//RS         }
-//RS         let disposition =
-//RS             capability_status_field(row, "disposition").and_then(capability_status_string);
-//RS         if let Some(disposition) = disposition {
-//RS             if !CAPABILITY_RELATION_DISPOSITIONS.contains(&disposition) {
-//RS                 errors.push(format!("row has an invalid disposition: {row_id}"));
-//RS             }
-//RS             *disposition_counts
-//RS                 .entry(disposition.to_string())
-//RS                 .or_default() += 1;
-//RS             if capability_status_field(row, "status").and_then(capability_status_string)
-//RS                 != Some(disposition)
-//RS             {
-//RS                 errors.push(format!("row status contradicts disposition: {row_id}"));
-//RS             }
-//RS             if disposition != "passed"
-//RS                 && capability_status_field(row, "owner_link")
-//RS                     .and_then(capability_status_string)
-//RS                     .is_none_or(|value| value.trim().is_empty())
-//RS             {
-//RS                 errors.push(format!("non-pass row has no owner link: {row_id}"));
-//RS             }
-//RS             if disposition == "passed" {
-//RS                 let evidence_passed = capability_status_field(row, "evidence")
-//RS                     .and_then(|value| capability_status_field(value, "status"))
-//RS                     .and_then(capability_status_string)
-//RS                     == Some("passed");
-//RS                 let independent_oracle = capability_status_field(row, "oracle")
-//RS                     .and_then(|value| {
-//RS                         capability_status_field(value, "independent_expected_behavior")
-//RS                     })
-//RS                     .and_then(capability_status_bool)
-//RS                     == Some(true);
-//RS                 let value_consuming = capability_status_field(row, "observable")
-//RS                     .and_then(|value| capability_status_field(value, "value_consuming"))
-//RS                     .and_then(capability_status_bool)
-//RS                     == Some(true);
-//RS                 if !evidence_passed || !independent_oracle || !value_consuming {
-//RS                     errors.push(format!(
-//RS                         "passed row lacks evidence, independent oracle, or observable value: {row_id}"
-//RS                     ));
-//RS                 }
-//RS                 let exact_identity = capability_status_field(row, "identity")
-//RS                     .and_then(|value| capability_status_field(value, "candidate"))
-//RS                     .and_then(|value| capability_status_field(value, "status"))
-//RS                     .and_then(capability_status_string)
-//RS                     == Some("available");
-//RS                 let concrete_identity = ["compiler_identity", "tool_identity", "target_identity"]
-//RS                     .iter()
-//RS                     .all(|field| matches!(capability_status_field(row, field), Some(StatusValue::Object(_))));
-//RS                 let candidate_available = capability_status_field(row, "candidate_identity")
-//RS                     .and_then(|value| capability_status_field(value, "status"))
-//RS                     .and_then(capability_status_string)
-//RS                     == Some("available");
-//RS                 if !exact_identity || !concrete_identity || !candidate_available {
-//RS                     errors.push(format!("passed row lacks exact candidate identity: {row_id}"));
-//RS                 }
-//RS                 if capability_status_field(row, "candidate_identity")
-//RS                     .and_then(|value| capability_status_field(value, "status"))
-//RS                     .and_then(capability_status_string)
-//RS                     == Some("stale")
-//RS                 {
-//RS                     errors.push(format!("stale candidate is marked passed: {row_id}"));
-//RS                 }
-//RS             }
-//RS             if disposition == "owner-ratified-not-applicable" {
-//RS                 let ratified = capability_status_field(row, "exclusion").is_some_and(|value| {
-//RS                     ["reason", "owner", "decision"].iter().all(|field| {
-//RS                         capability_status_field(value, field)
-//RS                             .and_then(capability_status_string)
-//RS                             .is_some_and(|value| !value.trim().is_empty())
-//RS                     })
-//RS                 });
-//RS                 if !ratified {
-//RS                     errors.push(format!("capability exclusion is not owner-ratified: {row_id}"));
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             errors.push(format!("row disposition is missing: {row_id}"));
-//RS         }
-//RS         for field in [
-//RS             "contract",
-//RS             "route",
-//RS             "observable",
-//RS             "oracle",
-//RS             "evidence",
-//RS             "identity",
-//RS             "owner",
-//RS             "source_identity",
-//RS             "candidate_identity",
-//RS         ] {
-//RS             if !matches!(capability_status_field(row, field), Some(StatusValue::Object(_))) {
-//RS                 errors.push(format!("row {field} is missing: {row_id}"));
-//RS             }
-//RS         }
-//RS         if capability_status_field(row, "counted").and_then(capability_status_bool) != Some(true) {
-//RS             errors.push(format!("row is not counted: {row_id}"));
-//RS         } else {
-//RS             counted_rows += 1;
-//RS         }
-//RS     }
-//RS     for (identity, modes) in &identity_modes {
-//RS         for mode in modes {
-//RS             let row_id = format!("{identity}@{mode}");
-//RS             if !row_ids.contains(&row_id) {
-//RS                 errors.push(format!("missing applicable mode row: {row_id}"));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let denominator = capability_status_field(relation, "denominator");
-//RS     let Some(denominator) = denominator.filter(|value| matches!(value, StatusValue::Object(_)))
-//RS     else {
-//RS         errors.push("denominator is required".to_string());
-//RS         return if errors.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(errors.join("; "))
-//RS         };
-//RS     };
-//RS     let integer_field = |value: Option<&StatusValue>| {
-//RS         value
-//RS             .and_then(capability_status_integer)
-//RS             .and_then(|value| usize::try_from(value).ok())
-//RS     };
-//RS     if integer_field(capability_status_field(denominator, "row_count")) != Some(row_rows.len()) {
-//RS         errors.push("denominator row_count is stale".to_string());
-//RS     }
-//RS     if integer_field(capability_status_field(denominator, "counted_rows")) != Some(counted_rows) {
-//RS         errors.push("denominator counted_rows is stale".to_string());
-//RS     }
-//RS     let denominator_ids = match capability_status_field(denominator, "identity_ids") {
-//RS         Some(StatusValue::Array(values)) => {
-//RS             let mut ids = BTreeSet::new();
-//RS             for value in values {
-//RS                 if let Some(value) = capability_status_string(value) {
-//RS                     if !ids.insert(value.to_string()) {
-//RS                         errors.push("denominator identity_ids contain duplicates".to_string());
-//RS                     }
-//RS                 } else {
-//RS                     errors.push("denominator identity_ids contain a malformed value".to_string());
-//RS                 }
-//RS             }
-//RS             Some(ids)
-//RS         }
-//RS         _ => {
-//RS             errors.push("denominator identity_ids are required".to_string());
-//RS             None
-//RS         }
-//RS     };
-//RS     if integer_field(capability_status_field(denominator, "identity_count"))
-//RS         != Some(identity_modes.len())
-//RS         || denominator_ids.as_ref().is_some_and(|ids| {
-//RS             ids.len() != identity_modes.len() || ids.iter().any(|id| !identity_modes.contains_key(id))
-//RS         })
-//RS     {
-//RS         errors.push("denominator identities are stale".to_string());
-//RS     }
-//RS     let disposition_values = capability_status_field(denominator, "dispositions");
-//RS     if let Some(StatusValue::Object(fields)) = disposition_values {
-//RS         for (name, _) in fields.iter() {
-//RS             if !CAPABILITY_RELATION_DISPOSITIONS.contains(&name) {
-//RS                 errors.push(format!("denominator has unknown disposition: {name}"));
-//RS             }
-//RS         }
-//RS         for disposition in CAPABILITY_RELATION_DISPOSITIONS {
-//RS             let actual = disposition_values
-//RS                 .and_then(|value| capability_status_field(value, disposition))
-//RS                 .and_then(capability_status_integer)
-//RS                 .and_then(|value| usize::try_from(value).ok());
-//RS             if actual != Some(*disposition_counts.get(*disposition).unwrap_or(&0)) {
-//RS                 errors.push(format!("denominator disposition count is stale: {disposition}"));
-//RS             }
-//RS         }
-//RS     } else {
-//RS         errors.push("denominator dispositions are required".to_string());
-//RS     }
-//RS 
-//RS     let consumers = capability_status_field(relation, "consumers");
-//RS     for consumer in ["inspect", "hardening", "learner", "release"] {
-//RS         let Some(consumer_value) = consumers.and_then(|value| capability_status_field(value, consumer))
-//RS         else {
-//RS             errors.push(format!("consumer metadata is missing: {consumer}"));
-//RS             continue;
-//RS         };
-//RS         if capability_status_field(consumer_value, "relation")
-//RS             .and_then(capability_status_string)
-//RS             != Some("manifest.capability_relation.rows")
-//RS         {
-//RS             errors.push(format!("consumer relation is not canonical: {consumer}"));
-//RS         }
-//RS         if consumer == "release"
-//RS             && capability_status_field(consumer_value, "candidate")
-//RS                 .and_then(capability_status_string)
-//RS                 != Some("row.candidate_identity")
-//RS         {
-//RS             errors.push("release consumer candidate is not canonical".to_string());
-//RS         }
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(errors.join("; "))
-//RS     }
-//RS }
-//RS 
-//RS fn capability_relation_status(value: &StatusValue) -> &str {
-//RS     capability_status_field(value, "status")
-//RS         .and_then(capability_status_string)
-//RS         .unwrap_or("unavailable")
-//RS }
-//RS 
-//RS fn capability_relation_has_candidate_evidence(value: &StatusValue) -> bool {
-//RS     let Some(StatusValue::Array(rows)) = capability_status_field(value, "rows") else {
-//RS         return false;
-//RS     };
-//RS     !rows.is_empty()
-//RS         && rows.iter().all(|row| {
-//RS             if capability_status_field(row, "counted").and_then(capability_status_bool)
-//RS                 != Some(true)
-//RS             {
-//RS                 return false;
-//RS             }
-//RS             match capability_status_field(row, "disposition").and_then(capability_status_string) {
-//RS                 Some("owner-ratified-not-applicable") => true,
-//RS                 Some("passed") => {
-//RS                     capability_status_field(row, "evidence")
-//RS                         .and_then(|value| capability_status_field(value, "status"))
-//RS                         .and_then(capability_status_string)
-//RS                         == Some("passed")
-//RS                         && capability_status_field(row, "candidate_identity")
-//RS                             .and_then(|value| capability_status_field(value, "status"))
-//RS                             .and_then(capability_status_string)
-//RS                             == Some("available")
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         })
-//RS }
-//RS pub(crate) fn capability_relation_projection(root: &Path) -> Result<StatusValue, String> {
-//RS     let path = root.join(".jet/hardening-manifest.json");
-//RS     let unavailable = |reason: String| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("schema", CAPABILITY_RELATION_SCHEMA)
-//RS                 .with("status", "unavailable")
-//RS                 .with("relation", "manifest.capability_relation.rows")
-//RS                 .with("path", path.display().to_string())
-//RS                 .with("reason", reason)
-//RS                 .with("rows", StatusValue::array(Vec::<StatusValue>::new())),
-//RS         )
-//RS     };
-//RS     let raw = match fs::read_to_string(&path) {
-//RS         Ok(raw) => raw,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             return Ok(unavailable(format!(
-//RS                 "capability relation source `{}` is absent",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         Err(error) => {
-//RS             return Err(format!(
-//RS                 "can't read canonical capability relation source `{}`: {error}",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS     };
-//RS     let manifest = StatusValue::parse(&raw)
-//RS         .map_err(|error| format!("can't parse canonical manifest `{}`: {error}", path.display()))?;
-//RS     validate_hardening_manifest(&manifest)
-//RS         .map_err(|error| format!("canonical manifest `{}` is invalid: {error}", path.display()))?;
-//RS     let relation = match capability_status_field(&manifest, "capability_relation") {
-//RS         Some(StatusValue::Object(_)) => capability_status_field(&manifest, "capability_relation")
-//RS             .expect("capability relation field was checked above"),
-//RS         Some(_) => {
-//RS             return Err(format!(
-//RS                 "canonical manifest `{}` has a non-object capability_relation",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         None => {
-//RS             return Ok(unavailable(
-//RS                 "manifest has no capability_relation evidence".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     validate_capability_relation(&manifest, relation).map_err(|error| {
-//RS         format!(
-//RS             "canonical capability relation `{}` is invalid: {error}",
-//RS             path.display()
-//RS         )
-//RS     })?;
-//RS     let StatusValue::Object(relation_fields) = relation else {
-//RS         unreachable!("capability relation object was checked above")
-//RS     };
-//RS     let mut projection = StatusFields::new();
-//RS     for (name, value) in relation_fields.iter() {
-//RS         if matches!(name, "status" | "relation" | "path") {
-//RS             continue;
-//RS         }
-//RS         projection
-//RS             .insert(name.to_string(), value.clone())
-//RS             .expect("manifest capability relation fields must be unique");
-//RS     }
-//RS     projection
-//RS         .insert("status", "available")
-//RS         .expect("capability relation status field must be unique");
-//RS     projection
-//RS         .insert("relation", "manifest.capability_relation.rows")
-//RS         .expect("capability relation route field must be unique");
-//RS     projection
-//RS         .insert("path", path.display().to_string())
-//RS         .expect("capability relation path field must be unique");
-//RS     Ok(StatusValue::object(projection))
-//RS }
-//RS 
-//RS /// `inspect claims --json` consumes this exact manifest relation without
-//RS /// rebuilding capability identities, dispositions, or evidence. Evidence
-//RS /// reports remain diagnostic observations; they are not release truth.
-//RS const RELEASE_CLAIM_SOURCE: &str = "manifest.capability_relation.rows";
-//RS 
-//RS fn release_claim_rows(relation: &StatusValue) -> Vec<StatusValue> {
-//RS     let Some(StatusValue::Array(rows)) = capability_status_field(relation, "rows") else {
-//RS         return Vec::new();
-//RS     };
-//RS     rows.iter()
-//RS         .filter_map(|row| {
-//RS             let row_id = capability_status_field(row, "row_id")
-//RS                 .and_then(capability_status_string)?;
-//RS             let capability = capability_status_field(row, "capability_id")
-//RS                 .and_then(capability_status_string)?;
-//RS             let mode = capability_status_field(row, "mode")
-//RS                 .and_then(capability_status_string)?;
-//RS             let disposition = capability_status_field(row, "disposition")
-//RS                 .and_then(capability_status_string)?;
-//RS             let status = capability_status_field(row, "status")
-//RS                 .and_then(capability_status_string)
-//RS                 .unwrap_or(disposition);
-//RS             let candidate = capability_status_field(row, "candidate_identity")
-//RS                 .cloned()
-//RS                 .unwrap_or(StatusValue::Null);
-//RS             Some(StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("claim", row_id)
-//RS                     .with("capability", capability)
-//RS                     .with("mode", mode)
-//RS                     .with("disposition", disposition)
-//RS                     .with("status", status)
-//RS                     .with(
-//RS                         "counted",
-//RS                         capability_status_field(row, "counted")
-//RS                             .and_then(capability_status_bool)
-//RS                             .unwrap_or(false),
-//RS                     )
-//RS                     .with(
-//RS                         "owner_link",
-//RS                         capability_status_field(row, "owner_link")
-//RS                             .cloned()
-//RS                             .unwrap_or(StatusValue::Null),
-//RS                     )
-//RS                     .with("candidate_identity", candidate),
-//RS             ))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn run_claims(file: &str, json: bool) {
-//RS     let source_path = Path::new(file);
-//RS     let base = source_path
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or_else(|| Path::new("."));
-//RS     let root = jet::Loader::find_package_root_checked(base)
-//RS         .ok()
-//RS         .flatten()
-//RS         .unwrap_or_else(|| base.to_path_buf());
-//RS     let capability_relation = capability_relation_projection(&root).unwrap_or_else(|error| {
-//RS         crate::cli_error!(
-//RS             @fix "E2105",
-//RS             error,
-//RS             "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims"
-//RS         );
-//RS         exit(jet::ExitCodes::USER_ERROR);
-//RS     });
-//RS     let release = jet::Manifest::current_release_status();
-//RS     let claims = release_claim_rows(&capability_relation);
-//RS     let relation_ready = capability_relation_status(&capability_relation) == "available"
-//RS         && capability_relation_has_candidate_evidence(&capability_relation);
-//RS     // A complete relation is necessary but never sufficient while the owner
-//RS     // still identifies the toolchain as prerelease and the 1.0 policy future.
-//RS     let release_ready = release.policy_active()
-//RS         && release.readiness() == "ready"
-//RS         && relation_ready;
-//RS 
-//RS     if json {
-//RS         let fields = StatusFields::new()
-//RS             .with("file", file)
-//RS             .with("source", RELEASE_CLAIM_SOURCE)
-//RS             .with(
-//RS                 "release",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("version", jet::Manifest::COMPILER_VERSION)
-//RS                         .with("status", release.channel())
-//RS                         .with("disposition", release.disposition())
-//RS                         .with("readiness", release.readiness())
-//RS                         .with("compatibility_policy", release.policy())
-//RS                         .with(
-//RS                             "compatibility_policy_disposition",
-//RS                             release.policy_disposition(),
-//RS                         )
-//RS                         .with("compatibility_policy_active", release.policy_active()),
-//RS                 ),
-//RS             )
-//RS             .with("release_ready", release_ready)
-//RS             .with("capability_relation", capability_relation.clone())
-//RS             .with("claims", StatusValue::array(claims.clone()));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("inspect.claims", release_ready)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         println!("claims");
-//RS         println!(
-//RS             "release: {} (disposition: {}; readiness: {}; 1.0 compatibility policy: {} [{}; {}])",
-//RS             release.channel(),
-//RS             release.disposition(),
-//RS             release.readiness(),
-//RS             release.policy(),
-//RS             release.policy_disposition(),
-//RS             if release.policy_active() {
-//RS                 "active"
-//RS             } else {
-//RS                 "not active"
-//RS             }
-//RS         );
-//RS         println!("claim source: {RELEASE_CLAIM_SOURCE}");
-//RS         println!("release ready: {}", if release_ready { "yes" } else { "no" });
-//RS         println!(
-//RS             "capability relation: {}",
-//RS             capability_relation_status(&capability_relation)
-//RS         );
-//RS         if claims.is_empty() {
-//RS             println!("none");
-//RS         } else {
-//RS             for claim in claims {
-//RS                 let claim = match claim {
-//RS                     StatusValue::Object(fields) => fields,
-//RS                     _ => continue,
-//RS                 };
-//RS                 let field = |name: &str| {
-//RS                     capability_status_field(&StatusValue::Object(claim.clone()), name)
-//RS                         .and_then(capability_status_string)
-//RS                         .unwrap_or("unknown")
-//RS                         .to_string()
-//RS                 };
-//RS                 println!(
-//RS                     "{} {} {}",
-//RS                     field("claim"),
-//RS                     field("mode"),
-//RS                     field("disposition")
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn plain_number(name: &str) -> bool {
-//RS     matches!(name, "Int" | "Float" | "Decimal")
-//RS }
-//RS 
-//RS fn operator_symbol(trait_name: &str) -> Option<&'static str> {
-//RS     match trait_name {
-//RS         "Add" => Some("+"),
-//RS         "Sub" => Some("-"),
-//RS         "Mul" => Some("*"),
-//RS         "Div" => Some("/"),
-//RS         _ => None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0693 Source/CmdInspect.rs:4041-5805
+// Private continuation of canonical Cli.Inspect.Projection.
+use core.files as fs
+use core.files.path.[OSPath]
+use core.sys as env
+use jet.[CLI, DevServer, RecordIndex, AST, Diagnostics, ExitCodes]
+use jet_foundation.[StatusValue, StatusFields, StatusEnvelope, CanonicalJson]
+use jet_foundation.sema.[RightsRow, RightsWalk]
+use jet_foundation.Authority.[Holds]
+use ProveReplay.[ReplayAuthority, open_named_replay]
 
+// Rust: Source/CmdInspect.rs:4041
+fn inspect_entry_path(scope: CLI.InspectScope) -> String {
+    if scope == {
+        .Target(target) -> {
+            if !fs.is_dir(target) -> return ~target
+            root :: require_manifest_root(OSPath.of(target), "error: no package.jet found for this inspect target")
+            return find_project_entry(root).to_string_lossy()
+        }
+        .Package | .Live(_) | .Replay(_) -> {
+            // GATE #4494: real process cwd.
+            cwd :: env.current_dir() ?? OSPath.of(".")
+            root :: require_manifest_root(cwd, "error: no package.jet found — run inspect inside a project")
+            return find_project_entry(root).to_string_lossy()
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:4068
+fn run_decisions_live(pid: U32, mode: OutputMode) -> {
+    projection :: DevServer.LiveInspect.read_plane(pid, "decisions") ?? {
+        cli_error_fix("E2105", err, "start the program with --observe, then run `jet inspect decisions --live {pid}`")
+        env.exit(ExitCodes.USER_ERROR) // GATE #4494
+    }
+    has_ledger :: projection.decision_ledger != None
+    ledger :: projection.decision_ledger ?? {
+        identity :: MirDecisionIdentity{source: ~projection.source_id, configuration: ~projection.build_id, profile: "live", target: ~projection.world_id, implementation: ~projection.protocol, artifact: "pid:{pid}", run: ~projection.revision}
+        MirDecisionLedger.from_rows(identity, [MirDecisionRow]{MirDecisionRow.new(MirDecisionKind.Tier, MirDecisionDisposition.Unavailable, None, "", Diagnostics.Span.new(0, 0), "live-decision-ledger", "the live runtime produced no compiler decision ledger for this run", "live.inspect", "runtime-snapshot")})
+    }
+    record_status :: if has_ledger -> "current" else -> "unavailable"
+    if mode.json {
+        rows := [StatusValue]{}
+        loop row in ledger.rows -> &rows.push(decision_row_value(row))
+        fields :: StatusFields.new().with("scope", "live").with("pid", projection.pid).with("protocol", projection.protocol).with("session_id", projection.session_id).with("source_id", projection.source_id).with("build_id", projection.build_id).with("revision", projection.revision).with("world_id", projection.world_id).with("record_status", record_status).with("retention", "bounded").with("redaction", "transport-safe").with("rows", StatusValue.array(^rows)).with("kinds", decision_kind_status_value(ledger.rows))
+        print("{render_status(\"inspect.decisions\", true, fields)}")
+        return
+    }
+    text := String.new()
+    &text.push_str("decisions: scope=live pid={projection.pid} source={projection.source_id} build={projection.build_id} revision={projection.revision} world={projection.world_id} record_status={record_status} retention=bounded redaction=transport-safe\n")
+    loop row in ledger.rows {
+        derivation_ref :: if row.derivation == .Val(reference) -> reference.id else -> "unavailable"
+        disposition :: if row.derivation_disposition == .Val(value) -> value.as_str() else -> "unknown"
+        &text.push_str("decision kind={row.kind.as_str()} disposition={row.disposition.as_str()} derivation_disposition={disposition} derivation_ref={derivation_ref} reason={row.reason} producer={row.producer}\n")
+    }
+    print_raw(text)
+}
+
+// Rust: Source/CmdInspect.rs:4163
+fn run_inspect_live(plane: CLI.InspectPlane, pid: U32, mode: OutputMode) -> {
+    if plane == CLI.InspectPlane.Decisions {
+        run_decisions_live(pid, mode)
+        return
+    }
+    if mode.json {
+        projection :: DevServer.LiveInspect.read_plane(pid, plane.name()) ?? {
+            cli_error_fix("E2105", err, "start the program with --observe, then run `jet inspect {plane.name()} --live {pid}`")
+            env.exit(ExitCodes.USER_ERROR) // GATE #4494
+        }
+        values := [StatusValue]{}
+        loop value in projection.values {
+            rendered :: if value.rendered_value == .Val(text) -> StatusValue.String(~text) else -> StatusValue.Null
+            &values.push(StatusValue.object(StatusFields.new().with("value_id", value.value_id).with("type_identity", value.type_identity).with("disposition", value.disposition).with("reason", value.reason).with("rendered_value", ^rendered)))
+        }
+        shapes := [StatusValue]{}
+        loop shape in projection.shapes {
+            ids := [StatusValue]{}
+            loop id in shape.value_ids -> &ids.push(StatusValue.String(~id))
+            &shapes.push(StatusValue.object(StatusFields.new().with("type_identity", shape.type_identity).with("value_ids", StatusValue.array(^ids))))
+        }
+        fields :: StatusFields.new().with("plane", projection.plane).with("scope", projection.scope).with("pid", projection.pid).with("protocol", projection.protocol).with("session_id", projection.session_id).with("source_id", projection.source_id).with("build_id", projection.build_id).with("revision", projection.revision).with("world_id", projection.world_id).with("values", StatusValue.array(^values)).with("shapes", StatusValue.array(^shapes))
+        print("{render_status(\"inspect.{plane.name()}\", true, fields)}")
+    } else {
+        snapshot :: DevServer.LiveInspect.read(pid) ?? {
+            cli_error_fix("E2105", err, "start the program with --observe, then run `jet inspect {plane.name()} --live {pid}`")
+            env.exit(ExitCodes.USER_ERROR) // GATE #4494
+        }
+        print_raw(DevServer.LiveInspect.render(snapshot))
+    }
+}
+
+// Rust: Source/CmdInspect.rs:4243
+fn indexed_decision_record_state(artifact: String) -> (status: String, retention: String, redaction: String) {
+    index :: RecordIndex.RecordIndex.load_for_project(OSPath.of(".")) ?? return (status: "unavailable", retention: "unknown", redaction: "unknown")
+    requested_path :: OSPath.of(artifact)
+    requested_name :: requested_path.file_name().and_then((name) -> name.to_str())
+    matches_artifact :: (entry: RecordIndex.RecordIndexEntry) -> entry.artifact_id == artifact || entry.path == requested_path || (if requested_name == .Val(name) -> entry.path.file_name().and_then((value) -> value.to_str()) == Val(name) else -> false)
+    loop entry in index.query(false) {
+        if entry.kind == RecordIndex.RecordKind.Replay && matches_artifact(entry) -> return (status: "current", retention: if entry.saved -> "saved" else -> "bounded", redaction: entry.capture.as_str())
+    }
+    loop entry in index.query(true) {
+        if entry.kind == RecordIndex.RecordKind.Replay && matches_artifact(entry) -> return (status: "redacted", retention: "retained", redaction: "sensitive")
+    }
+    (status: "unavailable", retention: "unknown", redaction: "unknown")
+}
+
+// Rust: Source/CmdInspect.rs:4276
+fn run_decisions_replay(artifact: String, authority: ReplayAuthority, mode: OutputMode) -> {
+    has_ledger :: authority.decision_ledger != None
+    ledger :: authority.decision_ledger ?? {
+        identity :: MirDecisionIdentity{source: "replay-artifact", configuration: "replay-receipt", profile: "replay", target: "replay", implementation: "mir-v1", artifact: ~artifact, run: "replay:{artifact}"}
+        MirDecisionLedger.from_rows(identity, [MirDecisionRow]{MirDecisionRow.new(MirDecisionKind.Tier, MirDecisionDisposition.Unavailable, None, "", Diagnostics.Span.new(0, 0), "replay-decision-ledger", "the replay artifact has no retained compiler decision section", "replay.inspect", "replay-receipt")})
+    }
+    indexed :: indexed_decision_record_state(artifact)
+    record_status :: if has_ledger -> "current" else -> indexed.status
+    if mode.json {
+        rows := [StatusValue]{}
+        loop row in ledger.rows -> &rows.push(decision_row_value(row))
+        fields :: StatusFields.new().with("plane", "decisions").with("scope", "replay").with("artifact", artifact).with("expected_outcome", authority.expected_outcome).with("expected_status", authority.expected_status).with("record_status", record_status).with("retention", indexed.retention).with("redaction", indexed.redaction).with("rows", StatusValue.array(^rows)).with("kinds", decision_kind_status_value(ledger.rows))
+        print("{StatusEnvelope.new(\"inspect.decisions\", true).with_fields(fields).json()}")
+    } else {
+        print("decisions replay")
+        print("artifact: {artifact}")
+        print("record_status: {record_status} retention: {indexed.retention} redaction: {indexed.redaction}")
+        print("expected: {authority.expected_outcome} ({authority.expected_status})")
+        loop row in ledger.rows {
+            reference :: if row.derivation == .Val(value) -> value.id else -> "unavailable"
+            disposition :: if row.derivation_disposition == .Val(value) -> value.as_str() else -> "unknown"
+            print("decision kind={row.kind.as_str()} disposition={row.disposition.as_str()} derivation_disposition={disposition} derivation_ref={reference} reason={row.reason} producer={row.producer}")
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:4363
+fn run_inspect_replay(plane: CLI.InspectPlane, artifact: String, profile: String, setting_overrides: [String:String], mode: OutputMode) -> {
+    file :: inspect_entry_path(CLI.InspectScope.Replay(~artifact))
+    authority :: open_named_replay(file, artifact, profile, setting_overrides, mode.json) ?? env.exit(err) // GATE #4494
+    if plane == CLI.InspectPlane.Decisions {
+        run_decisions_replay(artifact, authority, mode)
+        return
+    }
+    acts := [StatusValue]{}
+    values := [StatusValue]{}
+    shape_values := [String:[String:Bool]]{}
+    loop act in authority.recorded_run.acts {
+        locals := [StatusValue]{}
+        loop local in act.locals {
+            &locals.push(StatusValue.object(StatusFields.new().with("name", local.name).with("type_name", local.type_name).with("value", local.value)))
+            &values.push(StatusValue.object(StatusFields.new().with("value_id", local.name).with("type_identity", local.type_name).with("disposition", "captured").with("reason", "").with("rendered_value", local.value)))
+            if !shape_values.has_key(local.type_name) -> shape_values[~local.type_name] = [String:Bool]{}
+            shape_values[local.type_name][~local.name] = true
+        }
+        &acts.push(StatusValue.object(StatusFields.new().with("sequence", act.sequence).with("function", act.function).with("line", act.line).with("locals", StatusValue.array(^locals))))
+    }
+    shapes := [StatusValue]{}
+    types := shape_values.keys().to_list()
+    &types.sort()
+    loop type_identity in types {
+        ids := shape_values[type_identity].keys().to_list()
+        &ids.sort()
+        rows := [StatusValue]{}
+        loop id in ids -> &rows.push(StatusValue.String(~id))
+        &shapes.push(StatusValue.object(StatusFields.new().with("type_identity", type_identity).with("value_ids", StatusValue.array(^rows))))
+    }
+    if mode.json {
+        fields :: StatusFields.new().with("plane", plane.name()).with("scope", "replay").with("artifact", artifact).with("expected_outcome", authority.expected_outcome).with("expected_status", authority.expected_status).with("acts", StatusValue.array(^acts)).with("values", StatusValue.array(^values)).with("shapes", StatusValue.array(^shapes))
+        print("{StatusEnvelope.new(\"inspect.{plane.name()}\", true).with_fields(fields).json()}")
+    } else {
+        print("{plane.name()} replay")
+        print("artifact: {artifact}")
+        print("expected: {authority.expected_outcome} ({authority.expected_status})")
+        loop act in authority.recorded_run.acts {
+            print("  #{act.sequence} {act.function}:{act.line}")
+            loop local in act.locals -> print("    {local.name}: {local.type_name} = {local.value}")
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:4470
+fn run_rights(projection: CheckProjection, scope: CheckScope, target: String, json: Bool) -> {
+    // Rust: Source/CmdInspect.rs:4472
+    struct CallableView {
+        key: String, name: String, source: String, span: Diagnostics.Span
+        declared_effects: [String]?
+        is_pure: Bool, is_comptime: Bool, is_replayable: Bool
+        inferred_seed: String?
+    }
+    // Rust: Source/CmdInspect.rs:4484
+    struct CallableReport {
+        view: CallableView, declared: RightsRow, inferred: RightsRow
+        inferred_effects: Holds, direct_effects: Holds
+        callees: [String], maximal: Bool, walk: RightsWalk
+    }
+    // Rust: Source/CmdInspect.rs:4495
+    fn add_func(out: &[CallableView], alias: String, namespace: String, source: String, owner: String?, function: AST.Func) -> {
+        identity :: if owner == .Val(name) -> "{namespace}{name}::{function.name}" else -> "{namespace}{function.name}"
+        effects := [String]?{None}
+        if function.declared_effects == .Val(declared) {
+            names := [String]{}
+            loop pair in declared -> &names.push(~pair.0)
+            effects = Val(^names)
+        }
+        &out.push(CallableView{key: "{alias}::{identity}", name: ~function.name, source: ~source, span: function.span, declared_effects: ^effects, is_pure: function.is_pure, is_comptime: function.is_comptime, is_replayable: function.is_replayable, inferred_seed: None})
+    }
+    // Rust: Source/CmdInspect.rs:4522
+    fn add_trait_method(out: &[CallableView], alias: String, namespace: String, source: String, trait_name: String, method: AST.TraitMethodSig) -> {
+        identity :: "{namespace}{trait_name}::{method.name}"
+        effects := [String]?{None}
+        if method.declared_effects == .Val(declared) {
+            names := [String]{}
+            loop pair in declared -> &names.push(~pair.0)
+            effects = Val(^names)
+        }
+        &out.push(CallableView{key: "{alias}::{identity}", name: ~method.name, source: ~source, span: method.span, declared_effects: ^effects, is_pure: method.is_pure, is_comptime: false, is_replayable: false, inferred_seed: None})
+    }
+    // Rust: Source/CmdInspect.rs:4547
+    fn add_extern(out: &[CallableView], alias: String, namespace: String, source: String, function: AST.ExternFn) -> {
+        &out.push(CallableView{key: "{alias}::{namespace}{function.name}", name: ~function.name, source: ~source, span: function.span, declared_effects: None, is_pure: false, is_comptime: false, is_replayable: false, inferred_seed: Val(function.effect_root ?? "FFI")})
+    }
+    // Rust: Source/CmdInspect.rs:4572
+    fn collect_items(items: [AST.Item], alias: String, namespace: String, source: String, out: &[CallableView]) -> {
+        loop item in items {
+            if item == {
+                .Func(function) -> add_func(&out, alias, namespace, source, None, function)
+                .Impl(definition) -> {
+                    loop method in definition.methods -> add_func(&out, alias, namespace, source, Val(definition.type_name), method)
+                }
+                .Struct(definition) -> {
+                    loop method in definition.methods -> add_func(&out, alias, namespace, source, Val(definition.name), method)
+                    loop block in definition.trait_impls {
+                        loop method in block.methods -> add_func(&out, alias, namespace, source, Val(definition.name), method)
+                    }
+                }
+                .Enum(definition) -> {
+                    loop method in definition.methods -> add_func(&out, alias, namespace, source, Val(definition.name), method)
+                    loop block in definition.trait_impls {
+                        loop method in block.methods -> add_func(&out, alias, namespace, source, Val(definition.name), method)
+                    }
+                }
+                .Trait(definition) -> {
+                    loop method in definition.methods -> add_trait_method(&out, alias, namespace, source, definition.name, method)
+                }
+                .ExternRust(block) -> {
+                    loop function in block.functions -> add_extern(&out, alias, namespace, source, function)
+                }
+                .CodeModule(module) -> {
+                    if module.body == .Val(body) -> collect_items(body, alias, "{namespace}{module.name}__", source, &out)
+                }
+                .GenericModule(module) -> collect_items(module.body, alias, "{namespace}{module.name}__", source, &out)
+                else -> {}
+            }
+        }
+    }
+    // Rust: Source/CmdInspect.rs:4668
+    fn holds_value(holds: Holds) -> StatusValue {
+        values := [StatusValue]{}
+        loop name in holds.iter() -> &values.push(StatusValue.String(~name))
+        StatusValue.array(^values)
+    }
+    // Rust: Source/CmdInspect.rs:4672
+    fn holds_text(holds: Holds) -> String { holds.iter().to_list().join(", ") }
+    // Rust: Source/CmdInspect.rs:4676
+    fn verdict_name(verdict: jet_foundation.Authority.Verdict) -> String {
+        if verdict == { .Allowed -> "allowed"; .Denied -> "denied"; .Missing -> "missing" }
+    }
+    // Rust: Source/CmdInspect.rs:4684
+    fn span_value(source: String, start: Int, end: Int) -> StatusValue {
+        StatusValue.object(StatusFields.new().with("source", source).with("start", start).with("end", end))
+    }
+    // Rust: Source/CmdInspect.rs:4693
+    fn frame_value(frame: jet_foundation.sema.ScopeFrame) -> StatusValue {
+        StatusValue.object(StatusFields.new().with("scope", frame.scope.name()).with("name", frame.name).with("grants", holds_value(frame.grants)).with("authority", StatusValue.object(StatusFields.new().with("source", frame.provenance.source).with("reason", frame.provenance.reason))))
+    }
+    // Rust: Source/CmdInspect.rs:4710
+    fn row_value(row: RightsRow) -> StatusValue {
+        allow :: if row.allow == .Val(value) -> holds_value(value) else -> StatusValue.Null
+        StatusValue.object(StatusFields.new().with("kind", row.kind.name()).with("allow", ^allow).with("deny", holds_value(row.deny)).with("provenance", StatusValue.object(StatusFields.new().with("source", row.provenance.source).with("reason", row.provenance.reason))))
+    }
+    // Rust: Source/CmdInspect.rs:4732
+    fn row_text(row: RightsRow) -> String {
+        allow :: if row.allow == .Val(value) -> holds_text(value) else -> "unbounded"
+        "kind={row.kind.name()} allow=[{allow}] deny=[{holds_text(row.deny)}]"
+    }
+    // Rust: Source/CmdInspect.rs:4746
+    fn declared_row(callable: CallableView) -> RightsRow {
+        reason :: if {
+            callable.is_comptime -> "comptime declaration"
+            callable.is_pure -> "pure declaration"
+            callable.is_replayable -> "replayable declaration"
+            callable.declared_effects != None -> "declared effect row"
+            else -> "inferred callable declaration"
+        }
+        provenance :: jet_foundation.sema.RightsProvenance.new(~callable.key, reason)
+        if callable.is_comptime -> return RightsRow.comptime(provenance)
+        if callable.is_pure -> return RightsRow.pure(provenance)
+        if callable.is_replayable -> return RightsRow.replayable(provenance)
+        if callable.declared_effects == .Val(effects) {
+            allow := [String]{}
+            deny := [String]{}
+            loop name in effects {
+                if name.strip_prefix("!") == .Val(value) -> &deny.push(~value)
+                else -> &allow.push(~name)
+            }
+            return RightsRow.invocation(allow, deny, provenance)
+        }
+        RightsRow.callable(provenance)
+    }
+    selected_path :: OSPath.of(target).canonicalize().ok()
+    callables := [CallableView]{}
+    loop (module_index, module) in projection.bundle.modules {
+        if scope == CheckScope.ExplicitFile {
+            module_path :: module.path.canonicalize() ?? ~module.path
+            selected_matches :: if selected_path == .Val(selected) -> selected == module_path else -> false
+            if module.display != target && !selected_matches -> next
+        }
+        alias :: projection.facts.name_ledger.module_alias(module_index) ?? module.alias
+        collect_items(module.items, alias, "", module.display, &callables)
+    }
+    &callables.sort_by((left: CallableView, right: CallableView) -> {
+        if left.key != right.key -> left.key <=> right.key
+        else { if left.span.start != right.span.start -> left.span.start <=> right.span.start else -> left.span.end <=> right.span.end }
+    })
+    &callables.dedup_by((left: CallableView, right: CallableView) -> left.key == right.key)
+    application :: projection.bundle.package_guarantees.application_authority
+    scope_chain :: [jet_foundation.sema.ScopeFrame]{jet_foundation.sema.ScopeFrame.new(jet_foundation.Authority.Scope.Package, ~application.authority, ~application.granted_effects, jet_foundation.sema.RightsProvenance.new(~application.authority, "selected application authority"))}
+    reports := [CallableReport]{}
+    loop view in callables {
+        declared :: declared_row(view)
+        summary :: projection.facts.summaries.get(view.key)
+        inferred_effects := projection.facts.solved.get(view.key) ?? Holds.default()
+        if inferred_effects.is_empty() {
+            if summary == .Val(value) -> &inferred_effects.extend(value.direct.iter())
+        }
+        if inferred_effects.is_empty() {
+            if view.inferred_seed == .Val(seed) -> _ :: &inferred_effects.insert(~seed)
+        }
+        inferred :: RightsRow.invocation(inferred_effects.iter(), [], jet_foundation.sema.RightsProvenance.new(~view.key, "sema inferred effect facts"))
+        call_chain := [String]{~view.key}
+        if projection.index().effect_of(view.key) == .Val(fact) {
+            if fact.provenance.first() == .Val(witness) {
+                if !witness.call_path.is_empty() -> call_chain = ~witness.call_path
+            }
+        }
+        walk :: declared.walk(inferred_effects, call_chain, scope_chain)
+        direct :: if summary == .Val(value) -> ~value.direct else -> Holds.default()
+        callees :: if summary == .Val(value) -> value.edges.iter().to_list() else -> [String]{}
+        maximal :: if summary == .Val(value) -> value.maximal else -> false
+        &reports.push(CallableReport{view: ^view, declared: ^declared, inferred: ^inferred, inferred_effects: ^inferred_effects, direct_effects: ^direct, callees: ^callees, maximal: maximal, walk: ^walk})
+    }
+    authority_facts := [StatusValue]{}
+    loop declaration in jet_foundation.Authority.effect_declarations() -> &authority_facts.push(StatusValue.object(StatusFields.new().with("name", declaration.name).with("irreversible", declaration.irreversible)))
+    authority :: StatusValue.object(StatusFields.new().with("source", application.authority).with("required", holds_value(application.required_effects)).with("granted", holds_value(application.granted_effects)).with("denied", holds_value(application.denied_effects)))
+    callable_values := [StatusValue]{}
+    loop report in reports {
+        denials := [StatusValue]{}
+        loop denial in report.walk.denials {
+            witness_spans := [StatusValue]{}
+            if projection.index().effect_of(report.view.key) == .Val(fact) {
+                loop witness in fact.provenance {
+                    if witness.effect == denial.right {
+                        loop span in witness.spans -> &witness_spans.push(span_value(report.view.source, span.start, span.end))
+                        break
+                    }
+                }
+            }
+            nearest :: if denial.chain.nearest_granting_scope == .Val(frame) -> frame_value(frame) else -> StatusValue.Null
+            calls := [StatusValue]{}
+            loop call in denial.chain.call_chain -> &calls.push(StatusValue.String(~call))
+            frames := [StatusValue]{}
+            loop frame in denial.chain.scope_chain -> &frames.push(frame_value(frame))
+            chain :: StatusValue.object(StatusFields.new().with("right", denial.chain.right).with("call_chain", StatusValue.array(^calls)).with("scope_chain", StatusValue.array(^frames)).with("nearest_granting_scope", ^nearest))
+            &denials.push(StatusValue.object(StatusFields.new().with("right", denial.right).with("verdict", verdict_name(denial.verdict)).with("chain", ^chain).with("source_spans", StatusValue.array(^witness_spans))))
+        }
+        callees := [StatusValue]{}
+        loop callee in report.callees -> &callees.push(StatusValue.String(~callee))
+        summary :: StatusFields.new().with("direct", holds_value(report.direct_effects)).with("callees", StatusValue.array(^callees)).with("maximal", report.maximal)
+        &callable_values.push(StatusValue.object(StatusFields.new().with("callable", report.view.key).with("name", report.view.name).with("source_span", span_value(report.view.source, report.view.span.start, report.view.span.end)).with("declared_row", row_value(report.declared)).with("inferred_row", row_value(report.inferred)).with("inferred_effects", holds_value(report.inferred_effects)).with("effects", StatusValue.object(summary)).with("verdict", verdict_name(report.walk.verdict)).with("denials", StatusValue.array(^denials))))
+    }
+    if json {
+        fields :: StatusFields.new().with("scope", scope_name(scope)).with("target", target).with("authority", ^authority).with("evidence", "checked_static").with("runtime_observation", "not_run").with("provenance_scope", "checked_semantic_index").with("authority_facts", StatusValue.array(^authority_facts)).with("callables", StatusValue.array(^callable_values))
+        print("{StatusEnvelope.new(\"inspect.rights\", true).with_fields(fields).json()}")
+    } else {
+        print("rights")
+        print("scope: {scope_name(scope)}")
+        print("target: {target}")
+        print("evidence: checked_static")
+        print("runtime observation: not_run")
+        print("provenance scope: checked_semantic_index")
+        print("authority: {application.authority}")
+        print("granted: {holds_text(application.granted_effects)}")
+        print("denied: {holds_text(application.denied_effects)}")
+        print("authority facts:")
+        loop declaration in jet_foundation.Authority.effect_declarations() {
+            suffix :: if declaration.irreversible -> " (irreversible)" else -> ""
+            print("  {declaration.name}{suffix}")
+        }
+        loop report in reports {
+            print("callable: {report.view.key} @ {report.view.source}:{report.view.span.start}-{report.view.span.end}")
+            print("  declared row: {row_text(report.declared)}")
+            print("  inferred row: {row_text(report.inferred)}")
+            print("  inferred effects: {holds_text(report.inferred_effects)}")
+            print("  verdict: {verdict_name(report.walk.verdict)}")
+            if report.walk.denials.is_empty() -> print("  denials: none")
+            else {
+                loop denial in report.walk.denials {
+                    via :: if denial.chain.call_chain.is_empty() -> "none" else -> denial.chain.call_chain.join(" -> ")
+                    print("  denial: {denial.right} ({verdict_name(denial.verdict)}) via {via}")
+                }
+            }
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:5052
+const HARDENING_SURFACE_SCHEMA: String = "jet.hardening.surface.v1"
+// Rust: Source/CmdInspect.rs:5053
+const HARDENING_SURFACE_VERSION: I128 = 1
+// Rust: Source/CmdInspect.rs:5054
+const CAPABILITY_RELATION_SCHEMA: String = "jet.capability.relation.v1"
+// Rust: Source/CmdInspect.rs:5055
+const CAPABILITY_RELATION_VERSION: I128 = 1
+// Rust: Source/CmdInspect.rs:5056
+const CAPABILITY_RELATION_DISPOSITIONS: [String] = ["planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"]
+
+// Rust: Source/CmdInspect.rs:5067
+fn capability_status_field(value: StatusValue, name: String) -> StatusValue? {
+    if value == .Object(fields) {
+        loop (field, value) in fields.iter() { if field == name -> return Val(value) }
+    }
+    None
+}
+// Rust: Source/CmdInspect.rs:5076
+fn capability_status_string(value: StatusValue) -> String? {
+    if value == .String(text) -> Val(text) else -> None
+}
+// Rust: Source/CmdInspect.rs:5083
+fn capability_status_integer(value: StatusValue) -> I128? {
+    if value == .Integer(number) -> Val(number) else -> None
+}
+// Rust: Source/CmdInspect.rs:5090
+fn capability_status_bool(value: StatusValue) -> Bool? {
+    if value == .Bool(flag) -> Val(flag) else -> None
+}
+// Rust: Source/CmdInspect.rs:5097
+fn capability_digest(value: StatusValue) -> String? {
+    text :: capability_status_string(value) ?? return None
+    hex :: text.strip_prefix("sha256:") ?? return None
+    if hex.bytes().len() != 64 -> return None
+    loop character in hex.chars() { if !character.is_ascii_hexdigit() -> return None }
+    Val(text)
+}
+
+// Rust: Source/CmdInspect.rs:5104
+fn capability_canonical_json(value: StatusValue) -> String Err! {
+    // Rust: Source/CmdInspect.rs:5105
+    fn encode(value: StatusValue, root: Bool) -> String Err! {
+        if value == {
+            .Null -> Ok("null")
+            .Bool(flag) -> Ok("{flag}")
+            .Integer(number) -> Ok("{number}")
+            .Float(_) -> Err("canonical capability metadata cannot contain floating-point numbers")
+            .String(text) -> Ok("\"{json_escape(text)}\"")
+            .Array(values) -> {
+                parts := [String]{}
+                loop item in values -> &parts.push(encode(item, false))
+                Ok("[{parts.join(\",\")}]")
+            }
+            .Object(fields) -> {
+                entries := fields.iter().to_list()
+                &entries.sort_unstable_by((left, right) -> left.0 <=> right.0)
+                loop at in 1..<entries.len() {
+                    if entries[at - 1].0 == entries[at].0 -> return Err("canonical capability metadata has duplicate object keys")
+                }
+                parts := [String]{}
+                loop (name, item) in entries {
+                    if root && name == "content_digest" -> next
+                    encoded :: encode(item, false)
+                    &parts.push("\"{json_escape(name)}\":{encoded}")
+                }
+                Ok("{{{parts.join(\",\")}}}")
+            }
+        }
+    }
+    encode(value, true)
+}
+
+// Rust: Source/CmdInspect.rs:5149
+fn validate_capability_content_digest(value: StatusValue, label: String) -> Err! {
+    actual :: capability_status_field(value, "content_digest").and_then(capability_digest) ?? return Err("{label} content_digest is missing or invalid")
+    canonical :: capability_canonical_json(value)
+    expected :: "sha256:{jet.SHA256.sha256_hex(canonical.bytes())}"
+    if actual != expected -> return Err("{label} content_digest does not match canonical content")
+    return
+}
+
+// Rust: Source/CmdInspect.rs:5161
+fn validate_hardening_manifest(manifest: StatusValue) -> Err! {
+    errors := [String]{}
+    if capability_status_field(manifest, "schema").and_then(capability_status_string) != Val(HARDENING_SURFACE_SCHEMA) -> &errors.push("schema must be {HARDENING_SURFACE_SCHEMA}")
+    if capability_status_field(manifest, "schema_version").and_then(capability_status_integer) != Val(HARDENING_SURFACE_VERSION) -> &errors.push("schema_version must be {HARDENING_SURFACE_VERSION}")
+    if validate_capability_content_digest(manifest, "hardening manifest") == .Err(error) -> &errors.push(^error)
+    snapshot :: capability_status_field(manifest, "source_snapshot") ?? {
+        &errors.push("source_snapshot is required")
+        return Err(errors.join("; "))
+    }
+    if capability_status_field(snapshot, "algorithm").and_then(capability_status_string) != Val("sha256") -> &errors.push("source_snapshot algorithm must be sha256")
+    if capability_status_field(snapshot, "hash").and_then(capability_digest) == None -> &errors.push("source_snapshot hash is missing or invalid")
+    if errors.is_empty() -> return
+    Err(errors.join("; "))
+}
+
+// Rust: Source/CmdInspect.rs:5198
+fn validate_capability_relation(manifest: StatusValue, relation: StatusValue) -> Err! {
+    errors := [String]{}
+    if capability_status_field(relation, "schema").and_then(capability_status_string) != Val(CAPABILITY_RELATION_SCHEMA) -> &errors.push("schema must be {CAPABILITY_RELATION_SCHEMA}")
+    if capability_status_field(relation, "schema_version").and_then(capability_status_integer) != Val(CAPABILITY_RELATION_VERSION) -> &errors.push("schema_version must be {CAPABILITY_RELATION_VERSION}")
+    if validate_capability_content_digest(relation, "capability relation") == .Err(error) -> &errors.push(^error)
+    relation_source :: capability_status_field(relation, "source_snapshot_hash").and_then(capability_digest)
+    manifest_source :: capability_status_field(manifest, "source_snapshot").and_then((snapshot) -> capability_status_field(snapshot, "hash")).and_then(capability_digest)
+    if relation_source == None -> &errors.push("source_snapshot_hash is missing or invalid")
+    else { if relation_source != manifest_source -> &errors.push("source_snapshot_hash does not match the manifest") }
+    revision_rule :: capability_status_field(relation, "revision_rule").and_then(capability_status_string)
+    if (revision_rule ?? "").trim().is_empty() -> &errors.push("revision_rule is missing or empty")
+    identity_rows :: if capability_status_field(relation, "identities") == .Val(.Array(values)) -> values else -> {
+        &errors.push("identities are required")
+        [StatusValue]{}
+    }
+    identity_modes := [String:[String:Bool]]{}
+    loop identity in identity_rows {
+        identity_id :: capability_status_field(identity, "capability_id").and_then(capability_status_string) ?? {
+            &errors.push("identity capability_id is missing")
+            next
+        }
+        if identity_id.trim().is_empty() {
+            &errors.push("identity capability_id is empty")
+            next
+        }
+        if identity_modes.has_key(identity_id) -> &errors.push("duplicate identity: {identity_id}")
+        modes :: if capability_status_field(identity, "applicable_modes") == .Val(.Array(values)) -> values else -> {
+            &errors.push("identity has no applicable modes: {identity_id}")
+            [StatusValue]{}
+        }
+        mode_set := [String:Bool]{}
+        loop value in modes {
+            mode :: capability_status_string(value) ?? {
+                &errors.push("identity mode is malformed: {identity_id}")
+                next
+            }
+            // Rust short-circuits insert when an empty mode is encountered.
+            if mode.trim().is_empty() || mode_set.has_key(mode) -> &errors.push("identity mode is empty or duplicated: {identity_id}")
+            else -> mode_set[~mode] = true
+        }
+        source_identity :: capability_status_field(identity, "source_identity")
+        path :: source_identity.and_then((value) -> capability_status_field(value, "path")).and_then(capability_status_string)
+        digest :: source_identity.and_then((value) -> capability_status_field(value, "digest")).and_then(capability_digest)
+        if (path ?? "").trim().is_empty() || digest == None -> &errors.push("identity source is invalid: {identity_id}")
+        identity_modes[~identity_id] = ^mode_set
+    }
+    row_rows :: if capability_status_field(relation, "rows") == .Val(.Array(values)) -> values else -> {
+        &errors.push("rows are required")
+        [StatusValue]{}
+    }
+    row_ids := [String:Bool]{}
+    disposition_counts := [String:Int]{}
+    counted_rows := 0
+    loop (index, row) in row_rows {
+        label :: "row#{index}"
+        row_id :: capability_status_field(row, "row_id").and_then(capability_status_string) ?? {
+            &errors.push("{label} row_id is missing")
+            next
+        }
+        if row_id.trim().is_empty() || row_ids.has_key(row_id) -> &errors.push("duplicate or empty row_id: {row_id}")
+        else -> row_ids[~row_id] = true
+        capability_id :: capability_status_field(row, "capability_id").and_then(capability_status_string)
+        mode :: capability_status_field(row, "mode").and_then(capability_status_string)
+        if capability_id != None && mode != None {
+            id :: capability_id ?? panic("matched capability id")
+            mode_name :: mode ?? panic("matched mode")
+            if row_id != "{id}@{mode_name}" -> &errors.push("row identity is not canonical: {row_id}")
+            if identity_modes.get(id) == .Val(modes) {
+                if !modes.has_key(mode_name) -> &errors.push("row has an inapplicable mode: {row_id}")
+            } else -> &errors.push("row has no identity: {row_id}")
+        } else -> &errors.push("row capability_id or mode is missing: {row_id}")
+        disposition :: capability_status_field(row, "disposition").and_then(capability_status_string)
+        if disposition == .Val(name) {
+            if !CAPABILITY_RELATION_DISPOSITIONS.contains(name) -> &errors.push("row has an invalid disposition: {row_id}")
+            disposition_counts[~name] = (disposition_counts.get(name) ?? 0) + 1
+            if capability_status_field(row, "status").and_then(capability_status_string) != Val(name) -> &errors.push("row status contradicts disposition: {row_id}")
+            owner_link :: capability_status_field(row, "owner_link").and_then(capability_status_string)
+            if name != "passed" && (owner_link ?? "").trim().is_empty() -> &errors.push("non-pass row has no owner link: {row_id}")
+            if name == "passed" {
+                evidence_passed :: capability_status_field(row, "evidence").and_then((value) -> capability_status_field(value, "status")).and_then(capability_status_string) == Val("passed")
+                independent_oracle :: capability_status_field(row, "oracle").and_then((value) -> capability_status_field(value, "independent_expected_behavior")).and_then(capability_status_bool) == Val(true)
+                value_consuming :: capability_status_field(row, "observable").and_then((value) -> capability_status_field(value, "value_consuming")).and_then(capability_status_bool) == Val(true)
+                if !evidence_passed || !independent_oracle || !value_consuming -> &errors.push("passed row lacks evidence, independent oracle, or observable value: {row_id}")
+                exact_identity :: capability_status_field(row, "identity").and_then((value) -> capability_status_field(value, "candidate")).and_then((value) -> capability_status_field(value, "status")).and_then(capability_status_string) == Val("available")
+                concrete_identity := true
+                loop field in [String]{"compiler_identity", "tool_identity", "target_identity"} {
+                    if !(capability_status_field(row, field) == .Val(.Object(_))) -> concrete_identity = false
+                }
+                candidate_status :: capability_status_field(row, "candidate_identity").and_then((value) -> capability_status_field(value, "status")).and_then(capability_status_string)
+                candidate_available :: candidate_status == Val("available")
+                if !exact_identity || !concrete_identity || !candidate_available -> &errors.push("passed row lacks exact candidate identity: {row_id}")
+                if candidate_status == Val("stale") -> &errors.push("stale candidate is marked passed: {row_id}")
+            }
+            if name == "owner-ratified-not-applicable" {
+                ratified := false
+                if capability_status_field(row, "exclusion") == .Val(value) {
+                    ratified = true
+                    loop field in [String]{"reason", "owner", "decision"} {
+                        text :: capability_status_field(value, field).and_then(capability_status_string)
+                        if (text ?? "").trim().is_empty() -> ratified = false
+                    }
+                }
+                if !ratified -> &errors.push("capability exclusion is not owner-ratified: {row_id}")
+            }
+        } else -> &errors.push("row disposition is missing: {row_id}")
+        loop field in [String]{"contract", "route", "observable", "oracle", "evidence", "identity", "owner", "source_identity", "candidate_identity"} {
+            if !(capability_status_field(row, field) == .Val(.Object(_))) -> &errors.push("row {field} is missing: {row_id}")
+        }
+        if capability_status_field(row, "counted").and_then(capability_status_bool) != Val(true) -> &errors.push("row is not counted: {row_id}")
+        else -> counted_rows += 1
+    }
+    identity_keys := identity_modes.keys().to_list()
+    &identity_keys.sort()
+    loop identity in identity_keys {
+        modes := identity_modes[identity].keys().to_list()
+        &modes.sort()
+        loop mode in modes {
+            row_id :: "{identity}@{mode}"
+            if !row_ids.has_key(row_id) -> &errors.push("missing applicable mode row: {row_id}")
+        }
+    }
+    denominator :: capability_status_field(relation, "denominator") ?? {
+        &errors.push("denominator is required")
+        return Err(errors.join("; "))
+    }
+    if !(denominator == .Object(_)) {
+        &errors.push("denominator is required")
+        return Err(errors.join("; "))
+    }
+    // GATE #4483: checked i128→usize is selected-target width, not host width.
+    integer_field :: (value: StatusValue?) -> value.and_then(capability_status_integer).and_then((number) -> USize.try_from(number).ok())
+    if integer_field(capability_status_field(denominator, "row_count")) != Val(USize{row_rows.len()}) -> &errors.push("denominator row_count is stale")
+    if integer_field(capability_status_field(denominator, "counted_rows")) != Val(USize{counted_rows}) -> &errors.push("denominator counted_rows is stale")
+    denominator_ids := [String:Bool]?{None}
+    if capability_status_field(denominator, "identity_ids") == .Val(.Array(values)) {
+        ids := [String:Bool]{}
+        loop value in values {
+            if capability_status_string(value) == .Val(id) {
+                if ids.has_key(id) -> &errors.push("denominator identity_ids contain duplicates")
+                else -> ids[~id] = true
+            } else -> &errors.push("denominator identity_ids contain a malformed value")
+        }
+        denominator_ids = Val(^ids)
+    } else -> &errors.push("denominator identity_ids are required")
+    ids_stale := false
+    if denominator_ids == .Val(ids) {
+        if ids.len() != identity_modes.len() -> ids_stale = true
+        loop id in ids.keys() { if !identity_modes.has_key(id) -> ids_stale = true }
+    }
+    if integer_field(capability_status_field(denominator, "identity_count")) != Val(USize{identity_modes.len()}) || ids_stale -> &errors.push("denominator identities are stale")
+    disposition_values :: capability_status_field(denominator, "dispositions")
+    if disposition_values == .Val(.Object(fields)) {
+        loop (name, _) in fields.iter() {
+            if !CAPABILITY_RELATION_DISPOSITIONS.contains(name) -> &errors.push("denominator has unknown disposition: {name}")
+        }
+        loop disposition in CAPABILITY_RELATION_DISPOSITIONS {
+            actual :: integer_field(disposition_values.and_then((value) -> capability_status_field(value, disposition)))
+            if actual != Val(USize{disposition_counts.get(disposition) ?? 0}) -> &errors.push("denominator disposition count is stale: {disposition}")
+        }
+    } else -> &errors.push("denominator dispositions are required")
+    consumers :: capability_status_field(relation, "consumers")
+    loop consumer in [String]{"inspect", "hardening", "learner", "release"} {
+        value :: consumers.and_then((value) -> capability_status_field(value, consumer)) ?? {
+            &errors.push("consumer metadata is missing: {consumer}")
+            next
+        }
+        if capability_status_field(value, "relation").and_then(capability_status_string) != Val("manifest.capability_relation.rows") -> &errors.push("consumer relation is not canonical: {consumer}")
+        if consumer == "release" && capability_status_field(value, "candidate").and_then(capability_status_string) != Val("row.candidate_identity") -> &errors.push("release consumer candidate is not canonical")
+    }
+    if errors.is_empty() -> return
+    Err(errors.join("; "))
+}
+
+// Rust: Source/CmdInspect.rs:5530
+fn capability_relation_status(value: StatusValue) -> String {
+    capability_status_field(value, "status").and_then(capability_status_string) ?? "unavailable"
+}
+
+// Rust: Source/CmdInspect.rs:5536
+fn capability_relation_has_candidate_evidence(value: StatusValue) -> Bool {
+    rows :: if capability_status_field(value, "rows") == .Val(.Array(rows)) -> rows else -> { return false }
+    if rows.is_empty() -> return false
+    loop row in rows {
+        if capability_status_field(row, "counted").and_then(capability_status_bool) != Val(true) -> return false
+        disposition :: capability_status_field(row, "disposition").and_then(capability_status_string)
+        if disposition == {
+            .Val("owner-ratified-not-applicable") -> {}
+            .Val("passed") -> {
+                passed :: capability_status_field(row, "evidence").and_then((value) -> capability_status_field(value, "status")).and_then(capability_status_string) == Val("passed")
+                available :: capability_status_field(row, "candidate_identity").and_then((value) -> capability_status_field(value, "status")).and_then(capability_status_string) == Val("available")
+                if !passed || !available -> return false
+            }
+            else -> { return false }
+        }
+    }
+    true
+}
+
+// Rust: Source/CmdInspect.rs:5563
+pub fn capability_relation_projection(root: OSPath) -[FS.Read]> StatusValue Err! {
+    path :: root.join(".jet/hardening-manifest.json")
+    unavailable :: (reason: String) -> StatusValue.object(StatusFields.new().with("schema", CAPABILITY_RELATION_SCHEMA).with("status", "unavailable").with("relation", "manifest.capability_relation.rows").with("path", path.display()).with("reason", ^reason).with("rows", StatusValue.array([StatusValue]{})))
+    // GATE #4494 / #4409: real read_to_string with native NotFound fidelity.
+    raw :: fs.read_to_string(path) ?? {
+        if err.kind() == std.io.ErrorKind.NotFound -> return Ok(unavailable("capability relation source `{path.display()}` is absent"))
+        return Err("can't read canonical capability relation source `{path.display()}`: {err}")
+    }
+    manifest :: StatusValue.parse(raw) ?? return Err("can't parse canonical manifest `{path.display()}`: {err}")
+    validate_hardening_manifest(manifest) ?? return Err("canonical manifest `{path.display()}` is invalid: {err}")
+    relation :: capability_status_field(manifest, "capability_relation") ?? return Ok(unavailable("manifest has no capability_relation evidence"))
+    if !(relation == .Object(_)) -> return Err("canonical manifest `{path.display()}` has a non-object capability_relation")
+    validate_capability_relation(manifest, relation) ?? return Err("canonical capability relation `{path.display()}` is invalid: {err}")
+    fields :: if relation == .Object(fields) -> fields else -> panic("capability relation object was checked above")
+    projection := StatusFields.new()
+    loop (name, value) in fields.iter() {
+        if name == "status" || name == "relation" || name == "path" -> next
+        &projection.insert(~name, ~value) ?? panic("manifest capability relation fields must be unique")
+    }
+    &projection.insert("status", "available") ?? panic("capability relation status field must be unique")
+    &projection.insert("relation", "manifest.capability_relation.rows") ?? panic("capability relation route field must be unique")
+    &projection.insert("path", path.display()) ?? panic("capability relation path field must be unique")
+    Ok(StatusValue.object(^projection))
+}
+
+// Rust: Source/CmdInspect.rs:5643
+// inspect claims consumes this exact manifest relation, not diagnostic observations.
+const RELEASE_CLAIM_SOURCE: String = "manifest.capability_relation.rows"
+
+// Rust: Source/CmdInspect.rs:5645
+fn release_claim_rows(relation: StatusValue) -> [StatusValue] {
+    rows :: if capability_status_field(relation, "rows") == .Val(.Array(rows)) -> rows else -> { return [] }
+    claims := [StatusValue]{}
+    loop row in rows {
+        row_id :: capability_status_field(row, "row_id").and_then(capability_status_string) ?? { next }
+        capability :: capability_status_field(row, "capability_id").and_then(capability_status_string) ?? { next }
+        mode :: capability_status_field(row, "mode").and_then(capability_status_string) ?? { next }
+        disposition :: capability_status_field(row, "disposition").and_then(capability_status_string) ?? { next }
+        status :: capability_status_field(row, "status").and_then(capability_status_string) ?? disposition
+        candidate :: capability_status_field(row, "candidate_identity") ?? StatusValue.Null
+        counted :: capability_status_field(row, "counted").and_then(capability_status_bool) ?? false
+        owner_link :: capability_status_field(row, "owner_link") ?? StatusValue.Null
+        &claims.push(StatusValue.object(StatusFields.new().with("claim", row_id).with("capability", capability).with("mode", mode).with("disposition", disposition).with("status", status).with("counted", counted).with("owner_link", ~owner_link).with("candidate_identity", ~candidate)))
+    }
+    claims
+}
+
+// Rust: Source/CmdInspect.rs:5690
+fn run_claims(file: String, json: Bool) -> {
+    source_path :: OSPath.of(file)
+    base :: source_path.parent().filter((parent) -> !parent.as_os_str().is_empty()) ?? OSPath.of(".")
+    root :: jet.Loader.find_package_root_checked(base).ok().flatten() ?? ~base
+    relation :: capability_relation_projection(root) ?? {
+        cli_error_fix("E2105", err, "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims")
+        env.exit(ExitCodes.USER_ERROR) // GATE #4494
+    }
+    release :: jet.Manifest.current_release_status()
+    claims :: release_claim_rows(relation)
+    relation_ready :: capability_relation_status(relation) == "available" && capability_relation_has_candidate_evidence(relation)
+    // Complete relation is necessary, never sufficient while policy remains future.
+    release_ready :: release.policy_active() && release.readiness() == "ready" && relation_ready
+    if json {
+        release_value :: StatusValue.object(StatusFields.new().with("version", jet.Manifest.COMPILER_VERSION).with("status", release.channel()).with("disposition", release.disposition()).with("readiness", release.readiness()).with("compatibility_policy", release.policy()).with("compatibility_policy_disposition", release.policy_disposition()).with("compatibility_policy_active", release.policy_active()))
+        fields :: StatusFields.new().with("file", file).with("source", RELEASE_CLAIM_SOURCE).with("release", ^release_value).with("release_ready", release_ready).with("capability_relation", relation).with("claims", StatusValue.array(claims))
+        print("{StatusEnvelope.new(\"inspect.claims\", release_ready).with_fields(fields).json()}")
+    } else {
+        print("claims")
+        active :: if release.policy_active() -> "active" else -> "not active"
+        print("release: {release.channel()} (disposition: {release.disposition()}; readiness: {release.readiness()}; 1.0 compatibility policy: {release.policy()} [{release.policy_disposition()}; {active}])")
+        print("claim source: {RELEASE_CLAIM_SOURCE}")
+        ready :: if release_ready -> "yes" else -> "no"
+        print("release ready: {ready}")
+        print("capability relation: {capability_relation_status(relation)}")
+        if claims.is_empty() -> print("none")
+        else {
+            loop claim in claims {
+                if !(claim == .Object(_)) -> next
+                field :: (name: String) -> capability_status_field(claim, name).and_then(capability_status_string) ?? "unknown"
+                print("{field(\"claim\")} {field(\"mode\")} {field(\"disposition\")}")
+            }
+        }
+    }
+}
+
+// Rust: Source/CmdInspect.rs:5793
+fn plain_number(name: String) -> Bool { name == "Int" || name == "Float" || name == "Decimal" }
+// Rust: Source/CmdInspect.rs:5797
+fn operator_symbol(trait_name: String) -> String? {
+    if trait_name == { "Add" -> Val("+"); "Sub" -> Val("-"); "Mul" -> Val("*"); "Div" -> Val("/"); else -> None }
+}

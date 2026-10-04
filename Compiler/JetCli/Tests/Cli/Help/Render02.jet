@@ -1,0 +1,54 @@
+use jet_ast.[CtValue]
+
+// Rust: crates/jet-repl/src/Render.rs:208
+#Test("banner_matches_ratified_wording") {
+    assert_eq(render_banner("1.0.0", false), "Jet 1.0.0 — Interactive REPL  (:quit, :help, ^B bindings)")
+}
+// Rust: crates/jet-repl/src/Render.rs:217
+// The original lowercase expectations are retained, even though current source
+// capitalizes discovery descriptions. Integration must reconcile that drift.
+#Test("discovery_hints_match_available_modes") {
+    assert_eq(render_discovery_hint(true, false), "Try: Tab complete · F1 cursor docs · ?name docs · F3 history · ^P pin · ^F fold · ^R rerun · ^B bindings")
+    assert_eq(render_discovery_hint(false, false), "Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY")
+}
+// Rust: crates/jet-repl/src/Render.rs:229
+#Test("prompt_has_turn_gutter") {
+    assert_eq(render_prompt(1, false), "1 user> ")
+    assert_eq(render_prompt(42, false), "42 user> ")
+}
+// Rust: crates/jet-repl/src/Render.rs:235
+#Test("fold_decision_triggers_past_threshold") {
+    short := [CtValue]{}
+    loop i in 0..<5 -> &short.push(CtValue.Int(i))
+    assert(fold_decision_for_value(CtValue.List(short)) == None)
+    long := [CtValue]{}
+    loop i in 0..<42 -> &long.push(CtValue.Int(i))
+    (count, ty) :: fold_decision_for_value(CtValue.List(long)) ?? panic("should fold")
+    assert_eq(count, 42)
+    assert_eq(ty, "Int")
+}
+// Rust: crates/jet-repl/src/Render.rs:246
+#Test("fold_decision_uses_struct_type_name") {
+    rows := [CtValue]{}
+    loop i in 0..<30 -> &rows.push(CtValue.Struct{type_name: "Row", fields: [(String, CtValue)]{("id", CtValue.Int(i))}})
+    (count, ty) :: fold_decision_for_value(CtValue.List(rows)) ?? panic("should fold")
+    assert_eq(count, 30)
+    assert_eq(ty, "Row")
+}
+// Rust: crates/jet-repl/src/Render.rs:261
+#Test("fold_marker_matches_ratified_shape") {
+    assert_eq(render_fold_marker(42, "Row", false), "⋯ 42 rows folded · [Row] · unfold ⏎")
+}
+// Rust: crates/jet-repl/src/Render.rs:267
+#Test("pin_rail_shows_label_and_unpin_hint") {
+    text :: render_pin_rail("total: Int :: 15", 3, 62, false)
+    lines :: text.split("\n").to_list()
+    assert(lines[0].starts_with("📌 total: Int :: 15"))
+    assert(lines[0].ends_with("turn 3 · unpin ^P"))
+    loop character in lines[1].chars() -> assert_eq(character, '─')
+}
+// Rust: crates/jet-repl/src/Render.rs:278
+#Test("format_binding_matches_workspace_shape") {
+    assert_eq(format_binding("total", CtValue.Int(15), false), "total :: 15")
+    assert_eq(format_binding("total", CtValue.Int(15), true), "total := 15")
+}

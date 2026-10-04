@@ -1,0 +1,359 @@
+use Cli.Evidence.History.*
+use Cli.Evidence.ReceiptCodec.*
+use Cli.Evidence.ReceiptContext.*
+use Cli.Evidence.ReceiptTypes.*
+use ReceiptStore.[ReceiptStore, OptionalReceiptJob, NEXT_TEMP_ID, OPTIONAL_RECEIPT_JOB_DIR, stage_optional_receipt_job, run_optional_receipt_helper, input_paths_for, project_check_input_paths, receipt_root_for, context_identity, receipt_secret_values]
+use RecordIndex.[RecordIndex, RecordKind]
+use std.[fs, env, process, sync]
+
+// GATE #4494: these fixtures require real native filesystem/process/atomic hosts.
+fn receipt_test_root(label: String) -> OSPath {
+    root :: env.temp_dir().join("jet-receipt-{label}-{process.id()}-{NEXT_TEMP_ID.fetch_add(1, sync.Ordering.Relaxed)}")
+    fs.remove_dir_all(root) ?? {}
+    root
+}
+fn receipt_test_project(label: String, nested: Bool) -> OSPath {
+    project :: receipt_test_root(label)
+    fs.create_dir_all(if nested -> project.join("src") else -> project).unwrap()
+    fs.write(project.join(PACKAGE_FILE), "name: \"receipt-{label}\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(if nested -> project.join("src/run.jet") else -> project.join(DEFAULT_ENTRY_FILE), "fn run() -> {}\n").unwrap()
+    project
+}
+// Native publication fixture, using the real canonical receipt store.
+fn receipt_test_publish(store: &ReceiptStore, argv: [String], inputs: [OSPath]) -> JetCLIReceiptClaim {
+    claim :: &store.claim("check", argv, inputs).unwrap()
+    &store.write(claim, argv, I32{0}, "first".bytes(), []).unwrap()
+    key :: &store.context_key("check", argv).unwrap()
+    &store.remember_context_key(key, claim).unwrap()
+    claim
+}
+
+// Rust: Source/ReceiptStore.rs:3843
+#Test("receipt_body_digest_ignores_timestamp_because_there_is_none") {
+    claim :: JetCLIReceiptClaim{verb: "check", key: "a".repeat(JET_CLI_RECEIPT_DIGEST_LEN), inputs: []}
+    first :: JetCLIReceipt{claim: claim, status: I32{0}, stdout: "ok".bytes(), stderr: [], sections: [], consumed: [], produced: [], digest: ""}
+    second := ~first
+    second.claim = ~claim
+    assert(jet_cli_receipt_digest(first) == jet_cli_receipt_digest(second))
+}
+// Rust: Source/ReceiptStore.rs:3867
+#Test("compiler_tool_identity_never_reads_the_running_binary") {
+    assert(jet_cli_receipt_tool_digest("jet", receipt_paths.path("/definitely/missing/jet"), JET_COMPILER_BUILD_ID) == JET_COMPILER_BUILD_ID)
+}
+// Rust: Source/ReceiptStore.rs:3875
+#Test("captured_child_output_is_streamed_and_retained") {
+    input :: "one\ntwo\n".bytes()
+    reader := std.io.Cursor.new(input)
+    streamed := [U8]{}
+    captured :: capture_stream(&reader, &streamed)
+    assert(captured == input)
+    assert(streamed == input)
+}
+// Rust: Source/ReceiptStore.rs:3884
+#Test("malformed_context_pointer_is_a_cache_miss") {
+    root :: receipt_test_root("malformed-context")
+    store :: ReceiptStore.new(root)
+    argv :: [String]{"check"}
+    context_key :: store.context_key("check", argv).unwrap()
+    pointer :: store.context_path(context_key)
+    fs.create_dir_all(pointer.parent().unwrap()).unwrap()
+    fs.write(pointer, [U8]{U8{255}, U8{254}}).unwrap()
+    assert(store.lookup_context("check", argv, root).unwrap() == None)
+    fs.remove_dir_all(root) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:3906
+#Test("project_check_receipt_rejects_new_higher_priority_entry") {
+    project :: receipt_test_project("entry-priority", true)
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(initial.any((path) -> path.ends_with("src/run.jet")))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(project.join("run.jet"), "fn run() -> {}\n").unwrap()
+    assert(project_check_input_paths(project).unwrap().any((path) -> path.ends_with("run.jet")))
+    current :: store.claim("check", argv, input_paths_for("check", argv, project)).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:3949
+#Test("project_check_receipt_rejects_changed_generated_input") {
+    project :: receipt_test_project("generated-input", true)
+    generated :: project.join(".jet/generated")
+    fs.create_dir_all(generated).unwrap()
+    fs.write(generated.join("inputs.jet"), "generated-v1\n").unwrap()
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(initial.any((path) -> path == generated.join("inputs.jet")))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(generated.join("inputs.jet"), "generated-v2\n").unwrap()
+    current :: store.claim("check", argv, input_paths_for("check", argv, project)).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:3991
+#Test("project_check_receipt_rejects_new_workspace_input") {
+    project :: receipt_test_project("workspace-input", true)
+    workspace :: project.join("workspace.jet")
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(!initial.contains(workspace))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(workspace, "module workspace { members: [] }\n").unwrap()
+    current_inputs :: input_paths_for("check", argv, project)
+    assert(current_inputs.contains(workspace))
+    current :: store.claim("check", argv, current_inputs).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4029
+#Test("project_check_receipt_rejects_new_lock_input") {
+    project :: receipt_test_project("lock-input", true)
+    lock :: project.join(".jet/lock")
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(!initial.contains(lock))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.create_dir_all(lock.parent().unwrap()).unwrap()
+    fs.write(lock, "lock-v1\n").unwrap()
+    current_inputs :: input_paths_for("check", argv, project)
+    assert(current_inputs.contains(lock))
+    current :: store.claim("check", argv, current_inputs).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4068
+#Test("project_check_receipt_rejects_changed_output_authority") {
+    project :: receipt_test_project("output-authority", true)
+    package :: project.join("package.jet")
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(initial.contains(package))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(package, "name: \"project-check-output\"\noutputs: { release: .Executable{ entry: run } }\n").unwrap()
+    current :: store.claim("check", argv, input_paths_for("check", argv, project)).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4109
+#Test("explicit_check_receipt_rejects_new_generated_input") {
+    project :: receipt_test_root("explicit-generated")
+    source :: project.join("src/main.jet")
+    generated :: project.join(".jet/generated/inputs.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(project.join("package.jet"), "name: \"receipt-explicit-generated\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    argv :: [String]{"check", source.display().to_string()}
+    store :: ReceiptStore.new(project.join("receipts"))
+    claim :: receipt_test_publish(&store, argv, input_paths_for("check", argv, project))
+    assert(store.lookup_context("check", argv, project).unwrap() != None)
+    fs.create_dir_all(generated).unwrap()
+    fs.write(generated.join("inputs.jet"), "generated-v1\n").unwrap()
+    current :: store.claim("check", argv, input_paths_for("check", argv, project)).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4152
+#Test("project_check_receipt_rejects_new_retired_manifest_alias") {
+    project :: receipt_test_project("retired-manifest", false)
+    retired :: project.join(PAYLOAD_FILE)
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(!initial.contains(retired))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(retired, "name: \"retired\"\n").unwrap()
+    current_inputs :: input_paths_for("check", argv, project)
+    assert(current_inputs.contains(retired))
+    current :: store.claim("check", argv, current_inputs).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4194
+#Test("project_check_receipt_rejects_new_malformed_workspace_authority") {
+    project :: receipt_test_project("malformed-workspace", false)
+    workspace :: project.join("workspace.jet")
+    store :: ReceiptStore.new(project.join("receipts"))
+    argv :: [String]{"check"}
+    initial :: input_paths_for("check", argv, project)
+    assert(!initial.contains(workspace))
+    claim :: receipt_test_publish(&store, argv, initial)
+    fs.write(workspace, "module workspace {\n").unwrap()
+    current_inputs :: input_paths_for("check", argv, project)
+    assert(current_inputs.contains(workspace))
+    current :: store.claim("check", argv, current_inputs).unwrap()
+    assert(claim.key != current.key)
+    assert(store.lookup_context("check", argv, project).unwrap() == None)
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4236
+#Test("project_check_receipt_uses_inline_package_root_for_nested_cwd") {
+    project :: receipt_test_root("inline-package")
+    fs.create_dir_all(project.join("src")).unwrap()
+    fs.write(project.join(DEFAULT_ENTRY_FILE), "package {\nname: \"receipt-inline\"\nversion: \"0.1.0\"\n}\nfn run() -> {}\n").unwrap()
+    argv :: [String]{"check"}
+    assert(receipt_root_for("check", argv, project.join("src")) == project.join(".jet/receipts"))
+    assert(input_paths_for("check", argv, project.join("src")).contains(project.join(DEFAULT_ENTRY_FILE)))
+    fs.remove_dir_all(project) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4263
+#Test("receipt_debug_redacts_raw_legacy_and_unrecognized_output") {
+    stdout := "legacy bearer secret".bytes()
+    &stdout.push(U8{255})
+    receipt :: JetCLIReceipt{claim: JetCLIReceiptClaim{verb: "check", key: "a".repeat(JET_CLI_RECEIPT_DIGEST_LEN), inputs: []}, status: I32{17}, stdout: stdout, stderr: [U8]{U8{0}, U8{1}, U8{2}, U8{255}}, sections: [], consumed: [], produced: [], digest: "b".repeat(JET_CLI_RECEIPT_DIGEST_LEN)}
+    debug :: "{receipt:?}"
+    assert(debug.contains("stdout: \"<redacted>\""))
+    assert(debug.contains("stderr: \"<redacted>\""))
+    assert(!debug.contains("legacy bearer secret"))
+}
+// Rust: Source/ReceiptStore.rs:4285
+#Test("receipt_context_ignores_nix_shell_temp_paths_and_systemd_invocation") {
+    first := [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "INVOCATION_ID", value: "7863347a1378412ea643bdcc4c1a8b6d"}}
+    second := [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "INVOCATION_ID", value: "55d41a44be5646d9a261b25e341ea5bb"}}
+    loop name in [String]{"NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"} {
+        &first.push(JetCLIReceiptEnvironmentEntry{name: name, value: "/tmp/nix-shell.first"})
+        &second.push(JetCLIReceiptEnvironmentEntry{name: name, value: "/tmp/nix-shell.second"})
+    }
+    stable :: JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_TEST_STABLE", value: "same"}
+    &first.push(stable)
+    &second.push(stable)
+    assert(jet_cli_receipt_environment_identity_from(first) == jet_cli_receipt_environment_identity_from(second))
+    assert(jet_cli_receipt_environment_identity_from([stable]) != jet_cli_receipt_environment_identity_from([JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_TEST_STABLE", value: "different"}]))
+}
+// Rust: Source/ReceiptStore.rs:4316
+#Test("secret_names_cover_camel_case_dotted_env_and_receipt_identity") {
+    loop name in [String]{"--apiToken", "--auth.token", "--token2", "JET_API_TOKEN", "PERSISTENCE_SECRET", "digestKey", "replayToken"} -> assert(jet_cli_receipt_is_secret_name(name), "secret name not recognized: {name}")
+    assert(jet_cli_receipt_is_secret_environment_name("MY_APIKEY"))
+    assert(!jet_cli_receipt_is_secret_name("--public"))
+    first :: [String]{"check", "--apiToken=camel-secret", "--auth.token", "dotted-secret", "--persistenceToken", "persistence-secret", "--digest.key=digest-secret", "--replayToken", "replay-secret", "public"}
+    second :: loop argument in first -> argument.replace("secret", "rotated")
+    assert(jet_cli_receipt_argv_identity(first) == jet_cli_receipt_argv_identity(second))
+    assert(context_identity("check", first).unwrap() == context_identity("check", second).unwrap())
+    values :: receipt_secret_values(first)
+    loop value in [String]{"camel-secret", "dotted-secret", "persistence-secret", "digest-secret", "replay-secret"} -> assert(values.contains(value))
+}
+// Rust: Source/ReceiptStore.rs:4366
+#Test("replay_redacts_known_secret_values") {
+    argv :: [String]{"check", "--replayToken", "legacy-replay-secret"}
+    secrets :: receipt_secret_values(argv)
+    stdout := "old legacy-replay-secret".bytes()
+    &stdout.push(U8{0})
+    receipt :: JetCLIReceipt{claim: JetCLIReceiptClaim{verb: "check", key: "a".repeat(JET_CLI_RECEIPT_DIGEST_LEN), inputs: []}, status: I32{0}, stdout: stdout, stderr: "legacy-replay-secret\n".bytes(), sections: [], consumed: [], produced: [], digest: "b".repeat(JET_CLI_RECEIPT_DIGEST_LEN)}
+    (out, error) :: replay_output(receipt, secrets)
+    expected := "old <redacted>".bytes()
+    &expected.push(U8{0})
+    assert(out == expected)
+    assert(error == "<redacted>\n".bytes())
+}
+// Rust: Source/ReceiptStore.rs:4393
+#Test("receipt_persistence_redacts_secret_values_before_digest") {
+    root :: receipt_test_root("redaction")
+    store :: ReceiptStore.new(root)
+    claim :: JetCLIReceiptClaim{verb: "check", key: "a".repeat(JET_CLI_RECEIPT_DIGEST_LEN), inputs: []}
+    argv :: [String]{"check", "--apiToken=receipt-api-token", "--auth.token", "receipt-dotted-secret", "--persistenceToken", "receipt-persistence-secret", "--digest.key=receipt-digest-secret", "--replayToken", "receipt-hostile-secret"}
+    secrets :: receipt_secret_values(argv)
+    loop value in [String]{"receipt-api-token", "receipt-dotted-secret", "receipt-persistence-secret", "receipt-digest-secret", "receipt-hostile-secret"} -> assert(secrets.contains(value))
+    stdout := "public receipt-api-token receipt-dotted-secret receipt-persistence-secret receipt-digest-secret receipt-hostile-secret".bytes()
+    &stdout.push(U8{0})
+    store.write(claim, argv, I32{0}, stdout, "receipt-hostile-secret receipt-digest-secret receipt-persistence-secret receipt-dotted-secret receipt-api-token\n".bytes()).unwrap()
+    receipt :: store.lookup(claim).unwrap().unwrap()
+    expected := "public <redacted> <redacted> <redacted> <redacted> <redacted>".bytes()
+    &expected.push(U8{0})
+    assert(receipt.stdout == expected)
+    assert(receipt.stderr == "<redacted> <redacted> <redacted> <redacted> <redacted>\n".bytes())
+    assert(receipt.digest == jet_cli_receipt_digest(receipt))
+    assert(jet_cli_receipt_redact_bytes("receipt-hostile-secret".bytes(), secrets) == "<redacted>".bytes())
+    assert(jet_cli_receipt_redact_bytes("short".bytes(), [String]{"longer-secret"}) == "short".bytes())
+    fs.remove_dir_all(root) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4456
+#Test("legacy_v1_receipts_with_unknown_rotated_and_file_secrets_fail_closed") {
+    root :: receipt_test_root("legacy")
+    file_secret :: root.join("token.secret")
+    fs.create_dir_all(root).unwrap()
+    fs.write(file_secret, "file-secret-value".bytes()).unwrap()
+    value :: fs.read_to_string(file_secret).unwrap()
+    store :: ReceiptStore.new(root)
+    claim :: JetCLIReceiptClaim{verb: "check", key: "a".repeat(JET_CLI_RECEIPT_DIGEST_LEN), inputs: []}
+    receipt := JetCLIReceipt{claim: claim, status: I32{0}, stdout: "legacy rotated-secret {value} from {file_secret.display()}".bytes(), stderr: [], sections: [], consumed: [], produced: [], digest: ""}
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    bytes := jet_cli_receipt_encode(receipt).unwrap()
+    legacy_magic :: fs.read(OSPath.from("tests/fixtures/build-metadata-compat/receipt-v1.magic")).unwrap()
+    assert(legacy_magic.len() >= JET_CLI_RECEIPT_MAGIC.len())
+    loop index in 0..<JET_CLI_RECEIPT_MAGIC.len() -> bytes[index] = legacy_magic[index]
+    assert(jet_cli_receipt_decode(bytes).is_err())
+    fs.create_dir_all(root.join("objects")).unwrap()
+    fs.write(store.object_path(claim.key), bytes).unwrap()
+    assert(store.lookup(claim).unwrap() == None)
+    assert(store.list().unwrap().len() == 0)
+    fs.remove_dir_all(root) ?? {}
+}
+// Rust: Source/ReceiptStore.rs:4503
+#Test("optional_history_uses_canonical_jobs_and_fails_closed_for_blocked_destinations") {
+    make_project :: (label: String) -> {
+        project :: receipt_test_root("optional-{label}")
+        fs.create_dir_all(project).unwrap()
+        fs.write(project.join("package.jet"), "name: \"optional-history\"\nversion: \"0.1.0\"\n").unwrap()
+        fs.write(project.join("main.jet"), "fn run() -> {}\n").unwrap()
+        fs.canonicalize(project).unwrap()
+    }
+    project :: make_project("success")
+    store :: ReceiptStore.new(project.join(".jet/receipts"))
+    source :: project.join("main.jet")
+    argv :: [String]{"check", source.display().to_string()}
+    claim :: store.claim("check", argv, [source]).unwrap()
+    job :: OptionalReceiptJob{project_root: project, cwd: project, context_key: store.context_key("check", argv).unwrap(), claim: claim, argv: argv, status: I32{0}, stdout: "optional-output".bytes(), stderr: []}
+    staged :: stage_optional_receipt_job(job).unwrap()
+    assert(staged.parent().unwrap().file_name().unwrap().to_str() == Val(OPTIONAL_RECEIPT_JOB_DIR))
+    assert(run_optional_receipt_helper([staged.display().to_string()]) == 0)
+    assert(!staged.exists(), "the helper consumes its disposable job")
+    assert(store.lookup(claim).unwrap() != None)
+    indexed :: RecordIndex.load_for_project(project).unwrap()
+    assert(indexed.find(RecordKind.Receipt, claim.key, true) != None)
+    required :: make_project("required-blocked")
+    required_root :: required.join(".jet/receipts")
+    fs.create_dir_all(required_root).unwrap()
+    blocked_objects :: required_root.join("objects")
+    fs.write(blocked_objects, "required-destination".bytes()).unwrap()
+    required_store :: ReceiptStore.new(required_root)
+    required_source :: required.join("main.jet")
+    required_argv :: [String]{"check", required_source.display().to_string()}
+    required_claim :: required_store.claim("check", required_argv, [required_source]).unwrap()
+    error :: required_store.write(required_claim, required_argv, I32{0}, "output".bytes(), []).expect_err("a non-directory object destination must fail closed")
+    assert(error.contains("unsafe"))
+    assert(fs.read(blocked_objects).unwrap() == "required-destination".bytes())
+    optional :: make_project("optional-blocked")
+    optional_root :: optional.join(".jet/receipts")
+    fs.create_dir_all(optional_root).unwrap()
+    blocked_pending :: optional_root.join(OPTIONAL_RECEIPT_JOB_DIR)
+    fs.write(blocked_pending, "optional-destination".bytes()).unwrap()
+    optional_store :: ReceiptStore.new(optional_root)
+    optional_source :: optional.join("main.jet")
+    optional_argv :: [String]{"check", optional_source.display().to_string()}
+    optional_claim :: optional_store.claim("check", optional_argv, [optional_source]).unwrap()
+    optional_job :: OptionalReceiptJob{project_root: optional, cwd: optional, context_key: optional_store.context_key("check", optional_argv).unwrap(), claim: optional_claim, argv: optional_argv, status: I32{0}, stdout: [], stderr: []}
+    assert(stage_optional_receipt_job(optional_job).is_err())
+    assert(fs.read(blocked_pending).unwrap() == "optional-destination".bytes())
+    cleanup :: make_project("cleanup")
+    cleanup_pending :: cleanup.join(".jet/receipts").join(OPTIONAL_RECEIPT_JOB_DIR)
+    fs.create_dir_all(cleanup_pending).unwrap()
+    invalid :: cleanup_pending.join(".job-invalid")
+    fs.write(invalid, "not-a-job".bytes()).unwrap()
+    assert(run_optional_receipt_helper([invalid.display().to_string()]) == 0)
+    assert(!invalid.exists(), "invalid jobs in the disposable namespace are removed")
+    outside :: cleanup.join(".job-invalid")
+    fs.write(outside, "not-a-job".bytes()).unwrap()
+    assert(run_optional_receipt_helper([outside.display().to_string()]) == 0)
+    assert(outside.exists(), "cleanup never deletes a file outside the canonical disposable namespace")
+    loop root in [OSPath]{project, required, optional, cleanup} -> fs.remove_dir_all(root) ?? {}
+}

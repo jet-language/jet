@@ -1,0 +1,343 @@
+use jet_cli.[first_rustc_error_block, BuildProfile, child_exit_code, missing_c_lib, missing_linker, native_cache_key, native_cache_key_for_prepared_build, native_cache_key_for_program, native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema, render_internal_fault, NativeKeyBackend, ensure_web_output_dir, validate_web_output_file, WebRustcIncrementalSession]
+use jet.[Loader, Driver, Sema, Diagnostics, AST, SHA256, Syntax, ExitCodes]
+use std.[fs, env, process, time]
+use core.sys.target.selected_family
+
+// Rust: Source/CmdCompile.rs:15570
+#Test("first_rustc_error_block_keeps_the_first_error") {
+    stderr :: "warning: unused import\nerror[E0308]: mismatched types\n  --> build/out.rs:1:1\n  |\nwarning: another unused import\n  --> build/out.rs:2:1\nerror[E0425]: cannot find type\n"
+    block :: first_rustc_error_block(stderr).expect("first rustc error")
+    assert(block == "error[E0308]: mismatched types\n  --> build/out.rs:1:1\n  |")
+}
+// Rust: Source/CmdCompile.rs:15588
+#Test("first_rustc_error_block_accepts_unnumbered_error") {
+    assert(first_rustc_error_block("error: aborting due to previous error\n") == .Val("error: aborting due to previous error"))
+}
+// Rust: Source/CmdCompile.rs:15602
+#Test("command_defaults_route_dev_commands_to_fast_profile") {
+    assert(BuildProfile.default_for_command("run") == .Fast)
+    assert(BuildProfile.default_for_command("dev") == .Fast)
+    assert(BuildProfile.default_for_command("build") == .Default)
+}
+// Rust: Source/CmdCompile.rs:15618
+#Test("fast_profile_is_unoptimized_parallel_and_without_lto") {
+    assert(BuildProfile.Fast.config().rustc_args(false) == ["-C", "codegen-units=256", "-C", "opt-level=0", "-C", "lto=off"])
+}
+// Rust: Source/CmdCompile.rs:15634
+#Test("optimized_default_release_and_debug_profiles_keep_distinct_flags") {
+    optimized :: BuildProfile.Default.config().rustc_args(false)
+    assert(optimized.contains("opt-level=2"))
+    assert(!optimized.contains("-O"))
+    assert(optimized.contains("lto=off"))
+    assert(optimized.contains("strip=symbols"))
+    assert(!optimized.iter().any(arg -> arg == "lto=thin" || arg == "lto=fat" || arg.starts_with("codegen-units=")))
+    release :: BuildProfile.Release.config().rustc_args(false)
+    assert(release.contains("opt-level=3"))
+    assert(release.contains("lto=thin"))
+    assert(!release.contains("lto=off"))
+    debug :: BuildProfile.Debug.config().rustc_args(false)
+    assert(debug.contains("codegen-units=256"))
+    assert(debug.contains("debuginfo=2"))
+    assert(!debug.contains("-O"))
+    assert(!debug.contains("lto=thin"))
+}
+// Rust: Source/CmdCompile.rs:15659
+#Test("fast_and_optimized_defaults_have_distinct_cache_identity") {
+    assert(BuildProfile.Fast.cache_tag() != BuildProfile.Default.cache_tag())
+    assert(BuildProfile.Fast.config().settings_tag().contains("codegen-units=256"))
+}
+
+// Rust: Source/CmdCompile.rs:15680
+struct ScratchProject {
+    root: OSPath
+    // Rust: Source/CmdCompile.rs:15683
+    fn new() -> ScratchProject {
+        // GATE #4494: native clock, process identity and filesystem.
+        nonce :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("clock after epoch").as_nanos()
+        root :: env.temp_dir().join("jet_genmod_cache_{process.id()}_{nonce}")
+        fs.create_dir_all(&root).expect("create generic-module cache fixture")
+        ScratchProject { root: ^root }
+    }
+    // Rust: Source/CmdCompile.rs:15697
+    fn write(self, name: String, source: String) -> {
+        path :: self.root.join(name)
+        if parent :: path.parent() { fs.create_dir_all(parent).expect("create cache fixture input directory") }
+        fs.write(path, source).expect("write generic-module cache fixture")
+    }
+    // Rust: Source/CmdCompile.rs:15705
+    fn main(self) -> String { self.root.join("main.jet").to_string_lossy().into_owned() }
+    // Rust: Source/CmdCompile.rs:15708
+    fn native_cache_key_with_input(self, relative: String) -> String {
+        self.write("package.jet", "name: \"consumed-input-cache\"\nversion: \"1.0.0\"\n")
+        bundle := Loader.load_entry_with_overlay(self.main(), .None, false).expect("load consumed-input cache fixture")
+        Driver.seed_build_facts(&bundle, "dev", false, [String:String]{}).expect("seed consumed-input cache fixture")
+        diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Check)
+        assert(diagnostics.iter().all(diagnostic -> diagnostic.severity != Diagnostics.Severity.Error), "consumed-input cache fixture must check")
+        bytes :: fs.read(self.root.join(relative)).expect("read consumed-input cache fixture")
+        bundle.comptime_inputs = [AST.ComptimeInput { path: relative.replace(std.path.MAIN_SEPARATOR, "/"), hash: SHA256.sha256_hex(bytes) }]
+        native_cache_key_for_program(self.main(), &bundle, "default", "run", NativeKeyBackend.Rustc("comptime-input-test-toolchain"), .None).expect("consumed-input cache key")
+    }
+    // Rust: Source/CmdCompile.rs:15751
+    fn drop(&self) -> { _ :: fs.remove_dir_all(&self.root) }
+}
+// Rust: Source/CmdCompile.rs:15757
+#Test("crate_name_sanitizes_user_facing_file_stems") {
+    assert(Syntax.sanitize_crate_name("renderable-varargs") == "renderable_varargs")
+    assert(Syntax.sanitize_crate_name("3d.demo") == "_3d_demo")
+}
+// Rust: Source/CmdCompile.rs:15767
+#Test("signaled_program_is_not_reported_as_success") {
+    // GATE #4483/#4494: Unix process status, signal and command launch.
+    if selected_family() == "unix" {
+        status :: process.Command.new("sh").args(["-c", "kill -TERM $$"]).status().expect("launch signal fixture")
+        assert(child_exit_code(status) == ExitCodes.USER_ERROR)
+    }
+}
+// Rust: Source/CmdCompile.rs:15775
+#Test("native_cache_ignores_comments_and_tracks_bridge_identity") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("main.jet", "fn run() { print(1) }\n")
+    base :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("base cache key")
+    project.write("main.jet", "// cache-only comment\nfn run() { print(1) }\n")
+    comment :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("comment cache key")
+    assert(base == comment, "comments must not invalidate native cache")
+    instances: [String] :: []
+    no_bridge :: native_cache_salt("tool", "dependencies", "runtime", "core", "run", "linux-x86_64", instances, .None, [], .None)
+    bridge_a :: native_cache_salt("tool", "dependencies", "runtime", "core", "run", "linux-x86_64", instances, .Val("bridge-a"), [], .None)
+    bridge_b :: native_cache_salt("tool", "dependencies", "runtime", "core", "run", "linux-x86_64", instances, .Val("bridge-b"), [], .None)
+    assert(no_bridge != bridge_a, "a bridge must have its own cache identity")
+    assert(bridge_a != bridge_b, "bridge input changes must invalidate cache")
+}
+// Rust: Source/CmdCompile.rs:15833
+#Test("generic_instance_cache_salt_tracks_every_downstream_input") {
+    instances :: ["instance-a", "instance-b"]
+    salt :: (tool, deps, runtime, core, mode, target, instances: [String]) -> native_cache_salt(tool, deps, runtime, core, mode, target, instances, .None, [], .None)
+    base :: salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", instances)
+    assert(base != salt("tool-b", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", instances))
+    assert(base != salt("tool-a", "deps-b", "runtime-a", "core-a", "run", "linux-x86_64", instances))
+    assert(base != salt("tool-a", "deps-a", "runtime-b", "core-a", "run", "linux-x86_64", instances))
+    assert(base != salt("tool-a", "deps-a", "runtime-a", "core-b", "run", "linux-x86_64", instances))
+    assert(base != salt("tool-a", "deps-a", "runtime-a", "core-a", "test", "linux-x86_64", instances))
+    assert(base != salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "macos-aarch64", instances))
+    assert(base != salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", ["instance-c"]))
+    assert(base == salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", ["instance-b", "instance-a"]))
+}
+// Rust: Source/CmdCompile.rs:15957
+#Test("hostile_cache_invalidation_matrix") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("main.jet", "fn run() { print(1) }\n")
+    identity :: (compiler, schema, backend, flags, linker) -> "compiler={compiler};schema={schema};backend={backend};flags={flags};linker={linker}"
+    base_identity :: identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-a")
+    key :: (toolchain: String, profile: String) -> native_cache_key_with_toolchain(project.main(), "dev", profile, "run", toolchain, .None).expect("hostile cache fixture key")
+    base :: key(base_identity, "default")
+    identities :: [
+        ("compiler", identity("compiler-b", "schema-a", "backend-a", "flags-a", "linker-a")),
+        ("schema", identity("compiler-a", "schema-b", "backend-a", "flags-a", "linker-a")),
+        ("backend", identity("compiler-a", "schema-a", "backend-b", "flags-a", "linker-a")),
+        ("flags", identity("compiler-a", "schema-a", "backend-a", "flags-b", "linker-a")),
+        ("linker", identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-b"))
+    ]
+    for (input, changed) in identities { assert(base != key(changed, "default"), "{input} must miss final cache") }
+    assert(base != key(base_identity, "profile:debug;opt:none"), "profile must miss final cache")
+    instances :: ["instance-a"]
+    salt :: (dependencies, runtime, core, target) -> native_cache_salt(base_identity, dependencies, runtime, core, "run", target, instances, .None, [], .None)
+    base_salt :: salt("dependency-a", "generated-runtime-a", "core-a", "linux-x86_64")
+    assert(base_salt != native_cache_salt_with_schema("jet-native-cache-salt-v4".bytes(), base_identity, "dependency-a", "generated-runtime-a", "core-a", "run", "linux-x86_64", instances, .None, [], .None), "cache-schema change must miss final work")
+    for (input, changed) in [
+        ("dependency", salt("dependency-b", "generated-runtime-a", "core-a", "linux-x86_64")),
+        ("generated code", salt("dependency-a", "generated-runtime-b", "core-a", "linux-x86_64")),
+        ("Core artifact", salt("dependency-a", "generated-runtime-a", "core-b", "linux-x86_64")),
+        ("target", salt("dependency-a", "generated-runtime-a", "core-a", "wasm32"))
+    ] { assert(base_salt != changed, "{input} must miss affected final work") }
+}
+// Rust: Source/CmdCompile.rs:16089
+#Test("native_cache_key_requires_an_exact_emitted_program") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("package.jet", "name: \"prepared-cache\"\nversion: \"1.0.0\"\n")
+    project.write("main.jet", "fn run() {}\n")
+    options := Driver.BuildRunOptions.default()
+    options.package_scope = true
+    options.build_override = true
+    exact_inputs :: Driver.FrontEndInputs.for_build(project.main(), &options)
+    exact :: Driver.prepare_build_front_end(exact_inputs).expect("prepare exact runtime bundle")
+    assert(exact.emitted_program().is_some())
+    assert(native_cache_key_for_prepared_build(project.main(), .Val(&exact), "dev", "run", NativeKeyBackend.Cranelift, .None).is_some(), "an exact checked runtime bundle keeps native caching enabled")
+    project.write("tools/build.jet", "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    package_inputs :: Driver.FrontEndInputs.for_build(project.main(), &options)
+    package :: Driver.prepare_build_front_end(package_inputs).expect("prepare external package build entry")
+    assert(package.emitted_program().is_none(), "a package build entry does not itself equal the emitted runtime bundle")
+    assert(native_cache_key_for_prepared_build(project.main(), .Val(&package), "dev", "run", NativeKeyBackend.Cranelift, .None) == .None, "without an exact emitted bundle, native cache lookup and store stay disabled")
+}
+// Rust: Source/CmdCompile.rs:16143
+#Test("generic_instance_native_cache_key_invalidates_on_program_dependency_arg_package_and_profile_edits") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    main :: "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n"
+    dependency :: "pub module box<T>(n: Int) { pub fn value() -> Int { return n } }\n"
+    manifest_v1 :: "name: \"cache-proof\"\nversion: \"1.0.0\"\n"
+    project.write("main.jet", main)
+    project.write("defs.jet", dependency)
+    project.write("package.jet", manifest_v1)
+    base :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("base cache key")
+    project.write("package.jet", "// semantic no-op\nname: \"cache-proof\"\nversion: \"1.0.0\"\n")
+    manifest_comment :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("comment-only manifest cache key")
+    assert(base == manifest_comment, "comment-only package manifest edit must reuse the native cache")
+    project.write("package.jet", manifest_v1)
+    toolchain_a :: native_cache_key_with_toolchain(project.main(), "dev", "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a", .None).expect("toolchain A cache key")
+    toolchain_b :: native_cache_key_with_toolchain(project.main(), "dev", "default", "run", "compiler-build-b/rustc-a/linker-a/backend-a", .None).expect("toolchain B cache key")
+    assert(toolchain_a != toolchain_b, "production native-cache key seam must include compiler/toolchain identity")
+    project.write("main.jet", "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value() + 1) }\n")
+    program_body :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("program body cache key")
+    assert(base != program_body, "entry-body edit must invalidate native cache")
+    project.write("main.jet", main)
+    project.write("defs.jet", "pub module box<T>(n: Int) { pub fn value() -> Int { return n + 1 } }\n")
+    dependency_body :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("dependency cache key")
+    assert(base != dependency_body, "imported template-body edit must invalidate native cache")
+    project.write("defs.jet", dependency)
+    project.write("main.jet", "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(4)\nfn run() { print(selected.value()) }\n")
+    argument :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("argument cache key")
+    assert(base != argument, "normalized instance-argument edit must invalidate native cache")
+    project.write("main.jet", main)
+    project.write("package.jet", "name: \"cache-proof\"\nversion: \"2.0.0\"\n")
+    package :: native_cache_key(project.main(), "dev", "default", "run", .None).expect("package cache key")
+    assert(base != package, "package manifest edit must invalidate native cache")
+    project.write("package.jet", manifest_v1)
+    profile :: native_cache_key(project.main(), "small", "small", "run", .None).expect("profile cache key")
+    assert(base != profile, "build-profile edit must invalidate native cache")
+}
+// Rust: Source/CmdCompile.rs:16245
+#Test("native_cache_key_invalidates_when_consumed_lock_changes") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("main.jet", "fn run() { print(1) }\n")
+    project.write(".jet/lock", "version = 1\n")
+    base :: project.native_cache_key_with_input(".jet/lock")
+    project.write(".jet/lock", "version = 2\n")
+    changed :: project.native_cache_key_with_input(".jet/lock")
+    assert(base != changed, "a consumed package lock edit must invalidate native cache")
+}
+// Rust: Source/CmdCompile.rs:16261
+#Test("native_cache_key_invalidates_when_consumed_profile_changes") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("main.jet", "fn run() { print(1) }\n")
+    project.write("env.jet", "module dev {}\n")
+    base :: project.native_cache_key_with_input("env.jet")
+    project.write("env.jet", "// changed profile\nmodule dev {}\n")
+    changed :: project.native_cache_key_with_input("env.jet")
+    assert(base != changed, "a consumed profile edit must invalidate native cache")
+}
+// Rust: Source/CmdCompile.rs:16277
+#Test("native_cache_key_invalidates_when_consumed_config_changes") {
+    project :: ScratchProject.new()
+    defer project.drop()
+    project.write("main.jet", "fn run() { print(1) }\n")
+    project.write("config/release.jet", "pub release :: Config.{ version: \"1\" }\n")
+    base :: project.native_cache_key_with_input("config/release.jet")
+    project.write("config/release.jet", "// changed config\npub release :: Config.{ version: \"1\" }\n")
+    changed :: project.native_cache_key_with_input("config/release.jet")
+    assert(base != changed, "a consumed package config edit must invalidate native cache")
+}
+// Rust: Source/CmdCompile.rs:16299
+#Test("detects_ld_cannot_find") {
+    stderr :: "  = note: /usr/bin/ld: cannot find -lraylib: No such file or directory\n  collect2: error: ld returned 1 exit status\n"
+    assert(missing_c_lib(stderr) == .Val("raylib"))
+}
+// Rust: Source/CmdCompile.rs:16306
+#Test("detects_bare_form") { assert(missing_c_lib("ld: cannot find -lsqlite3\n") == .Val("sqlite3")) }
+// Rust: Source/CmdCompile.rs:16314
+#Test("genuine_codegen_error_is_not_a_missing_lib") {
+    assert(missing_c_lib("error[E0308]: mismatched types\n --> build/main.rs:3:5\n") == .None)
+}
+// Rust: Source/CmdCompile.rs:16321
+#Test("detects_missing_system_linker") {
+    assert(missing_linker("error: linker `cc` not found\n  |\n  = note: No such file or directory (os error 2)\n") == .Val("cc"))
+}
+// Rust: Source/CmdCompile.rs:16328
+#Test("genuine_codegen_error_is_not_a_missing_linker") {
+    assert(missing_linker("error[E0425]: cannot find type `RaylibWindow` in module `jet_std`\n") == .None)
+}
+// Rust: Source/CmdCompile.rs:16334
+#Test("driver_brands_runtime_host_fault_without_rust_text") {
+    diagnostic :: Diagnostics.Diagnostic.runtime_host_fault("before\n", "the JIT runtime helper failed")
+    (stdout, what) :: diagnostic.runtime_host_fault_parts().expect("typed runtime host fault")
+    report :: render_internal_fault(what)
+    assert(stdout == "before\n")
+    assert(report.starts_with("internal compiler error: the JIT runtime helper failed\n"))
+    assert(report.contains("This is a bug in jet, NOT in your program."))
+    assert(!report.contains("thread 'main' panicked"))
+    assert(!report.contains("runtime_host.rs"))
+}
+// Rust: Source/CmdCompile.rs:16357
+#Test("web_artifact_writer_rejects_symlink_output") {
+    // GATE #4483/#4494: target Unix symlink and filesystem operations.
+    if selected_family() == "unix" {
+        root :: env.current_dir().unwrap().join(".jet-web-output-symlink-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        fs.create_dir_all(&root).unwrap()
+        outside :: root.join("outside.js")
+        output :: root.join("app.js")
+        fs.write(&outside, "must survive").unwrap()
+        std.os.unix.fs.symlink(&outside, &output).unwrap()
+        error :: validate_web_output_file(&output, &root).expect_err("web artifact writes must not follow symlinks")
+        assert(error.contains("must not be a symlink"), "{error}")
+        assert(fs.read_to_string(&outside).unwrap() == "must survive")
+        _ :: fs.remove_dir_all(&root)
+    }
+}
+// Rust: Source/CmdCompile.rs:16380
+#Test("web_artifact_writer_rejects_hardlink_output") {
+    // GATE #4483/#4494: target Unix hard-link filesystem operations.
+    if selected_family() == "unix" {
+        root :: env.current_dir().unwrap().join(".jet-web-output-hardlink-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        fs.create_dir_all(&root).unwrap()
+        outside :: root.with_file_name(".jet-web-output-hardlink-target-{process.id()}")
+        output :: root.join("app.js")
+        fs.write(&outside, "must survive").unwrap()
+        fs.hard_link(&outside, &output).unwrap()
+        error :: validate_web_output_file(&output, &root).expect_err("web artifact writes must not follow hardlinks")
+        assert(error.contains("must not be a hard link"), "{error}")
+        assert(fs.read_to_string(&outside).unwrap() == "must survive")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_file(&outside)
+    }
+}
+// Rust: Source/CmdCompile.rs:16405
+#Test("web_build_rejects_symlinked_output_root_before_creation") {
+    // GATE #4483/#4494: target Unix symlink filesystem operations.
+    if selected_family() == "unix" {
+        root :: env.temp_dir().join("jet-web-build-root-symlink-{process.id()}")
+        outside :: env.temp_dir().join("jet-web-build-root-outside-{process.id()}")
+        _ :: fs.remove_file(&root)
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+        fs.create_dir_all(&outside).unwrap()
+        std.os.unix.fs.symlink(&outside, &root).unwrap()
+        error :: ensure_web_output_dir(&root).expect_err("web builds must reject a symlinked output root")
+        assert(error.contains("must not be a symlink"), "{error}")
+        assert(!outside.join("created-by-build").exists())
+        _ :: fs.remove_file(&root)
+        _ :: fs.remove_dir_all(&outside)
+    }
+}
+// Rust: Source/CmdCompile.rs:16434
+#Test("changed_web_build_reuses_identity_path_and_populated_dir") {
+    // GATE #4494: native filesystem and process identity.
+    root :: env.temp_dir().join("jet-web-rustc-session-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    session := WebRustcIncrementalSession.new(&root)
+    first :: session.prepare_dir("stable-web-identity", true, false).expect("baseline incremental directory")
+    marker :: first.join("rustc-incremental-marker")
+    fs.write(&marker, "populated".bytes()).expect("baseline rustc output")
+    second :: session.prepare_dir("stable-web-identity", true, false).expect("changed-function incremental directory")
+    assert(first == second)
+    assert(second.join("rustc-incremental-marker").is_file())
+    assert(session.reused_dirs() == 1)
+    session.cleanup()
+    assert(!first.exists())
+    _ :: fs.remove_dir_all(&root)
+}

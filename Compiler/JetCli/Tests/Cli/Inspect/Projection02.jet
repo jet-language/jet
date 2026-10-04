@@ -1,0 +1,27 @@
+use Cli.Inspect.Projection02.[source_line, explicit_file_proof_rows, digest_quote, parse_digest_args, digest_slices, llm_digest]
+
+// Behavioral control for Source/CmdInspect.rs:557,602; no inline Rust tests.
+#Test("explicit_file_proofs_remain_not_applicable_and_lines_use_byte_offsets") {
+    rows :: explicit_file_proof_rows()
+    assert(rows.len() == 4)
+    assert(rows[0].diagnostic == "E2389")
+    assert(rows[3].diagnostic == "E2392")
+    loop row in rows {
+        assert(row.output == "not-applicable")
+        assert(row.status == "not applicable")
+    }
+    assert(source_line("a\nb\n", UInt{0}) == UInt{1})
+    assert(source_line("a\nb\n", UInt{2}) == UInt{2})
+    assert(source_line("a\nb\n", UInt{999}) == UInt{3})
+}
+
+// Behavioral control for Source/CmdInspect.rs:1718,1752,2007.
+#Test("digest_topics_reconstruct_the_exact_full_digest") {
+    (topic, list_topics) :: parse_digest_args(&["--topic=markers", "--list-topics"])
+    assert(topic == Some("markers"))
+    assert(list_topics)
+    assert(digest_quote("a\\b\"c") == "a\\\\b\\\"c")
+    slices :: digest_slices()
+    joined :: slices.iter().map(slice -> slice.bytes).collect<[String]>().join("")
+    assert(joined == llm_digest())
+}

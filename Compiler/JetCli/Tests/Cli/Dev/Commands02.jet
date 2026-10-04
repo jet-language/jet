@@ -1,0 +1,17 @@
+// Behavioral controls for Rust: Source/CmdDevTools.rs:2223.
+#Test("dev_incremental_reload_requires_unmodified_dev_entry") {
+    assert(dev_incremental_reload_enabled(None, "dev", GateSet.empty(), [:]))
+    assert(!dev_incremental_reload_enabled(.Val("job"), "dev", GateSet.empty(), [:]))
+    assert(!dev_incremental_reload_enabled(None, "release", GateSet.empty(), [:]))
+    assert(!dev_incremental_reload_enabled(None, "dev", GateSet.empty(), ["key":"value"]))
+}
+// Behavioral controls for Rust: Source/CmdDevTools.rs:3394.
+#Test("ddmin_preserves_the_interesting_line") {
+    reduced :: ddmin(["before", "target", "after"], fn(text: String) -> text.contains("target"))
+    assert(reduced == ["target"])
+}
+// Behavioral controls for Rust: Source/CmdDevTools.rs:3436.
+#Test("reduced_path_keeps_parent_and_source_extension") {
+    assert(reduced_path("folder/case.jet") == OSPath.new("folder/case.reduced.jet"))
+    assert(reduced_path("case.jet") == OSPath.new("case.reduced.jet"))
+}

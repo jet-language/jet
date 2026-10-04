@@ -1,0 +1,153 @@
+// Rust: Source/CmdPerf.rs:3756
+fn chrome_projection_trace() -> CanonicalJson {
+    symbol :: CanonicalJson.object([("name", CanonicalJson.String("run")), ("path", CanonicalJson.String("examples/app.jet"))]) ?? panic("unique symbol keys")
+    task :: (id: String) -> CanonicalJson.object([("id", CanonicalJson.Integer(id)), ("symbol", ~symbol)]) ?? panic("unique task keys")
+    allocation :: CanonicalJson.object([("bytes", CanonicalJson.Integer("64")), ("count", CanonicalJson.Integer("2")), ("symbol", ~symbol)]) ?? panic("unique allocation keys")
+    browser :: CanonicalJson.object([("class", CanonicalJson.String("dom")), ("duration_ns", CanonicalJson.Integer("3000000")), ("start_ns", CanonicalJson.Integer("2000000")), ("symbol", ~symbol)]) ?? panic("unique browser keys")
+    io :: CanonicalJson.object([("end_ns", CanonicalJson.Integer("9000000")), ("kind", CanonicalJson.String("tcp")), ("start_ns", CanonicalJson.Integer("4000000")), ("symbol", ~symbol), ("task_id", CanonicalJson.Integer("1")), ("wait", CanonicalJson.String("tcp accept"))]) ?? panic("unique io keys")
+    lock :: CanonicalJson.object([("depth", CanonicalJson.Integer("1")), ("kind", CanonicalJson.String("channel")), ("recv_waiters", CanonicalJson.Integer("1")), ("send_waiters", CanonicalJson.Integer("0")), ("symbol", ~symbol)]) ?? panic("unique lock keys")
+    native :: CanonicalJson.object([("duration_ns", CanonicalJson.Integer("5000000")), ("observed_at_ns", CanonicalJson.Integer("1000000")), ("status", CanonicalJson.String("captured")), ("symbol", ~symbol), ("task_id", CanonicalJson.Integer("1"))]) ?? panic("unique native keys")
+    wall :: CanonicalJson.object([("domain", CanonicalJson.String("wall")), ("duration_ns", CanonicalJson.Integer("1500000")), ("symbol", ~symbol)]) ?? panic("unique wall keys")
+    cpu :: CanonicalJson.object([("domain", CanonicalJson.String("cpu")), ("duration_ns", CanonicalJson.Integer("2500000")), ("symbol", ~symbol)]) ?? panic("unique cpu keys")
+    span1 :: CanonicalJson.object([("end_ns", CanonicalJson.Integer("8000000")), ("start_ns", CanonicalJson.Integer("1000000")), ("status", CanonicalJson.String("captured")), ("symbol", ~symbol), ("task_id", CanonicalJson.Integer("1"))]) ?? panic("unique span keys")
+    span2 :: CanonicalJson.object([("end_ns", CanonicalJson.Integer("7000000")), ("start_ns", CanonicalJson.Integer("2000000")), ("status", CanonicalJson.String("captured")), ("symbol", ~symbol), ("task_id", CanonicalJson.Integer("2"))]) ?? panic("unique span keys")
+    content :: CanonicalJson.object([("allocations", CanonicalJson.Array([allocation])), ("browser", CanonicalJson.Array([browser])), ("io", CanonicalJson.Array([io])), ("locks", CanonicalJson.Array([lock])), ("native", CanonicalJson.Array([native])), ("samples", CanonicalJson.Array([wall, cpu])), ("spans", CanonicalJson.Array([span1, span2])), ("tasks", CanonicalJson.Array([task("1"), task("2")]))]) ?? panic("unique content keys")
+    CanonicalJson.object([("content", ^content), ("trace_id", CanonicalJson.String("trace-test"))]) ?? panic("unique trace keys")
+}
+
+// Rust: Source/CmdPerf.rs:3896
+#Test("chrome_projection_emits_all_domains_in_trace_event_units") {
+    projection :: export_chrome_projection(chrome_projection_trace())
+    fields :: if projection == .Object(fields) -> fields else -> panic("projection is not an object")
+    events :: if fields.get("traceEvents") == .Val(.Array(events)) -> events else -> panic("traceEvents is not an array")
+    complete := 0
+    metadata_names := [String:Bool]{}
+    task_tids := [String:Bool]{}
+    matching_wall := false
+    loop event in events {
+        event_fields :: if event == .Object(fields) -> fields else -> panic("trace event is not an object")
+        phase :: if event_fields.get("ph") == .Val(.String(phase)) -> phase else -> panic("trace event has no phase")
+        assert(phase == "X" || phase == "M", "unexpected phase {phase}")
+        if phase == "X" {
+            complete += 1
+            assert(event_fields.has_key("args"), "complete event has no args")
+            assert(event_fields.has_key("dur"), "complete event has no duration")
+            assert(event_fields.has_key("ts"), "complete event has no timestamp")
+            assert(event_fields.has_key("tid"), "complete event has no lane")
+        } else {
+            if event_fields.get("name") == .Val(.String(name)) {
+                metadata_names[~name] = true
+                if name == "thread_name" {
+                    if event_fields.get("tid") == .Val(.Integer(tid)) {
+                        if tid == "1001" || tid == "1002" -> task_tids[~tid] = true
+                    }
+                }
+            }
+        }
+        if event_fields.get("name") == Val(CanonicalJson.String("examples/app.jet#run")) && event_fields.get("dur") == Val(CanonicalJson.Integer("1500")) && event_fields.get("ph") == Val(CanonicalJson.String("X")) && event_fields.has_key("args") -> matching_wall = true
+    }
+    assert_eq(complete, 9, "every captured domain row needs an X event")
+    assert(metadata_names.has_key("process_name"))
+    assert(metadata_names.has_key("thread_name"))
+    tids := task_tids.keys().to_list()
+    &tids.sort()
+    assert_eq(tids, [String]{"1001", "1002"})
+    assert(matching_wall)
+    loss :: if fields.get("loss") == .Val(.String(loss)) -> loss else -> panic("loss is not a string")
+    assert(loss.contains("unavailable states"), loss)
+    assert(!loss.contains("no pprof/otel/chrome payloads"), loss)
+    assert_eq(CanonicalJson.parse_canonical(projection.bytes()) ?? panic(err), projection)
+}
+
+// Rust: Source/CmdPerf.rs:3960
+#Test("task_ingestion_is_capped_and_audits_possible_io_loss") {
+    tasks := [String]{}
+    loop id in 1..=TRACE_TASK_ROW_LIMIT + 1 -> &tasks.push("{{\"id\":{id},\"parent\":0,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}}")
+    snapshot :: "{{\"tasks\":[{tasks.join(\",\")}]}}"
+    observed :: observe_tasks(snapshot, 10)
+    assert_eq(observed.rows.len(), Int{TRACE_TASK_ROW_LIMIT})
+    assert(observed.truncated)
+    timeline := IOTimeline.default()
+    &timeline.observe(observed, 10, false)
+    &timeline.finish(20)
+    assert_eq(timeline.tasks.len(), Int{TRACE_TASK_ROW_LIMIT})
+    assert_eq(timeline.completed.len(), Int{TRACE_IO_ROW_LIMIT})
+    assert_eq(timeline.task_spans.len(), Int{TRACE_SPAN_ROW_LIMIT})
+    assert(timeline.task_rows_truncated)
+    assert(timeline.io_rows_truncated)
+    assert(timeline.span_rows_truncated)
+}
+
+// Rust: Source/CmdPerf.rs:3986
+#Test("sequential_processes_with_reused_runtime_task_ids_remain_distinct") {
+    snapshot :: "{{\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}}]}}"
+    first :: observe_tasks(snapshot, 100)
+    second :: observe_tasks(snapshot, 200)
+    timeline := IOTimeline.default()
+    &timeline.observe(first, 10, true)
+    &timeline.observe(second, 20, false)
+    &timeline.finish(30)
+    tasks :: timeline.tasks()
+    ids :: trace_task_id_map(tasks) // GATE #4499 composite (process, runtime task) keys.
+    assert_eq(tasks.len(), 4)
+    assert_eq(timeline.spans().len(), 4)
+    assert_eq(timeline.completed.len(), 2)
+    assert_eq(timeline.completed[0].end_ns, 10)
+    assert_eq(timeline.completed[1].end_ns, 20)
+    assert_ne(ids[(100, 1)], ids[(200, 1)])
+    assert_ne(ids[(100, 2)], ids[(200, 2)])
+    assert_eq(ids[(100, 1)], 1)
+    assert_eq(ids[(100, 2)], 2)
+    assert_eq(ids[(200, 1)], 3)
+    assert_eq(ids[(200, 2)], 4)
+    loop process_id in [U32]{100, 200} {
+        child :: tasks.iter().find((task) -> task.key() == (process_id, 2)) ?? panic("child missing")
+        assert_eq(ids[(process_id, child.parent)], ids[(process_id, 1)])
+    }
+}
+
+// Rust: Source/CmdPerf.rs:4018
+#Test("native_process_cpu_support_matrix_is_explicit") {
+    assert(native_process_cpu_supported("linux"))
+    assert(native_process_cpu_supported("android"))
+    assert(!native_process_cpu_supported("macos"))
+    assert(!native_process_cpu_supported("windows"))
+    assert(!native_process_cpu_supported("wasi"))
+    assert_eq(native_unavailable_reason_for("windows", "x86_64-pc-windows-msvc"), "process CPU timing is unavailable on target x86_64-pc-windows-msvc")
+    assert_eq(native_unavailable_reason_for("linux", "x86_64-unknown-linux-gnu"), "process CPU timing was not observable")
+}
+
+// Rust: Source/CmdPerf.rs:4035
+#Test("proc_tick_conversion_uses_the_injected_rate_without_overflow") {
+    auxv := [U8]{}
+    // GATE #4483: native words and byte order are facts of the selected target.
+    loop word in [USize]{17, 250, 0, 0} -> &auxv.extend(word.to_ne_bytes())
+    assert_eq(clock_ticks_per_second_from_auxv(auxv), Val(U64{250}))
+    assert_eq(uptime_ticks("2.50 1.00\n", 100), Val(U64{250}))
+    assert_eq(uptime_ticks("2.50 1.00\n", 250), Val(U64{625}))
+    assert_eq(ticks_to_ns(1, 100), Val(U64{10_000_000}))
+    assert_eq(ticks_to_ns(1, 250), Val(U64{4_000_000}))
+    assert_eq(ticks_to_ns(1, 1000), Val(U64{1_000_000}))
+    assert_eq(ticks_to_ns(1, 0), None)
+    assert_eq(ticks_to_ns(U64.MAX, 1), None)
+}
+
+// Rust: Source/CmdPerf.rs:4052
+#Test("source_profile_attributes_the_parsed_entrypoint_not_a_comment") {
+    src :: "// `fn run` in a comment\nfn helper() -> {}\nfn run() -> {\n    helper()\n}\n"
+    sha :: "a".repeat(64)
+    functions :: source_functions(src) ?? panic("source parses")
+    names := [String]{}
+    loop function in functions -> &names.push(~function.name)
+    assert_eq(names, [String]{"helper", "run"})
+    profile :: sampled_source_profile("app.jet", sha, src, Val(functions), 2, 1, false)
+    assert_eq(profile.status, "captured")
+    ranges := [(String, Int, Int, Int, Int)]{}
+    loop row in profile.rows -> &ranges.push((~row.clock, row.source.start_line, row.source.start_column, row.source.end_line, row.source.end_column))
+    assert_eq(ranges, [("wall", 3, 1, 5, 2), ("cpu", 3, 1, 5, 2)])
+    unparsed :: "fn run( {"
+    assert(source_functions(unparsed) == None)
+    unsupported :: sampled_source_profile("app.jet", sha, unparsed, None, 2, 1, false)
+    assert_eq(unsupported.status, "unsupported")
+    assert(unsupported.rows.is_empty())
+}

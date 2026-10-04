@@ -1,0 +1,26 @@
+// Source/CmdImport.rs:2522-2594 has no inline Rust tests; behavioral binding controls.
+fn import02_record(attachments: [EvidenceAttachment]) -> EvidenceRecord Never! {
+    source :: EvidenceSource{path: "input", line: U32{0}, column: U32{0}}
+    build :: EvidenceBuild{toolchain: "tool", target: "target", profile: "source-import"}
+    revision :: EvidenceRevision{source: "source", build: "build", revision: "run"}
+    identity :: evidence_identity_for_record("report", "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, source, U64{1}, "generated")
+    record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Compile, EvidenceOutcome.Generated, U64{1}, source, build, revision)
+    record.attachments = ^attachments
+    record
+}
+
+#Test("import_attachment_requires_exactly_one_current_value") {
+    good :: import02_record([EvidenceAttachment]{EvidenceAttachment{name: "boundary", value: "current"}})
+    assert(jet_cli_import_require_attachment(good, "boundary", "current") == .Ok(_))
+    assert_eq(jet_cli_import_require_attachment(good, "boundary", "stale"), Err("indexed evidence attachment `boundary` does not match the current import"))
+    assert_eq(jet_cli_import_require_attachment(good, "absent", "current"), Err("indexed evidence attachment `absent` does not match the current import"))
+    duplicate :: import02_record([EvidenceAttachment]{EvidenceAttachment{name: "boundary", value: "current"}, EvidenceAttachment{name: "boundary", value: "current"}})
+    assert(jet_cli_import_require_attachment(duplicate, "boundary", "current") == .Err(_))
+}
+
+#Test("import_assumption_attachments_are_sorted_but_not_deduplicated") {
+    record :: import02_record([EvidenceAttachment]{EvidenceAttachment{name: "assumption", value: "b"}, EvidenceAttachment{name: "boundary", value: "ignored"}, EvidenceAttachment{name: "assumption", value: "a"}, EvidenceAttachment{name: "assumption", value: "a"}})
+    assert_eq(jet_cli_import_attachment_values(record, "assumption"), [String]{"b", "a", "a"})
+    assert(jet_cli_import_require_attachment_set(record, "assumption", [String]{"a", "a", "b"}) == .Ok(_))
+    assert_eq(jet_cli_import_require_attachment_set(record, "assumption", [String]{"a", "b"}), Err("indexed evidence attachments `assumption` do not match the current import"))
+}

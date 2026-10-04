@@ -1,1782 +1,747 @@
-// PORT-PENDING 0673 source-cmdcompile-slice-11989: Source/CmdCompile.rs:11989-13766
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn write_web_artifacts(
-//RS     file: &str,
-//RS     web: &jet::Codegen::MIRWeb::WebArtifacts,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     verbose: bool,
-//RS     output: &jet_devserver::WebHost::WebOutputAuthority,
-//RS     incremental_session: Option<&mut WebRustcIncrementalSession>,
-//RS     emit_maps: bool,
-//RS     mode: OutputMode,
-//RS ) -> Result<WebBuildPaths, String> {
-//RS     let step = |msg: String| {
-//RS         if verbose {
-//RS             write_mode_status(mode, &format!("[build] {msg}\n"));
-//RS         }
-//RS     };
-//RS     let output_path = |name: &str| {
-//RS         output
-//RS             .path_for(name)
-//RS             .map_err(|e| format!("error: couldn't resolve web output `{name}`: {e}"))
-//RS     };
-//RS 
-//RS     let manifest_path = output_path("web.manifest.json")?;
-//RS     let dom_path = output_path("jet_dom_runtime.js")?;
-//RS     let js_path = output_path("app.js")?;
-//RS     let js_map_path = output_path("app.js.map")?;
-//RS     let wasm_rs_path = output_path("app_wasm.rs")?;
-//RS     let wasm_path = output_path("app.wasm")?;
-//RS     let wasm_map_path = output_path("app.wasm.map")?;
-//RS     let html_path = output_path("index.html")?;
-//RS 
-//RS     // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
-//RS     // (1) an explicit `#HTML("path.html")` marker, relative to the source
-//RS     //     file's own directory; a path that doesn't resolve is a hard error
-//RS     //     naming the missing file, never a silent fallback;
-//RS     // (2) the legacy `<stem>.html` sibling-filename convention, kept for
-//RS     //     backward-compat with existing examples that predate the marker;
-//RS     // (3) the generic `jet_main()`-only page from `emit_index_html`.
-//RS     let html_contents = if let Some(rel) = &web.explicit_html_path {
-//RS         read_web_html_source(file, Path::new(rel), true)?
-//RS             .ok_or_else(|| format!("error: `#HTML(\"{rel}\")` source is missing"))?
-//RS     } else {
-//RS         let sibling_html = PathBuf::from(file).with_extension("html");
-//RS         match sibling_html.file_name() {
-//RS             Some(name) => read_web_html_source(file, Path::new(name), false)?
-//RS                 .unwrap_or_else(|| web.index_html.clone()),
-//RS             None => web.index_html.clone(),
-//RS         }
-//RS     };
-//RS 
-//RS     let manifest_json = if emit_maps {
-//RS         web.manifest_json.clone()
-//RS     } else {
-//RS         strip_manifest_source_map(&web.manifest_json)
-//RS     };
-//RS     let mut js_app = web.js_app.clone();
-//RS     if emit_maps {
-//RS         if !js_app.ends_with('\n') {
-//RS             js_app.push('\n');
-//RS         }
-//RS         js_app.push_str("//# sourceMappingURL=app.js.map\n");
-//RS     }
-//RS 
-//RS     output
-//RS         .replace_file("web.manifest.json", manifest_json.as_bytes())
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", manifest_path.display(), e))?;
-//RS     output
-//RS         .replace_file("jet_dom_runtime.js", web.dom_runtime.as_bytes())
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", dom_path.display(), e))?;
-//RS     output
-//RS         .replace_file("app.js", js_app.as_bytes())
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", js_path.display(), e))?;
-//RS     output
-//RS         .replace_file("app_wasm.rs", web.wasm_rust.as_bytes())
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", wasm_rs_path.display(), e))?;
-//RS     output
-//RS         .replace_file("index.html", html_contents.as_bytes())
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", html_path.display(), e))?;
-//RS 
-//RS     let mut js_map_written = None;
-//RS     if emit_maps {
-//RS         output
-//RS             .replace_file("app.js.map", web.js_source_map.as_bytes())
-//RS             .map_err(|e| format!("error: couldn't write {}: {}", js_map_path.display(), e))?;
-//RS         js_map_written = Some(js_map_path.clone());
-//RS         step(format!("js map     -> {}", js_map_path.display()));
-//RS     } else {
-//RS         output
-//RS             .remove_file_if_exists("app.js.map")
-//RS             .map_err(|e| format!("error: couldn't remove {}: {}", js_map_path.display(), e))?;
-//RS         output
-//RS             .remove_file_if_exists("app.wasm.map")
-//RS             .map_err(|e| format!("error: couldn't remove {}: {}", wasm_map_path.display(), e))?;
-//RS     }
-//RS 
-//RS     step(format!("web manifest -> {}", manifest_path.display()));
-//RS     step(format!("dom shim    -> {}", dom_path.display()));
-//RS     step(format!("js entry    -> {}", js_path.display()));
-//RS     step(format!("wasm emit   -> {}", wasm_rs_path.display()));
-//RS     step(format!("index.html  -> {}", html_path.display()));
-//RS     step(format!(
-//RS         "rustc wasm  {} -> {}",
-//RS         wasm_rs_path.display(),
-//RS         wasm_path.display()
-//RS     ));
-//RS 
-//RS     let wasm_temp = output
-//RS         .create_temp_file("jet-web-rustc", ".wasm")
-//RS         .map_err(|e| format!("error: couldn't create a wasm temporary: {e}"))?;
-//RS     let wasm_temp_path = wasm_temp.path().to_path_buf();
-//RS     let rustc_profile_flags = if emit_maps {
-//RS         // Exact Jet statement lines need rustc's Wasm line table.
-//RS         vec![
-//RS             "-C".to_string(),
-//RS             "opt-level=0".to_string(),
-//RS             "-C".to_string(),
-//RS             "debuginfo=2".to_string(),
-//RS         ]
-//RS     } else {
-//RS 
-//RS         vec!["-O".to_string()]
-//RS     };
-//RS     let incremental_dir = incremental_session
-//RS         .map(|session| session.prepare_dir(&web.rustc_incremental_identity, emit_maps, ffi.is_some()))
-//RS         .transpose()?;
-//RS     // The existing runtime marker split is below the generated program: the
-//RS     // invariant Prelude/Core closure is compiled for this exact Wasm/profile
-//RS     // flag set, while the changed program source is always compiled below.
-//RS     let mut runtime_flags = vec![
-//RS         std::ffi::OsString::from("--target"),
-//RS         std::ffi::OsString::from("wasm32-unknown-unknown"),
-//RS     ];
-//RS     runtime_flags.extend(
-//RS         rustc_profile_flags
-//RS             .iter()
-//RS             .cloned()
-//RS             .map(std::ffi::OsString::from),
-//RS     );
-//RS     let inline_runtime = || jet_store::runtime::PreparedRuntime::inline(&web.wasm_rust);
-//RS     let prepared_runtime = if ffi.is_some() {
-//RS         // Rust FFI glue can make runtime items depend on the external crate;
-//RS         // preserve the safe inline path rather than sharing a partial closure.
-//RS         inline_runtime()
-//RS     } else {
-//RS         match Store::from_env() {
-//RS             Ok(store) => jet_store::runtime::prepare(
-//RS                 &store,
-//RS                 std::ffi::OsStr::new("rustc"),
-//RS                 &web.wasm_rust,
-//RS                 &runtime_flags,
-//RS                 &[],
-//RS             )
-//RS             .unwrap_or_else(|_| inline_runtime()),
-//RS             Err(_) => inline_runtime(),
-//RS         }
-//RS     };
-//RS     let mut _prepared_source = None;
-//RS     let mut split_source_path = wasm_rs_path.clone();
-//RS     if prepared_runtime.is_split() {
-//RS         if let Some(dir) = incremental_dir.as_ref() {
-//RS             let source_path = dir.join("app_wasm.rs");
-//RS             fs::write(&source_path, prepared_runtime.rust().as_bytes()).map_err(|error| {
-//RS                 format!(
-//RS                     "error: couldn't write the prepared Web rustc source {}: {error}",
-//RS                     source_path.display()
-//RS                 )
-//RS             })?;
-//RS             split_source_path = source_path;
-//RS         } else {
-//RS             let mut source = output
-//RS                 .create_temp_file("jet-web-rustc", ".rs")
-//RS                 .map_err(|e| format!("error: couldn't create a prepared Wasm source: {e}"))?;
-//RS             source
-//RS                 .write_all(prepared_runtime.rust().as_bytes())
-//RS                 .map_err(|e| format!("error: couldn't write a prepared Wasm source: {e}"))?;
-//RS             split_source_path = source.path().to_path_buf();
-//RS             _prepared_source = Some(source);
-//RS         }
-//RS     }
-//RS     let wasm_destination = wasm_temp_path.to_str().ok_or_else(|| {
-//RS         format!(
-//RS             "error: web wasm temporary path is not valid UTF-8: {}",
-//RS             wasm_temp_path.display()
-//RS         )
-//RS     })?;
-//RS 
-//RS     let run_rustc = |source_path: &Path,
-//RS                      prepared: Option<&jet_store::runtime::PreparedRuntime>|
-//RS      -> Result<std::process::Output, String> {
-//RS         let wasm_source = source_path.to_str().ok_or_else(|| {
-//RS             format!(
-//RS                 "error: web source path is not valid UTF-8: {}",
-//RS                 source_path.display()
-//RS             )
-//RS         })?;
-//RS         let mut rustc = Command::new("rustc");
-//RS         rustc.args([
-//RS             "--edition",
-//RS             "2021",
-//RS             "--target",
-//RS             "wasm32-unknown-unknown",
-//RS             "--crate-type",
-//RS             "cdylib",
-//RS             "--crate-name",
-//RS         ]);
-//RS         rustc.arg(jet::Syntax::sanitize_crate_name(
-//RS             wasm_rs_path
-//RS                 .file_stem()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("out"),
-//RS         ));
-//RS         rustc.args(&rustc_profile_flags);
-//RS         if let Some(dir) = incremental_dir.as_ref() {
-//RS             rustc.arg("-C").arg(format!("incremental={}", dir.display()));
-//RS         }
-//RS         if let Some(prepared) = prepared {
-//RS             prepared.add_rustc_args(&mut rustc);
-//RS         }
-//RS         rustc.args([wasm_source, "-o", wasm_destination]);
-//RS         if let Some(link) = ffi {
-//RS             rustc
-//RS                 .arg("--extern")
-//RS                 .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS             for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS                 rustc
-//RS                     .arg("-L")
-//RS                     .arg(format!("dependency={}", deps_dir.display()));
-//RS             }
-//RS         }
-//RS         rustc
-//RS             .output()
-//RS             .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))
-//RS     };
-//RS 
-//RS     let mut used_split = prepared_runtime.is_split();
-//RS     let mut rustc = run_rustc(
-//RS         &split_source_path,
-//RS         used_split.then_some(&prepared_runtime),
-//RS     )?;
-//RS     if !rustc.status.success() && used_split {
-//RS         // The split is an optimization below the source-of-truth artifact.
-//RS         // If rustc rejects it, retry the exact complete generated source once.
-//RS         if verbose {
-//RS             step("runtime split bypassed (inline retry)".to_string());
-//RS         }
-//RS         used_split = false;
-//RS         rustc = run_rustc(&wasm_rs_path, None)?;
-//RS     }
-//RS 
-//RS     if !rustc.status.success() {
-//RS         return Err(jet::Diagnostics::render_ice_report(
-//RS             "rustc rejected generated wasm module",
-//RS             &String::from_utf8_lossy(&rustc.stderr),
-//RS             true,
-//RS         ));
-//RS     }
-//RS     if used_split {
-//RS         let status = if prepared_runtime.cache_hit() {
-//RS             "reused invariant wasm modules"
-//RS         } else {
-//RS             "stored invariant wasm modules"
-//RS         };
-//RS         step(format!("runtime   -> {status}"));
-//RS     }
-//RS 
-//RS     // rustc may atomically replace its output path. Reopen the path instead of
-//RS     // reading the pre-existing temporary-file handle, which can still point at
-//RS     // the empty inode after that rename.
-//RS     let mut wasm = fs::read(&wasm_temp_path)
-//RS         .map_err(|e| format!("error: couldn't read {}: {}", wasm_temp_path.display(), e))?;
-//RS     jet_foundation::CLISchema::embed_wasm_record(&mut wasm, &web.command_record)
-//RS         .map_err(|e| format!("error: couldn't embed JetCommandSchema metadata: {e}"))?;
-//RS 
-//RS     let mut wasm_map_written = None;
-//RS     if emit_maps {
-//RS         let wasm_map = jet::Codegen::build_wasm_jet_source_map(
-//RS             &wasm,
-//RS             &web.wasm_rust,
-//RS             &web.source_names,
-//RS             &web.source_contents,
-//RS         )
-//RS         .map_err(|e| format!("error: couldn't build app.wasm.map: {e}"))?;
-//RS         output
-//RS             .replace_file("app.wasm.map", wasm_map.as_bytes())
-//RS             .map_err(|e| format!("error: couldn't write {}: {}", wasm_map_path.display(), e))?;
-//RS         jet_foundation::WasmDebug::embed_source_mapping_url(&mut wasm, "app.wasm.map")
-//RS             .map_err(|e| format!("error: couldn't embed wasm sourceMappingURL: {e:?}"))?;
-//RS         wasm_map_written = Some(wasm_map_path.clone());
-//RS         step(format!("wasm map   -> {}", wasm_map_path.display()));
-//RS     }
-//RS 
-//RS     output
-//RS         .replace_file("app.wasm", &wasm)
-//RS         .map_err(|e| format!("error: couldn't write {}: {}", wasm_path.display(), e))?;
-//RS 
-//RS     Ok(WebBuildPaths {
-//RS         manifest: manifest_path,
-//RS         dom: dom_path,
-//RS         js: js_path,
-//RS         js_map: js_map_written,
-//RS         wasm: wasm_path,
-//RS         wasm_map: wasm_map_written,
-//RS         html: html_path,
-//RS     })
-//RS }
-//RS 
-//RS fn read_web_html_source(
-//RS     file: &str,
-//RS     relative: &Path,
-//RS     required: bool,
-//RS ) -> Result<Option<String>, String> {
-//RS     let source_dir = Path::new(file)
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or_else(|| Path::new("."));
-//RS     let source_path = source_dir.join(relative);
-//RS     let resolver = jet::Authority::AuthorityResolver::open(source_dir).map_err(|error| {
-//RS         format!(
-//RS             "error: couldn't open the pinned HTML source directory `{}`: {}",
-//RS             source_dir.display(),
-//RS             error
-//RS         )
-//RS     })?;
-//RS     let checked = match resolver.checked_file(relative) {
-//RS         Ok(checked) => checked,
-//RS         Err(error) if !required && error.is_missing() => return Ok(None),
-//RS         Err(error) if required && error.is_missing() => {
-//RS             return Err(format!(
-//RS                 "error: `#HTML(\"{}\")` names a file that doesn't exist: {} ({})",
-//RS                 relative.display(),
-//RS                 source_path.display(),
-//RS                 error
-//RS             ));
-//RS         }
-//RS         Err(error) => {
-//RS             return Err(format!(
-//RS                 "error: HTML source `{}` is not a safe source-relative regular file: {}",
-//RS                 source_path.display(),
-//RS                 error
-//RS             ));
-//RS         }
-//RS     };
-//RS     resolver.revalidate_file(&checked).map_err(|error| {
-//RS         format!(
-//RS             "error: HTML source `{}` changed during its pinned read: {}",
-//RS             source_path.display(),
-//RS             error
-//RS         )
-//RS     })?;
-//RS     let text = checked.text().map_err(|error| {
-//RS         format!(
-//RS             "error: HTML source `{}` is not valid UTF-8: {}",
-//RS             source_path.display(),
-//RS             error
-//RS         )
-//RS     })?;
-//RS     Ok(Some(text))
-//RS }
-//RS 
-//RS mod foreign_build_import {
-//RS     use super::*;
-//RS 
-//RS     const CANDIDATE_SCHEMA: &str = "jet-ffi-build-import-v1";
-//RS     const SELECTION_PACKAGE: &str = "__jet_foreign_build__";
-//RS 
-//RS     #[derive(Clone, Debug)]
-//RS     enum Operation {
-//RS         Preview,
-//RS         Accept(String),
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug)]
-//RS     struct Request {
-//RS         kind: String,
-//RS         build_dir: String,
-//RS         operation: Operation,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug)]
-//RS     struct Action {
-//RS         id: String,
-//RS         owner: String,
-//RS         inner_owner: Option<String>,
-//RS         command: Vec<String>,
-//RS         inputs: Vec<String>,
-//RS         outputs: Vec<String>,
-//RS         environment: Vec<(String, String)>,
-//RS         workdir: String,
-//RS         custom: bool,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug)]
-//RS     struct Candidate {
-//RS         key: String,
-//RS         build_dir: String,
-//RS         argv: Vec<String>,
-//RS         inputs: Vec<(String, String)>,
-//RS         outputs: Vec<String>,
-//RS         toolchains: Vec<(String, String)>,
-//RS         environment: Vec<(String, String)>,
-//RS         workdirs: Vec<String>,
-//RS         actions: Vec<Action>,
-//RS         unsupported: Vec<String>,
-//RS         ownership: String,
-//RS     }
-//RS 
-//RS     #[derive(Debug)]
-//RS     enum Failure {
-//RS         User(String),
-//RS         Internal(String),
-//RS     }
-//RS 
-//RS     impl Failure {
-//RS         fn user(message: impl Into<String>) -> Self {
-//RS             Self::User(message.into())
-//RS         }
-//RS 
-//RS         fn internal(message: impl Into<String>) -> Self {
-//RS             Self::Internal(message.into())
-//RS         }
-//RS     }
-//RS 
-//RS     fn relative_path(value: &str) -> Result<PathBuf, Failure> {
-//RS         let path = Path::new(value);
-//RS         if path.is_absolute()
-//RS             || path.components().any(|component| {
-//RS                 matches!(
-//RS                     component,
-//RS                     Component::ParentDir | Component::RootDir | Component::Prefix(_)
-//RS                 )
-//RS             })
-//RS         {
-//RS             return Err(Failure::user(format!(
-//RS                 "foreign build path `{value}` must be relative to the project"
-//RS             )));
-//RS         }
-//RS         Ok(path.to_path_buf())
-//RS     }
-//RS 
-//RS     fn display_relative(path: &Path) -> String {
-//RS         path.to_string_lossy().replace('\\', "/")
-//RS     }
-//RS 
-//RS     fn ensure_directory(path: &Path) -> Result<(), Failure> {
-//RS         match fs::symlink_metadata(path) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() => Err(Failure::internal(format!(
-//RS                 "refusing symlinked directory `{}`",
-//RS                 path.display()
-//RS             ))),
-//RS             Ok(metadata) if metadata.is_dir() => Ok(()),
-//RS             Ok(_) => Err(Failure::internal(format!(
-//RS                 "foreign build cache path `{}` is not a directory",
-//RS                 path.display()
-//RS             ))),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                 if let Some(parent) = path.parent() {
-//RS                     ensure_directory(parent)?;
-//RS                 }
-//RS                 match fs::create_dir(path) {
-//RS                     Ok(()) => Ok(()),
-//RS                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-//RS                         ensure_directory(path)
-//RS                     }
-//RS                     Err(error) => Err(Failure::internal(format!(
-//RS                         "could not create `{}`: {error}",
-//RS                         path.display()
-//RS                     ))),
-//RS                 }
-//RS             }
-//RS             Err(error) => Err(Failure::internal(format!(
-//RS                 "could not inspect `{}`: {error}",
-//RS                 path.display()
-//RS             ))),
-//RS         }
-//RS     }
-//RS 
-//RS     fn read_regular(root: &Path, relative: &str) -> Result<Vec<u8>, Failure> {
-//RS         let relative_path = relative_path(relative)?;
-//RS         let path = root.join(&relative_path);
-//RS         let metadata = fs::symlink_metadata(&path).map_err(|error| {
-//RS             Failure::user(format!(
-//RS                 "foreign build input `{relative}` is unavailable: {error}"
-//RS             ))
-//RS         })?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(Failure::user(format!(
-//RS                 "foreign build input `{relative}` must be a regular non-symlink file"
-//RS             )));
-//RS         }
-//RS         fs::read(&path).map_err(|error| {
-//RS             Failure::user(format!(
-//RS                 "could not read foreign build input `{relative}`: {error}"
-//RS             ))
-//RS         })
-//RS     }
-//RS 
-//RS     fn add_input(
-//RS         root: &Path,
-//RS         relative: &str,
-//RS         inputs: &mut Vec<(String, String)>,
-//RS         unsupported: &mut Vec<String>,
-//RS     ) -> Result<(), Failure> {
-//RS         let relative = display_relative(&relative_path(relative)?);
-//RS         if inputs.iter().any(|(path, _)| path == &relative) {
-//RS             return Ok(());
-//RS         }
-//RS         match read_regular(root, &relative) {
-//RS             Ok(bytes) => {
-//RS                 inputs.push((
-//RS                     relative,
-//RS                     format!("sha256-{}", jet::SHA256::sha256_hex(&bytes)),
-//RS                 ));
-//RS                 Ok(())
-//RS             }
-//RS             Err(Failure::User(error)) => {
-//RS                 unsupported.push(error);
-//RS                 Ok(())
-//RS             }
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     fn cmake_calls(source: &str, command: &str) -> Vec<Vec<String>> {
-//RS         let lower = source.to_ascii_lowercase();
-//RS         let needle = command.to_ascii_lowercase();
-//RS         let bytes = lower.as_bytes();
-//RS         let mut cursor = 0usize;
-//RS         let mut calls = Vec::new();
-//RS         while cursor < bytes.len() {
-//RS             let Some(found) = lower[cursor..].find(&needle) else {
-//RS                 break;
-//RS             };
-//RS             let start = cursor + found;
-//RS             let before = start
-//RS                 .checked_sub(1)
-//RS                 .and_then(|index| bytes.get(index).copied());
-//RS             let after_name = start + needle.len();
-//RS             if before.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-//RS                 || bytes
-//RS                     .get(after_name)
-//RS                     .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-//RS             {
-//RS                 cursor = after_name;
-//RS                 continue;
-//RS             }
-//RS             let Some(open_offset) = lower[after_name..].find('(') else {
-//RS                 break;
-//RS             };
-//RS             let open = after_name + open_offset;
-//RS             let Some(close_offset) = source[open + 1..].find(')') else {
-//RS                 break;
-//RS             };
-//RS             let close = open + 1 + close_offset;
-//RS             let args = source[open + 1..close]
-//RS                 .split_whitespace()
-//RS                 .map(|value| {
-//RS                     value
-//RS                         .trim_matches(|character| matches!(character, '"' | '\''))
-//RS                         .trim_end_matches(';')
-//RS                         .to_string()
-//RS                 })
-//RS                 .filter(|value| !value.is_empty())
-//RS                 .collect::<Vec<_>>();
-//RS             calls.push(args);
-//RS             cursor = close + 1;
-//RS         }
-//RS         calls
-//RS     }
-//RS 
-//RS     fn cmake_source_tokens(
-//RS         calls: &[Vec<String>],
-//RS         root: &Path,
-//RS         inputs: &mut Vec<(String, String)>,
-//RS         unsupported: &mut Vec<String>,
-//RS     ) -> Result<(), Failure> {
-//RS         const FLAGS: &[&str] = &[
-//RS             "WIN32",
-//RS             "MACOSX_BUNDLE",
-//RS             "EXCLUDE_FROM_ALL",
-//RS             "STATIC",
-//RS             "SHARED",
-//RS             "MODULE",
-//RS             "OBJECT",
-//RS             "INTERFACE",
-//RS             "ALL",
-//RS         ];
-//RS         for args in calls {
-//RS             for token in args.iter().skip(1) {
-//RS                 if FLAGS.contains(&token.as_str())
-//RS                     || token.starts_with('$')
-//RS                     || token.contains('=')
-//RS                     || !token.contains('.')
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 let path = token.trim_matches(|character| matches!(character, '"' | '\''));
-//RS                 let extension = Path::new(path)
-//RS                     .extension()
-//RS                     .and_then(|extension| extension.to_str())
-//RS                     .unwrap_or_default()
-//RS                     .to_ascii_lowercase();
-//RS                 if !matches!(
-//RS                     extension.as_str(),
-//RS                     "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "m" | "mm"
-//RS                 ) {
-//RS                     continue;
-//RS                 }
-//RS                 if root.join(path).is_file() {
-//RS                     add_input(root, path, inputs, unsupported)?;
-//RS                 } else {
-//RS                     unsupported.push(format!("declared CMake source `{path}` is unavailable"));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     fn cmake_custom_dependencies(
-//RS         calls: &[Vec<String>],
-//RS         root: &Path,
-//RS         inputs: &mut Vec<(String, String)>,
-//RS         unsupported: &mut Vec<String>,
-//RS     ) -> Result<(), Failure> {
-//RS         const FLAGS: &[&str] = &[
-//RS             "COMMAND",
-//RS             "DEPENDS",
-//RS             "OUTPUT",
-//RS             "BYPRODUCTS",
-//RS             "VERBATIM",
-//RS             "WORKING_DIRECTORY",
-//RS             "COMMENT",
-//RS             "USES_TERMINAL",
-//RS             "COMMAND_EXPAND_LISTS",
-//RS         ];
-//RS         for args in calls {
-//RS             let Some(depends) = args.iter().position(|value| value == "DEPENDS") else {
-//RS                 continue;
-//RS             };
-//RS             for token in args.iter().skip(depends + 1) {
-//RS                 let token = token.trim_matches(|character| matches!(character, '"' | '\''));
-//RS                 if token.is_empty()
-//RS                     || FLAGS.iter().any(|flag| *flag == token)
-//RS                     || token.starts_with('$')
-//RS                     || token.contains('=')
-//RS                     || token.starts_with('-')
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 if root.join(token).is_file() {
-//RS                     add_input(root, token, inputs, unsupported)?;
-//RS                 } else {
-//RS                     unsupported.push(format!(
-//RS                         "declared CMake custom dependency `{token}` is unavailable"
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn cache_value(cache: &str, key: &str) -> Option<String> {
-//RS         cache.lines().find_map(|line| {
-//RS             let line = line.trim();
-//RS             let (name, value) = line.split_once('=')?;
-//RS             let name = name.split(':').next().unwrap_or(name);
-//RS             (name == key).then(|| value.trim().to_string())
-//RS         })
-//RS     }
-//RS 
-//RS     fn cmake_target_outputs(build_dir: &str, command: &str, name: &str) -> Vec<String> {
-//RS         let prefix = format!("{build_dir}/");
-//RS         match command {
-//RS             "add_library" => vec![format!("{prefix}lib{name}.a")],
-//RS             "add_executable" => vec![format!("{prefix}{name}")],
-//RS             _ => Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn custom_outputs(build_dir: &str, calls: &[Vec<String>]) -> Vec<String> {
-//RS         let mut outputs = Vec::new();
-//RS         for args in calls {
-//RS             let mut key = None;
-//RS             for value in args {
-//RS                 if matches!(key, Some("OUTPUT" | "BYPRODUCTS")) {
-//RS                     if !value.starts_with('$') {
-//RS                         if !Path::new(value).is_absolute() {
-//RS                             outputs.push(format!("{build_dir}/{value}"));
-//RS                         }
-//RS                     }
-//RS                     key = None;
-//RS                 } else if matches!(value.as_str(), "OUTPUT" | "BYPRODUCTS") {
-//RS                     key = Some(value.as_str());
-//RS                 }
-//RS             }
-//RS         }
-//RS         outputs
-//RS     }
-//RS 
-//RS     fn candidate_path(root: &Path, key: &str) -> PathBuf {
-//RS         let digest = jet::SHA256::sha256_hex(key.as_bytes());
-//RS         root.join(".jet")
-//RS             .join("cache")
-//RS             .join("foreign-build")
-//RS             .join(format!(
-//RS                 "{}-{}.json",
-//RS                 key.replace(':', "-").replace('/', "_"),
-//RS                 digest.get(..16).unwrap_or(&digest)
-//RS             ))
-//RS     }
-//RS 
-//RS     fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
-//RS         let parent = path.parent().ok_or_else(|| {
-//RS             Failure::internal(format!("candidate `{}` has no parent", path.display()))
-//RS         })?;
-//RS         ensure_directory(parent)?;
-//RS         let temporary = parent.join(format!(
-//RS             ".foreign-build-{}-{}.tmp",
-//RS             std::process::id(),
-//RS             jet::SHA256::sha256_hex(bytes)
-//RS                 .get(..16)
-//RS                 .unwrap_or("candidate")
-//RS         ));
-//RS         let result = (|| {
-//RS             let mut file = fs::OpenOptions::new()
-//RS                 .write(true)
-//RS                 .create_new(true)
-//RS                 .open(&temporary)
-//RS                 .map_err(|error| {
-//RS                     Failure::internal(format!("could not stage candidate: {error}"))
-//RS                 })?;
-//RS             file.write_all(bytes).map_err(|error| {
-//RS                 Failure::internal(format!("could not write candidate: {error}"))
-//RS             })?;
-//RS             file.sync_all()
-//RS                 .map_err(|error| Failure::internal(format!("could not sync candidate: {error}")))?;
-//RS             if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS                 if metadata.file_type().is_symlink() || metadata.is_dir() {
-//RS                     return Err(Failure::internal(format!(
-//RS                         "candidate destination `{}` is not replaceable",
-//RS                         path.display()
-//RS                     )));
-//RS                 }
-//RS             }
-//RS             fs::rename(&temporary, path).map_err(|error| {
-//RS                 Failure::internal(format!("could not publish candidate: {error}"))
-//RS             })?;
-//RS             Ok(())
-//RS         })();
-//RS         if result.is_err() {
-//RS             let _ = fs::remove_file(&temporary);
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     fn json_strings(values: &[String]) -> String {
-//RS         values
-//RS             .iter()
-//RS             .map(|value| format!("\"{}\"", json_escape(value)))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     }
-//RS 
-//RS     fn json_pairs(values: &[(String, String)]) -> String {
-//RS         values
-//RS             .iter()
-//RS             .map(|(key, value)| {
-//RS                 format!(
-//RS                     "{{\"name\":\"{}\",\"value\":\"{}\"}}",
-//RS                     json_escape(key),
-//RS                     json_escape(value)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     }
-//RS 
-//RS     fn action_json(action: &Action) -> String {
-//RS         let inner = action
-//RS             .inner_owner
-//RS             .as_deref()
-//RS             .map(|value| format!("\"{}\"", json_escape(value)))
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"id\":\"{}\",\"owner\":\"{}\",\"inner_owner\":{},\"command\":[{}],\"inputs\":[{}],\"outputs\":[{}],\"environment\":[{}],\"workdir\":\"{}\",\"custom_action\":{}}}",
-//RS             json_escape(&action.id),
-//RS             json_escape(&action.owner),
-//RS             inner,
-//RS             json_strings(&action.command),
-//RS             json_strings(&action.inputs),
-//RS             json_strings(&action.outputs),
-//RS             json_pairs(&action.environment),
-//RS             json_escape(&action.workdir),
-//RS             action.custom
-//RS         )
-//RS     }
-//RS 
-//RS     fn candidate_json(candidate: &Candidate) -> String {
-//RS         let actions = candidate
-//RS             .actions
-//RS             .iter()
-//RS             .map(action_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "{{\n  \"schema\":\"{CANDIDATE_SCHEMA}\",\n  \"selection_key\":\"{}\",\n  \"kind\":\"cmake\",\n  \"build_dir\":\"{}\",\n  \"ownership\":\"{}\",\n  \"argv\":[{}],\n  \"dependencies\":[{}],\n  \"inputs\":[{}],\n  \"outputs\":[{}],\n  \"toolchains\":[{}],\n  \"environment\":[{}],\n  \"workdirs\":[{}],\n  \"actions\":[{}],\n  \"unsupported_edges\":[{}]\n}}\n",
-//RS             json_escape(&candidate.key),
-//RS             json_escape(&candidate.build_dir),
-//RS             json_escape(&candidate.ownership),
-//RS             json_strings(&candidate.argv),
-//RS             json_strings(
-//RS                 &candidate
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .map(|(path, _)| path.clone())
-//RS                     .collect::<Vec<_>>()
-//RS             ),
-//RS             candidate
-//RS                 .inputs
-//RS                 .iter()
-//RS                 .map(|(path, digest)| {
-//RS                     format!(
-//RS                         "{{\"path\":\"{}\",\"digest\":\"{}\"}}",
-//RS                         json_escape(path),
-//RS                         json_escape(digest)
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             json_strings(&candidate.outputs),
-//RS             json_pairs(&candidate.toolchains),
-//RS             json_pairs(&candidate.environment),
-//RS             json_strings(&candidate.workdirs),
-//RS             actions,
-//RS             json_strings(&candidate.unsupported)
-//RS         )
-//RS     }
-//RS 
-//RS     fn build_candidate(
-//RS         root: &Path,
-//RS         request: &Request,
-//RS     ) -> Result<(PathBuf, Candidate, String), Failure> {
-//RS         if request.kind != "cmake" {
-//RS             return Err(Failure::user(format!(
-//RS                 "unsupported foreign build importer `{}`; only `cmake:build` is currently supported",
-//RS                 request.kind
-//RS             )));
-//RS         }
-//RS         let cmake_source = read_regular(root, "CMakeLists.txt")?;
-//RS         let cmake_source = std::str::from_utf8(&cmake_source)
-//RS             .map_err(|_| Failure::user("CMakeLists.txt must be UTF-8"))?
-//RS             .to_string();
-//RS         let cache_relative = display_relative(&relative_path(&format!(
-//RS             "{}/CMakeCache.txt",
-//RS             request.build_dir
-//RS         ))?);
-//RS         let cache_bytes = read_regular(root, &cache_relative)?;
-//RS         let cache = std::str::from_utf8(&cache_bytes)
-//RS             .map_err(|_| Failure::user("CMakeCache.txt must be UTF-8"))?
-//RS             .to_string();
-//RS         let compile_commands_relative = display_relative(&relative_path(&format!(
-//RS             "{}/compile_commands.json",
-//RS             request.build_dir
-//RS         ))?);
-//RS         let compile_commands_present = root.join(&compile_commands_relative).is_file();
-//RS 
-//RS         let mut inputs = Vec::new();
-//RS         let mut unsupported = Vec::new();
-//RS         add_input(root, "CMakeLists.txt", &mut inputs, &mut unsupported)?;
-//RS         add_input(root, &cache_relative, &mut inputs, &mut unsupported)?;
-//RS         if compile_commands_present {
-//RS             add_input(
-//RS                 root,
-//RS                 &compile_commands_relative,
-//RS                 &mut inputs,
-//RS                 &mut unsupported,
-//RS             )?;
-//RS             unsupported.push(
-//RS                 "compilation database is evidence only; it cannot establish the complete graph"
-//RS                     .to_string(),
-//RS             );
-//RS         }
-//RS         if root.join("package.jet").is_file() {
-//RS             add_input(root, "package.jet", &mut inputs, &mut unsupported)?;
-//RS         }
-//RS         let target_calls = ["add_executable", "add_library", "add_custom_target"]
-//RS             .iter()
-//RS             .flat_map(|command| {
-//RS                 cmake_calls(&cmake_source, command)
-//RS                     .into_iter()
-//RS                     .map(move |args| ((*command).to_string(), args))
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         cmake_source_tokens(
-//RS             &target_calls
-//RS                 .iter()
-//RS                 .map(|(_, args)| args.clone())
-//RS                 .collect::<Vec<_>>(),
-//RS             root,
-//RS             &mut inputs,
-//RS             &mut unsupported,
-//RS         )?;
-//RS         let custom_calls = cmake_calls(&cmake_source, "add_custom_command");
-//RS         cmake_custom_dependencies(&custom_calls, root, &mut inputs, &mut unsupported)?;
-//RS         if !custom_calls.is_empty() {
-//RS             unsupported.push(
-//RS                 "CMake custom actions retain their inner foreign owner until explicitly modeled"
-//RS                     .to_string(),
-//RS             );
-//RS         }
-//RS         for dynamic in ["add_dependencies(", "include(", "execute_process(", "$<"] {
-//RS             if cmake_source.contains(dynamic) {
-//RS                 unsupported.push(format!("unsupported dynamic CMake edge `{dynamic}`"));
-//RS             }
-//RS         }
-//RS         let mut argv = vec![
-//RS             "cmake".to_string(),
-//RS             "--build".to_string(),
-//RS             request.build_dir.clone(),
-//RS         ];
-//RS         match jet::Comptime::Build::LegacyWrapperSpec::from_project_file(
-//RS             root,
-//RS             jet::Comptime::Build::LegacyWrapperKind::CMake,
-//RS         ) {
-//RS             Ok(spec) => argv = spec.argv,
-//RS             Err(error) => unsupported.push(format!(
-//RS                 "typed CMake importer retained this edge: {error:?}"
-//RS             )),
-//RS         }
-//RS 
-//RS         let mut outputs = Vec::new();
-//RS         let mut actions = Vec::new();
-//RS         for (index, (command, args)) in target_calls.iter().enumerate() {
-//RS             let Some(name) = args.first() else {
-//RS                 unsupported.push(format!("{command} has no literal target name"));
-//RS                 continue;
-//RS             };
-//RS             let target_outputs = cmake_target_outputs(&request.build_dir, command, name);
-//RS             outputs.extend(target_outputs.iter().cloned());
-//RS             let action_command = vec![
-//RS                 "cmake".to_string(),
-//RS                 "--build".to_string(),
-//RS                 request.build_dir.clone(),
-//RS                 "--target".to_string(),
-//RS                 name.clone(),
-//RS             ];
-//RS             let action_inputs = inputs
-//RS                 .iter()
-//RS                 .map(|(path, _)| path.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             actions.push(Action {
-//RS                 id: format!("cmake.target.{index}.{name}"),
-//RS                 owner: "cmake".to_string(),
-//RS                 inner_owner: None,
-//RS                 command: action_command,
-//RS                 inputs: action_inputs,
-//RS                 outputs: target_outputs,
-//RS                 environment: Vec::new(),
-//RS                 workdir: request.build_dir.clone(),
-//RS                 custom: false,
-//RS             });
-//RS         }
-//RS         for (index, args) in custom_calls.iter().enumerate() {
-//RS             let inner_owner = args
-//RS                 .iter()
-//RS                 .position(|value| value == "COMMAND")
-//RS                 .and_then(|position| args.get(position + 1))
-//RS                 .cloned()
-//RS                 .or_else(|| Some("cmake custom command".to_string()));
-//RS             let action_outputs = custom_outputs(&request.build_dir, std::slice::from_ref(args));
-//RS             outputs.extend(action_outputs.iter().cloned());
-//RS             actions.push(Action {
-//RS                 id: format!("cmake.custom.{index}"),
-//RS                 owner: "cmake".to_string(),
-//RS                 inner_owner,
-//RS                 command: vec![
-//RS                     "cmake".to_string(),
-//RS                     "--build".to_string(),
-//RS                     request.build_dir.clone(),
-//RS                 ],
-//RS                 inputs: inputs
-//RS                     .iter()
-//RS                     .map(|(path, _)| path.clone())
-//RS                     .collect::<Vec<_>>(),
-//RS                 outputs: action_outputs,
-//RS                 environment: Vec::new(),
-//RS                 workdir: ".".to_string(),
-//RS                 custom: true,
-//RS             });
-//RS         }
-//RS         if actions.is_empty() {
-//RS             actions.push(Action {
-//RS                 id: "cmake.build".to_string(),
-//RS                 owner: "cmake".to_string(),
-//RS                 inner_owner: Some("cmake generator".to_string()),
-//RS                 command: argv.clone(),
-//RS                 inputs: inputs
-//RS                     .iter()
-//RS                     .map(|(path, _)| path.clone())
-//RS                     .collect::<Vec<_>>(),
-//RS                 outputs: Vec::new(),
-//RS                 environment: Vec::new(),
-//RS                 workdir: ".".to_string(),
-//RS                 custom: true,
-//RS             });
-//RS         }
-//RS         outputs.sort();
-//RS         outputs.dedup();
-//RS         if outputs.is_empty() {
-//RS             unsupported.push("CMake did not expose a declared artifact output".to_string());
-//RS         }
-//RS         let mut toolchains = Vec::new();
-//RS         for key in [
-//RS             "CMAKE_C_COMPILER",
-//RS             "CMAKE_CXX_COMPILER",
-//RS             "CMAKE_LINKER",
-//RS             "CMAKE_GENERATOR",
-//RS             "CMAKE_BUILD_TYPE",
-//RS         ] {
-//RS             if let Some(value) = cache_value(&cache, key) {
-//RS                 toolchains.push((key.to_string(), value));
-//RS             }
-//RS         }
-//RS         let mut environment = Vec::new();
-//RS         for key in [
-//RS             "CMAKE_BUILD_TYPE",
-//RS             "CMAKE_GENERATOR",
-//RS             "CMAKE_TOOLCHAIN_FILE",
-//RS         ] {
-//RS             if let Some(value) = cache_value(&cache, key) {
-//RS                 environment.push((key.to_string(), value));
-//RS             }
-//RS         }
-//RS         let mut unsupported = unsupported
-//RS             .into_iter()
-//RS             .collect::<BTreeSet<_>>()
-//RS             .into_iter()
-//RS             .collect::<Vec<_>>();
-//RS         let ownership = "partial".to_string();
-//RS         let mut candidate = Candidate {
-//RS             key: format!("{}:{}", request.kind, request.build_dir),
-//RS             build_dir: request.build_dir.clone(),
-//RS             argv,
-//RS             inputs,
-//RS             outputs,
-//RS             toolchains,
-//RS             environment,
-//RS             workdirs: vec![".".to_string()],
-//RS             actions,
-//RS             unsupported: std::mem::take(&mut unsupported),
-//RS             ownership,
-//RS         };
-//RS         candidate.inputs.sort();
-//RS         candidate.outputs.sort();
-//RS         candidate.toolchains.sort();
-//RS         candidate.environment.sort();
-//RS         candidate.workdirs.sort();
-//RS         candidate
-//RS             .actions
-//RS             .sort_by(|left, right| left.id.cmp(&right.id));
-//RS         let bytes = candidate_json(&candidate).into_bytes();
-//RS         let digest = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
-//RS         let path = candidate_path(root, &candidate.key);
-//RS         write_atomic(&path, &bytes)?;
-//RS         Ok((path, candidate, digest))
-//RS     }
-//RS 
-//RS     fn tree_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
-//RS         tree.get(key)
-//RS             .map_err(|error| Failure::internal(format!("candidate {error}")))
-//RS     }
-//RS 
-//RS     fn tree_string(tree: &DataTree, key: &str) -> Result<String, Failure> {
-//RS         tree_field(tree, key)?
-//RS             .as_str()
-//RS             .map(str::to_string)
-//RS             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
-//RS     }
-//RS 
-//RS     fn tree_array<'a>(tree: &'a DataTree, key: &str) -> Result<&'a [DataTree], Failure> {
-//RS         tree_field(tree, key)?
-//RS             .as_array()
-//RS             .map(Vec::as_slice)
-//RS             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
-//RS     }
-//RS 
-//RS     fn tree_object_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
-//RS         let fields = tree
-//RS             .as_object()
-//RS             .map_err(|error| Failure::internal(format!("candidate object {error}")))?;
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == key).then_some(value))
-//RS             .ok_or_else(|| Failure::internal(format!("candidate missing `{key}`")))
-//RS     }
-//RS 
-//RS     fn candidate_inputs(tree: &DataTree) -> Result<Vec<(String, String)>, Failure> {
-//RS         tree_array(tree, "inputs")?
-//RS             .iter()
-//RS             .map(|entry| {
-//RS                 Ok((
-//RS                     tree_object_field(entry, "path")?
-//RS                         .as_str()
-//RS                         .map(str::to_string)
-//RS                         .map_err(|error| {
-//RS                             Failure::internal(format!("candidate input path {error}"))
-//RS                         })?,
-//RS                     tree_object_field(entry, "digest")?
-//RS                         .as_str()
-//RS                         .map(str::to_string)
-//RS                         .map_err(|error| {
-//RS                             Failure::internal(format!("candidate input digest {error}"))
-//RS                         })?,
-//RS                 ))
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn candidate_strings(tree: &DataTree, key: &str) -> Result<Vec<String>, Failure> {
-//RS         tree_array(tree, key)?
-//RS             .iter()
-//RS             .map(|value| {
-//RS                 value
-//RS                     .as_str()
-//RS                     .map(str::to_string)
-//RS                     .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
-//RS             })
-//RS             .collect()
-//RS     }
-//RS     fn candidate_pairs(tree: &DataTree, key: &str) -> Result<Vec<(String, String)>, Failure> {
-//RS         tree_array(tree, key)?
-//RS             .iter()
-//RS             .map(|entry| {
-//RS                 Ok((
-//RS                     tree_object_field(entry, "name")?
-//RS                         .as_str()
-//RS                         .map(str::to_string)
-//RS                         .map_err(|error| {
-//RS                             Failure::internal(format!("candidate `{key}` name {error}"))
-//RS                         })?,
-//RS                     tree_object_field(entry, "value")?
-//RS                         .as_str()
-//RS                         .map(str::to_string)
-//RS                         .map_err(|error| {
-//RS                             Failure::internal(format!("candidate `{key}` value {error}"))
-//RS                         })?,
-//RS                 ))
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn load_candidate(
-//RS         root: &Path,
-//RS         request: &Request,
-//RS         expected_digest: Option<&str>,
-//RS     ) -> Result<(DataTree, String, PathBuf), Failure> {
-//RS         let path = candidate_path(root, &format!("{}:{}", request.kind, request.build_dir));
-//RS         let metadata = fs::symlink_metadata(&path).map_err(|error| {
-//RS             Failure::user(format!(
-//RS                 "no generated candidate for `{}:{}`; run preview first: {error}",
-//RS                 request.kind, request.build_dir
-//RS             ))
-//RS         })?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(Failure::internal(format!(
-//RS                 "generated candidate `{}` is not a regular non-symlink file",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         let bytes = fs::read(&path).map_err(|error| {
-//RS             Failure::internal(format!(
-//RS                 "could not read generated candidate `{}`: {error}",
-//RS                 path.display()
-//RS             ))
-//RS         })?;
-//RS         let actual = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
-//RS         if let Some(expected) = expected_digest {
-//RS             if expected != actual {
-//RS                 return Err(Failure::user(format!(
-//RS                     "stale plan digest: expected `{expected}`, found `{actual}`; previous selection was preserved"
-//RS                 )));
-//RS             }
-//RS         }
-//RS         let source = std::str::from_utf8(&bytes)
-//RS             .map_err(|_| Failure::internal("generated candidate is not UTF-8"))?;
-//RS         let tree = parse_json(source).map_err(|error| {
-//RS             Failure::internal(format!("generated candidate is not valid JSON: {error:?}"))
-//RS         })?;
-//RS         if tree_string(&tree, "schema")? != CANDIDATE_SCHEMA {
-//RS             return Err(Failure::internal(
-//RS                 "generated candidate has an unsupported schema",
-//RS             ));
-//RS         }
-//RS         if tree_string(&tree, "selection_key")? != format!("{}:{}", request.kind, request.build_dir)
-//RS         {
-//RS             return Err(Failure::user(
-//RS                 "generated candidate belongs to a different foreign build; previous selection was preserved",
-//RS             ));
-//RS         }
-//RS         Ok((tree, actual, path))
-//RS     }
-//RS 
-//RS     fn verify_inputs(root: &Path, tree: &DataTree) -> Result<(), Failure> {
-//RS         for (relative, expected) in candidate_inputs(tree)? {
-//RS             let bytes = read_regular(root, &relative).map_err(|error| match error {
-//RS                 Failure::User(message) => Failure::user(format!(
-//RS                     "candidate input drifted: `{relative}` is unavailable ({message}); previous selection was preserved"
-//RS                 )),
-//RS                 Failure::Internal(message) => Failure::Internal(message),
-//RS             })?;
-//RS             let actual = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
-//RS             if actual != expected {
-//RS                 return Err(Failure::user(format!(
-//RS                     "candidate input drifted: `{relative}` expected `{expected}`, found `{actual}`; previous selection was preserved"
-//RS                 )));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn lock_path(root: &Path) -> PathBuf {
-//RS         root.join(".jet").join("lock")
-//RS     }
-//RS 
-//RS     fn selected_digest(root: &Path, key: &str) -> Result<Option<String>, Failure> {
-//RS         let path = lock_path(root);
-//RS         let metadata = match fs::symlink_metadata(&path) {
-//RS             Ok(metadata) => metadata,
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-//RS             Err(error) => {
-//RS                 return Err(Failure::internal(format!(
-//RS                     "could not inspect `{}`: {error}",
-//RS                     path.display()
-//RS                 )))
-//RS             }
-//RS         };
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(Failure::internal(format!(
-//RS                 "lock `{}` is not a regular non-symlink file",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         let raw = fs::read_to_string(&path).map_err(|error| {
-//RS             Failure::internal(format!("could not read `{}`: {error}", path.display()))
-//RS         })?;
-//RS         let lock = jet::Lock::parse(&raw).map_err(|error| {
-//RS             Failure::internal(format!("could not parse `{}`: {error}", path.display()))
-//RS         })?;
-//RS         Ok(lock
-//RS             .build_contributions
-//RS             .iter()
-//RS             .find(|row| row.package == SELECTION_PACKAGE && row.key == key)
-//RS             .map(|row| row.value.clone()))
-//RS     }
-//RS 
-//RS     fn select_plan(root: &Path, key: &str, digest: &str) -> Result<(), Failure> {
-//RS         let path = lock_path(root);
-//RS         let metadata = fs::symlink_metadata(&path).map_err(|error| {
-//RS             Failure::user(format!(
-//RS                 "cannot activate a foreign build without the existing `.jet/lock`: {error}"
-//RS             ))
-//RS         })?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(Failure::user(format!(
-//RS                 "lock `{}` is not a regular non-symlink file",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         let raw = fs::read_to_string(&path).map_err(|error| {
-//RS             Failure::internal(format!("could not read `{}`: {error}", path.display()))
-//RS         })?;
-//RS         let mut lock = jet::Lock::parse(&raw).map_err(|error| {
-//RS             Failure::internal(format!("could not parse `{}`: {error}", path.display()))
-//RS         })?;
-//RS         lock.build_contributions
-//RS             .retain(|row| !(row.package == SELECTION_PACKAGE && row.key == key));
-//RS         lock.build_contributions
-//RS             .push(jet::Lock::LockedBuildContribution {
-//RS                 package: SELECTION_PACKAGE.to_string(),
-//RS                 key: key.to_string(),
-//RS                 value: digest.to_string(),
-//RS                 scope: "project".to_string(),
-//RS                 layer: "explicit-accept".to_string(),
-//RS                 source: "jet build --import".to_string(),
-//RS                 reason: "reviewed foreign build plan selected explicitly".to_string(),
-//RS             });
-//RS         let replacement = jet::Lock::write(&lock);
-//RS         jet::Lock::write_lock_atomically(root, replacement.as_bytes()).map_err(|error| {
-//RS             Failure::internal(format!("could not atomically select foreign plan: {error}"))
-//RS         })
-//RS     }
-//RS 
-//RS     fn parse_request(args: &[String]) -> Result<Request, Failure> {
-//RS         let position = args
-//RS             .iter()
-//RS             .position(|argument| argument == "--import")
-//RS             .ok_or_else(|| Failure::user("foreign build import requires `--import cmake:build`"))?;
-//RS         let spec = args.get(position + 1).ok_or_else(|| {
-//RS             Failure::user("foreign build import requires a kind and build directory")
-//RS         })?;
-//RS         let (kind, build_dir) = spec
-//RS             .split_once(':')
-//RS             .ok_or_else(|| Failure::user("foreign build import must use `kind:build-directory`"))?;
-//RS         if kind.is_empty() || build_dir.is_empty() {
-//RS             return Err(Failure::user(
-//RS                 "foreign build import must use `kind:build-directory`",
-//RS             ));
-//RS         }
-//RS         relative_path(build_dir)?;
-//RS         let preview = args.iter().any(|argument| argument == "--preview");
-//RS         let accept_position = args.iter().position(|argument| argument == "--accept");
-//RS         if preview && accept_position.is_some() {
-//RS             return Err(Failure::user(
-//RS                 "foreign build import accepts either `--preview` or `--accept`, not both",
-//RS             ));
-//RS         }
-//RS         let operation = if preview {
-//RS             Operation::Preview
-//RS         } else if let Some(position) = accept_position {
-//RS             let digest = args.get(position + 1).ok_or_else(|| {
-//RS                 Failure::user("foreign build import `--accept` requires a plan digest")
-//RS             })?;
-//RS             if digest.starts_with('-') {
-//RS                 return Err(Failure::user(
-//RS                     "foreign build import `--accept` requires a plan digest",
-//RS                 ));
-//RS             }
-//RS             Operation::Accept(digest.clone())
-//RS         } else {
-//RS             return Err(Failure::user(
-//RS                 "foreign build import requires `--preview` or `--accept <plan-digest>`",
-//RS             ));
-//RS         };
-//RS         Ok(Request {
-//RS             kind: kind.to_string(),
-//RS             build_dir: display_relative(&relative_path(build_dir)?),
-//RS             operation,
-//RS         })
-//RS     }
-//RS 
-//RS     fn import_banned() -> bool {
-//RS         super::env_truthy("CI") && !super::env_truthy("JET_ALLOW_FOREIGN_BUILD_IMPORT")
-//RS     }
-//RS 
-//RS     fn report_failure(error: Failure, mode: OutputMode) -> ! {
-//RS         match error {
-//RS             Failure::User(message) => {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2104",
-//RS                     message,
-//RS                     "run the preview, review every action and input, then accept the exact plan digest"
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             Failure::Internal(message) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &jet::Diagnostics::render_ice_report(
-//RS                         "foreign build import failed",
-//RS                         &message,
-//RS                         false,
-//RS                     ),
-//RS                 );
-//RS                 exit(ExitCodes::ICE);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn requested(args: &[String]) -> bool {
-//RS         args.iter().any(|argument| argument == "--import")
-//RS     }
-//RS 
-//RS     pub(super) fn run(args: &[String], mode: OutputMode) -> ! {
-//RS         if import_banned() {
-//RS             report_failure(
-//RS                 Failure::user(
-//RS                     "foreign build import is disabled by the CI build policy; set `JET_ALLOW_FOREIGN_BUILD_IMPORT=1` only for an explicitly reviewed job",
-//RS                 ),
-//RS                 mode,
-//RS             );
-//RS         }
-//RS         let request = parse_request(args).unwrap_or_else(|error| report_failure(error, mode));
-//RS         match &request.operation {
-//RS             Operation::Preview => {
-//RS                 let root = std::env::current_dir()
-//RS                     .map_err(|error| {
-//RS                         Failure::internal(format!("could not resolve project root: {error}"))
-//RS                     })
-//RS                     .unwrap_or_else(|error| report_failure(error, mode));
-//RS                 let (path, candidate, digest) = build_candidate(&root, &request)
-//RS                     .unwrap_or_else(|error| report_failure(error, mode));
-//RS                 let rendered = candidate_json(&candidate);
-//RS                 if mode.json {
-//RS                     write_mode_machine(mode, &rendered);
-//RS                 } else {
-//RS                     let custom = candidate
-//RS                         .actions
-//RS                         .iter()
-//RS                         .filter(|action| action.custom)
-//RS                         .map(|action| action.id.as_str())
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     let unsupported = if candidate.unsupported.is_empty() {
-//RS                         "none".to_string()
-//RS                     } else {
-//RS                         candidate.unsupported.join(" | ")
-//RS                     };
-//RS                     write_mode_renderable(
-//RS                         mode,
-//RS                         &format!(
-//RS                             "foreign build import preview\nplan-digest: {digest}\nselection: {}\nownership: {}\ndependencies: {}\ncommands: {}\ntoolchain identities: {}\ninputs: {}\noutputs: {}\nenvironment: {}\nworkdirs: {}\ncustom actions: {}\nunsupported edges: {}\ncandidate: {}\n",
-//RS                             candidate.key,
-//RS                             candidate.ownership,
-//RS                             candidate
-//RS                                 .inputs
-//RS                                 .iter()
-//RS                                 .map(|(path, _)| path.as_str())
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(", "),
-//RS                             candidate
-//RS                                 .actions
-//RS                                 .iter()
-//RS                                 .map(|action| action.command.join(" "))
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(" | "),
-//RS                             candidate
-//RS                                 .toolchains
-//RS                                 .iter()
-//RS                                 .map(|(key, value)| format!("{key}={value}"))
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(", "),
-//RS                             candidate
-//RS                                 .inputs
-//RS                                 .iter()
-//RS                                 .map(|(path, digest)| format!("{path} ({digest})"))
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(", "),
-//RS                             candidate.outputs.join(", "),
-//RS                             candidate
-//RS                                 .environment
-//RS                                 .iter()
-//RS                                 .map(|(key, value)| format!("{key}={value}"))
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(", "),
-//RS                             candidate.workdirs.join(", "),
-//RS                             if custom.is_empty() { "none" } else { &custom },
-//RS                             unsupported,
-//RS                             path.display()
-//RS                         ),
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Operation::Accept(digest) => {
-//RS                 let root = std::env::current_dir()
-//RS                     .map_err(|error| {
-//RS                         Failure::internal(format!("could not resolve project root: {error}"))
-//RS                     })
-//RS                     .unwrap_or_else(|error| report_failure(error, mode));
-//RS                 let (tree, actual, _) = load_candidate(&root, &request, Some(digest))
-//RS                     .unwrap_or_else(|error| report_failure(error, mode));
-//RS                 verify_inputs(&root, &tree).unwrap_or_else(|error| report_failure(error, mode));
-//RS                 if tree_string(&tree, "ownership").unwrap_or_default() != "partial" {
-//RS                     report_failure(
-//RS                         Failure::user(
-//RS                             "foreign build candidate did not disclose partial ownership; full ownership requires every action to be modeled",
-//RS                         ),
-//RS                         mode,
-//RS                     );
-//RS                 }
-//RS                 let key = format!("{}:{}", request.kind, request.build_dir);
-//RS                 select_plan(&root, &key, &actual)
-//RS                     .unwrap_or_else(|error| report_failure(error, mode));
-//RS                 if mode.json {
-//RS                     write_mode_machine(
-//RS                         mode,
-//RS                         &format!(
-//RS                             "{{\"schema\":\"jet-ffi-build-activation-v1\",\"status\":\"accepted\",\"selection_key\":\"{}\",\"plan_digest\":\"{}\",\"ownership\":\"partial\"}}\n",
-//RS                             json_escape(&key),
-//RS                             json_escape(&actual)
-//RS                         ),
-//RS                     );
-//RS                 } else {
-//RS                     write_mode_renderable(
-//RS                         mode,
-//RS                         &format!("foreign build plan accepted: {key} ({actual})\n"),
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         exit(ExitCodes::OK);
-//RS     }
-//RS 
-//RS     pub(super) fn run_selected(mode: OutputMode) -> Option<i32> {
-//RS         let root = match std::env::current_dir() {
-//RS             Ok(root) => root,
-//RS             Err(error) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &jet::Diagnostics::render_ice_report(
-//RS                         "selected foreign build failed",
-//RS                         &format!("could not resolve project root: {error}"),
-//RS                         false,
-//RS                     ),
-//RS                 );
-//RS                 return Some(ExitCodes::ICE);
-//RS             }
-//RS         };
-//RS         let key = match selected_digest(&root, "cmake:build") {
-//RS             Ok(Some(key)) => key,
-//RS             Ok(None) => return None,
-//RS             Err(Failure::User(message)) => {
-//RS                 crate::cli_error!("E2104", "{}", message);
-//RS                 return Some(ExitCodes::USER_ERROR);
-//RS             }
-//RS             Err(Failure::Internal(message)) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &jet::Diagnostics::render_ice_report(
-//RS                         "selected foreign build failed",
-//RS                         &message,
-//RS                         false,
-//RS                     ),
-//RS                 );
-//RS                 return Some(ExitCodes::ICE);
-//RS             }
-//RS         };
-//RS         if import_banned() {
-//RS             crate::cli_error!(
-//RS                 @fix "E2104",
-//RS                 "the selected foreign build is disabled by the CI build policy",
-//RS                 "set JET_ALLOW_FOREIGN_BUILD_IMPORT=1 only for an explicitly reviewed job"
-//RS             );
-//RS             return Some(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let request = Request {
-//RS             kind: "cmake".to_string(),
-//RS             build_dir: "build".to_string(),
-//RS             operation: Operation::Accept(key.clone()),
-//RS         };
-//RS         let result = (|| {
-//RS             let (tree, actual, _) = load_candidate(&root, &request, Some(&key))?;
-//RS             verify_inputs(&root, &tree)?;
-//RS             let argv = candidate_strings(&tree, "argv")?;
-//RS             let outputs = candidate_strings(&tree, "outputs")?;
-//RS             let environment = candidate_pairs(&tree, "environment")?;
-//RS             let workdir = candidate_strings(&tree, "workdirs")?
-//RS                 .into_iter()
-//RS                 .next()
-//RS                 .ok_or_else(|| {
-//RS                     Failure::internal("selected foreign build has no working directory")
-//RS                 })?;
-//RS             let workdir = relative_path(&workdir)?;
-//RS             let workdir = root.join(workdir);
-//RS             let metadata = fs::symlink_metadata(&workdir).map_err(|error| {
-//RS                 Failure::user(format!(
-//RS                     "selected foreign build working directory is unavailable: {error}"
-//RS                 ))
-//RS             })?;
-//RS             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                 return Err(Failure::user(
-//RS                     "selected foreign build working directory is not a regular directory"
-//RS                         .to_string(),
-//RS                 ));
-//RS             }
-//RS             if argv.is_empty() {
-//RS                 return Err(Failure::internal("selected foreign build has no command"));
-//RS             }
-//RS             let mut command = Command::new(&argv[0]);
-//RS             command.args(argv.iter().skip(1));
-//RS             command.current_dir(&workdir);
-//RS             for (name, value) in environment {
-//RS                 command.env(name, value);
-//RS             }
-//RS             let status = command.status().map_err(|error| {
-//RS                 Failure::user(format!("could not run selected foreign build: {error}"))
-//RS             })?;
-//RS             if !status.success() {
-//RS                 return Ok(Some(status.code().unwrap_or(ExitCodes::USER_ERROR)));
-//RS             }
-//RS             for output in outputs {
-//RS                 let relative = relative_path(&output)?;
-//RS                 let path = root.join(relative);
-//RS                 let metadata = fs::symlink_metadata(&path).map_err(|error| {
-//RS                     Failure::user(format!(
-//RS                         "selected foreign build completed without declared output `{output}`: {error}"
-//RS                     ))
-//RS                 })?;
-//RS                 if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS                     return Err(Failure::user(format!(
-//RS                         "selected foreign build output `{output}` is not a regular file"
-//RS                     )));
-//RS                 }
-//RS             }
-//RS             if mode.json {
-//RS                 write_mode_machine(
-//RS                     mode,
-//RS                     &format!(
-//RS                         "{{\"schema\":\"jet-ffi-build-execution-v1\",\"status\":\"built\",\"plan_digest\":\"{}\",\"ownership\":\"partial\"}}\n",
-//RS                         json_escape(&actual)
-//RS                     ),
-//RS                 );
-//RS             }
-//RS             Ok(Some(ExitCodes::OK))
-//RS         })();
-//RS         match result {
-//RS             Ok(status) => status,
-//RS             Err(Failure::User(message)) => {
-//RS                 crate::cli_error!("E2104", "{}", message);
-//RS                 Some(ExitCodes::USER_ERROR)
-//RS             }
-//RS             Err(Failure::Internal(message)) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &jet::Diagnostics::render_ice_report(
-//RS                         "selected foreign build failed",
-//RS                         &message,
-//RS                         false,
-//RS                     ),
-//RS                 );
-//RS                 Some(ExitCodes::ICE)
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn foreign_build_import_requested(args: &[String]) -> bool {
-//RS     foreign_build_import::requested(args)
-//RS }
-//RS 
-//RS pub(crate) fn run_foreign_build_import(args: &[String], mode: OutputMode) -> ! {
-//RS     foreign_build_import::run(args, mode)
-//RS }
-//RS 
-//RS pub(crate) fn run_selected_foreign_build(mode: OutputMode) -> Option<i32> {
-//RS     foreign_build_import::run_selected(mode)
-//RS }
-//RS #[cfg(test)]
-//RS 
-//RS fn ensure_web_output_dir(path: &Path) -> Result<PathBuf, String> {
-//RS     let cwd = fs::canonicalize(".")
-//RS         .map_err(|e| format!("error: couldn't resolve the web output root: {e}"))?;
-//RS     ensure_web_directory(path).map_err(|e| {
-//RS         format!(
-//RS             "error: couldn't create the {} folder safely: {}",
-//RS             path.display(),
-//RS             e
-//RS         )
-//RS     })?;
-//RS     let real = fs::canonicalize(path)
-//RS         .map_err(|e| format!("error: couldn't resolve {}: {e}", path.display()))?;
-//RS     if !real.starts_with(&cwd) {
-//RS         return Err(format!(
-//RS             "error: web output directory `{}` escapes the working directory",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(real)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS 
-//RS fn validate_web_output_file(path: &Path, root: &Path) -> Result<(), String> {
-//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!(
-//RS                 "error: web output `{}` must not be a symlink",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         if web_output_has_multiple_links(&metadata) {
-//RS             return Err(format!(
-//RS                 "error: web output `{}` must not be a hard link",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     let parent = path.parent().unwrap_or(Path::new("."));
-//RS     let real_parent = fs::canonicalize(parent)
-//RS         .map_err(|e| format!("error: couldn't resolve web output parent: {e}"))?;
-//RS     if !real_parent.starts_with(root) {
-//RS         return Err(format!(
-//RS             "error: web output `{}` escapes the output directory",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS 
-//RS fn web_output_has_multiple_links(metadata: &fs::Metadata) -> bool {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::MetadataExt;
-//RS         return metadata.is_file() && metadata.nlink() > 1;
-//RS     }
-//RS     #[cfg(windows)]
-//RS     {
-//RS         use std::os::windows::fs::MetadataExt;
-//RS         return metadata.is_file() && metadata.number_of_links() > 1;
-//RS     }
-//RS     #[cfg(not(any(unix, windows)))]
-//RS     {
-//RS         let _ = metadata;
-//RS         false
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS 
-//RS fn ensure_web_directory(path: &Path) -> std::io::Result<()> {
-//RS     match fs::symlink_metadata(path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "web output directory must not be a symlink",
-//RS         )),
-//RS         Ok(metadata) if metadata.is_dir() => Ok(()),
-//RS         Ok(_) => Err(std::io::Error::new(
-//RS             std::io::ErrorKind::AlreadyExists,
-//RS             "web output path is not a directory",
-//RS         )),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             if let Some(parent) = path
-//RS                 .parent()
-//RS                 .filter(|parent| !parent.as_os_str().is_empty())
-//RS             {
-//RS                 ensure_web_directory(parent)?;
-//RS             }
-//RS             fs::create_dir(path)
-//RS         }
-//RS         Err(error) => Err(error),
-//RS     }
-//RS }
-//RS 
-//RS fn strip_manifest_source_map(manifest: &str) -> String {
-//RS     let mut out = String::with_capacity(manifest.len());
-//RS     for line in manifest.lines() {
-//RS         if line.trim_start().starts_with("\"sourceMap\":") {
-//RS             continue;
-//RS         }
-//RS         // Drop a trailing comma left on the previous field when sourceMap was last-but-one.
-//RS         out.push_str(line);
-//RS         out.push('\n');
-//RS     }
-//RS     // Repair ",\n  \"partitions\"" style when sourceMap line removed mid-object:
-//RS     // the previous non-empty line may end with a comma already; if we removed
-//RS     // sourceMap, the prior line (traceMap) still has its comma — fine.
-//RS     // If sourceMap was alone after a non-comma line, JSON stays valid because
-//RS     // emit_manifest always puts sourceMap before partitions with commas on each
-//RS     // field line except the structural closers.
-//RS     out
-//RS }
-//RS 
-//RS /// Where `write_plugin_artifacts` put the final `.wasm` Component (and the
-//RS /// intermediate `.wit`/guest-Rust files, kept for `-v` reporting).
-//RS pub(crate) struct PluginBuildPaths {
-//RS     pub(crate) wit: PathBuf,
-//RS     pub(crate) guest_rust: PathBuf,
-//RS     pub(crate) core_wasm: PathBuf,
-//RS     pub(crate) component_wasm: PathBuf,
-//RS }
-//RS 
-//RS /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): whether a plugin build step failed
-//RS /// because a required external tool is missing/failed to run (a clean E1259,
-//RS /// never an internal-compiler-error exit — I2 reserves ICE for our own
-//RS /// generated code being rejected) or because `rustc` rejected the
-//RS /// jet-generated guest Rust (a genuine internal compiler error — sema should
-//RS /// have caught this before codegen ever ran).
-//RS pub(crate) enum PluginBuildError {
-//RS     ToolFailure(String),
-//RS     GeneratedCodeRejected(String),
-//RS }
-//RS 
-//RS /// The ONE place that turns a compiled `PluginArtifacts` bundle into an actual
-//RS /// `.wasm` Component Model file on disk (I8, mirrors `write_web_artifacts`):
-//RS /// `rustc --target wasm32-unknown-unknown --crate-type cdylib` builds the core
-//RS /// module from the guest Rust, then `wasm-tools component embed` + `component
-//RS /// new` lift it into a typed component using the generated `.wit` world — no
-//RS /// wit-bindgen crate, no adapter shims; scalar exports use the canonical
-//RS /// Component Model ABI at the core-wasm level (including `cabi_realloc` for
-//RS /// Text; see `Codegen::Plugin` module doc).
-// END-PORT-PENDING 0673 Source/CmdCompile.rs:11989-13766
+use core.files as fs
+use core.process.[Command, exit]
+use core.sys.target
+use jet.Codegen.MIRWeb.WebArtifacts
+use jet.FFI.FfiLink
+use jet.Authority.AuthorityResolver
+use jet.Diagnostics.render_ice_report
+use jet.Syntax.sanitize_crate_name
+use jet.SHA256.sha256_hex
+use jet.Lock
+use jet.Comptime.Build.[LegacyWrapperSpec, LegacyWrapperKind]
+use jet_store.Store
+use jet_store.runtime as runtime
+use jet_devserver.WebHost.WebOutputAuthority
+use jet_foundation.[DataTree, CLISchema, WasmDebug, ExitCodes]
+use jet_foundation.JSON.parse_json
+use std.ffi.[OsString, OsStr]
+use std.io.[Error, ErrorKind]
+
+// Rust: Source/CmdCompile.rs:11989
+pub fn write_web_artifacts(file: String, web: &WebArtifacts, ffi: FfiLink?, verbose: Bool, output: &WebOutputAuthority, incremental_session: &WebRustcIncrementalSession?, emit_maps: Bool, mode: OutputMode) -> WebBuildPaths Err! {
+    step :: fn(msg: String) -> { if verbose -> write_mode_status(mode, "[build] {msg}\n") }
+    output_path :: fn(name: String) -> OSPath Err! {
+        output.path_for(name) ?? return Err("error: couldn't resolve web output `{name}`: {err}")
+    }
+    manifest_path :: output_path("web.manifest.json")?
+    dom_path :: output_path("jet_dom_runtime.js")?
+    js_path :: output_path("app.js")?
+    js_map_path :: output_path("app.js.map")?
+    wasm_rs_path :: output_path("app_wasm.rs")?
+    wasm_path :: output_path("app.wasm")?
+    wasm_map_path :: output_path("app.wasm.map")?
+    html_path :: output_path("index.html")?
+    // D-HTMLPAIR1: explicit marker, sibling HTML, then the generated page.
+    html_contents := web.index_html.clone()
+    if web.explicit_html_path == .Val(rel) {
+        html_contents = read_web_html_source(file, OSPath.new(rel), true)? ?? return Err("error: `#HTML(\"{rel}\")` source is missing")
+    } else {
+        sibling :: OSPath.new(file).with_extension("html")
+        if sibling.file_name() == .Val(name) -> html_contents = read_web_html_source(file, OSPath.new(name), false)? ?? web.index_html.clone()
+    }
+    manifest_json :: if emit_maps -> web.manifest_json.clone() else -> strip_manifest_source_map(web.manifest_json)
+    js_app := web.js_app.clone()
+    if emit_maps {
+        if !js_app.ends_with("\n") -> &js_app.push('\n')
+        &js_app.push_str("//# sourceMappingURL=app.js.map\n")
+    }
+    output.replace_file("web.manifest.json", manifest_json.bytes()) ?? return Err("error: couldn't write {manifest_path.display()}: {err}")
+    output.replace_file("jet_dom_runtime.js", web.dom_runtime.bytes()) ?? return Err("error: couldn't write {dom_path.display()}: {err}")
+    output.replace_file("app.js", js_app.bytes()) ?? return Err("error: couldn't write {js_path.display()}: {err}")
+    output.replace_file("app_wasm.rs", web.wasm_rust.bytes()) ?? return Err("error: couldn't write {wasm_rs_path.display()}: {err}")
+    output.replace_file("index.html", html_contents.bytes()) ?? return Err("error: couldn't write {html_path.display()}: {err}")
+    js_map_written := OSPath?{None}
+    if emit_maps {
+        output.replace_file("app.js.map", web.js_source_map.bytes()) ?? return Err("error: couldn't write {js_map_path.display()}: {err}")
+        js_map_written = .Val(js_map_path.clone())
+        step("js map     -> {js_map_path.display()}")
+    } else {
+        output.remove_file_if_exists("app.js.map") ?? return Err("error: couldn't remove {js_map_path.display()}: {err}")
+        output.remove_file_if_exists("app.wasm.map") ?? return Err("error: couldn't remove {wasm_map_path.display()}: {err}")
+    }
+    step("web manifest -> {manifest_path.display()}")
+    step("dom shim    -> {dom_path.display()}")
+    step("js entry    -> {js_path.display()}")
+    step("wasm emit   -> {wasm_rs_path.display()}")
+    step("index.html  -> {html_path.display()}")
+    step("rustc wasm  {wasm_rs_path.display()} -> {wasm_path.display()}")
+    wasm_temp :: output.create_temp_file("jet-web-rustc", ".wasm") ?? return Err("error: couldn't create a wasm temporary: {err}")
+    wasm_temp_path :: wasm_temp.path().to_path_buf()
+    rustc_profile_flags :: if emit_maps -> ["-C", "opt-level=0", "-C", "debuginfo=2"] else -> ["-O"]
+    incremental_dir := OSPath?{None}
+    if incremental_session == .Val(session) -> incremental_dir = .Val(session.prepare_dir(web.rustc_incremental_identity, emit_maps, ffi.is_some())?)
+    runtime_flags := [OsString]{OsString.from("--target"), OsString.from("wasm32-unknown-unknown")}
+    loop flag in rustc_profile_flags -> &runtime_flags.push(OsString.from(flag))
+    inline_runtime :: fn() -> runtime.PreparedRuntime.inline(web.wasm_rust)
+    prepared_runtime := inline_runtime()
+    if ffi.is_none() {
+        if Store.from_env() == .Ok(store) -> prepared_runtime = runtime.prepare(store, OsStr.new("rustc"), web.wasm_rust, runtime_flags, []) ?? inline_runtime()
+    }
+    prepared_source := None
+    split_source_path := wasm_rs_path.clone()
+    if prepared_runtime.is_split() {
+        if incremental_dir == .Val(dir) {
+            source_path :: dir.join("app_wasm.rs")
+            fs.write(source_path, prepared_runtime.rust().bytes()) ?? return Err("error: couldn't write the prepared Web rustc source {source_path.display()}: {err}")
+            split_source_path = source_path
+        } else {
+            source := output.create_temp_file("jet-web-rustc", ".rs") ?? return Err("error: couldn't create a prepared Wasm source: {err}")
+            source.write_all(prepared_runtime.rust().bytes()) ?? return Err("error: couldn't write a prepared Wasm source: {err}")
+            split_source_path = source.path().to_path_buf()
+            prepared_source = .Val(^source)
+        }
+    }
+    wasm_destination :: wasm_temp_path.to_str() ?? return Err("error: web wasm temporary path is not valid UTF-8: {wasm_temp_path.display()}")
+    run_rustc :: fn(source_path: &OSPath, prepared: &runtime.PreparedRuntime?) -> std.process.Output Err! {
+        wasm_source :: source_path.to_str() ?? return Err("error: web source path is not valid UTF-8: {source_path.display()}")
+        // GATE #4494: native process creation and OS-string arguments.
+        rustc := Command.new("rustc")
+        &rustc.args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "--crate-name"])
+        &rustc.arg(sanitize_crate_name(wasm_rs_path.file_stem().and_then(fn(name) -> name.to_str()) ?? "out"))
+        &rustc.args(rustc_profile_flags)
+        if incremental_dir == .Val(dir) -> &rustc.arg("-C").arg("incremental={dir.display()}")
+        if prepared == .Val(value) -> value.add_rustc_args(&rustc)
+        &rustc.args([wasm_source, "-o", wasm_destination])
+        if ffi == .Val(link) {
+            &rustc.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+            loop deps_dir in link.dependency_dirs() {
+                if deps_dir.is_dir() -> &rustc.arg("-L").arg("dependency={deps_dir.display()}")
+            }
+        }
+        rustc.output() ?? return Err("error: couldn't run rustc for wasm: {err}")
+    }
+    used_split := prepared_runtime.is_split()
+    rustc := run_rustc(split_source_path, if used_split -> .Val(&prepared_runtime) else -> None)?
+    if !rustc.status.success() && used_split {
+        if verbose -> step("runtime split bypassed (inline retry)")
+        used_split = false
+        rustc = run_rustc(wasm_rs_path, None)?
+    }
+    if !rustc.status.success() -> return Err(render_ice_report("rustc rejected generated wasm module", String.from_utf8_lossy(rustc.stderr), true))
+    if used_split {
+        status :: if prepared_runtime.cache_hit() -> "reused invariant wasm modules" else -> "stored invariant wasm modules"
+        step("runtime   -> {status}")
+    }
+    // rustc may replace the inode; reopen its output path.
+    wasm := fs.read(wasm_temp_path) ?? return Err("error: couldn't read {wasm_temp_path.display()}: {err}")
+    CLISchema.embed_wasm_record(&wasm, web.command_record) ?? return Err("error: couldn't embed JetCommandSchema metadata: {err}")
+    wasm_map_written := OSPath?{None}
+    if emit_maps {
+        wasm_map :: jet.Codegen.build_wasm_jet_source_map(wasm, web.wasm_rust, web.source_names, web.source_contents) ?? return Err("error: couldn't build app.wasm.map: {err}")
+        output.replace_file("app.wasm.map", wasm_map.bytes()) ?? return Err("error: couldn't write {wasm_map_path.display()}: {err}")
+        WasmDebug.embed_source_mapping_url(&wasm, "app.wasm.map") ?? return Err("error: couldn't embed wasm sourceMappingURL: {err:?}")
+        wasm_map_written = .Val(wasm_map_path.clone())
+        step("wasm map   -> {wasm_map_path.display()}")
+    }
+    output.replace_file("app.wasm", wasm) ?? return Err("error: couldn't write {wasm_path.display()}: {err}")
+    WebBuildPaths{manifest: manifest_path, dom: dom_path, js: js_path, js_map: js_map_written, wasm: wasm_path, wasm_map: wasm_map_written, html: html_path}
+}
+
+// Rust: Source/CmdCompile.rs:12294
+fn read_web_html_source(file: String, relative: &OSPath, required: Bool) -> String? Err! {
+    source_dir :: OSPath.new(file).parent().filter(fn(parent) -> !parent.as_os_str().is_empty()) ?? OSPath.new(".")
+    source_path :: source_dir.join(relative)
+    resolver :: AuthorityResolver.open(source_dir) ?? return Err("error: couldn't open the pinned HTML source directory `{source_dir.display()}`: {err}")
+    checked :: resolver.checked_file(relative) ?? {
+        if !required && err.is_missing() -> return None
+        if required && err.is_missing() -> return Err("error: `#HTML(\"{relative.display()}\")` names a file that doesn't exist: {source_path.display()} ({err})")
+        return Err("error: HTML source `{source_path.display()}` is not a safe source-relative regular file: {err}")
+    }
+    resolver.revalidate_file(checked) ?? return Err("error: HTML source `{source_path.display()}` changed during its pinned read: {err}")
+    text :: checked.text() ?? return Err("error: HTML source `{source_path.display()}` is not valid UTF-8: {err}")
+    .Val(text)
+}
+
+// Rust: Source/CmdCompile.rs:12347
+struct foreign_build_import {}
+// Rust: Source/CmdCompile.rs:12350
+CANDIDATE_SCHEMA :: "jet-ffi-build-import-v1"
+// Rust: Source/CmdCompile.rs:12351
+SELECTION_PACKAGE :: "__jet_foreign_build__"
+// Rust: Source/CmdCompile.rs:12354
+enum ForeignBuildOperation { Preview Accept(String) }
+// Rust: Source/CmdCompile.rs:12360
+struct ForeignBuildRequest { kind: String, build_dir: String, operation: ForeignBuildOperation }
+// Rust: Source/CmdCompile.rs:12367
+struct ForeignBuildAction {
+    id: String
+    owner: String
+    inner_owner: String?
+    command: [String]
+    inputs: [String]
+    outputs: [String]
+    environment: [(String, String)]
+    workdir: String
+    custom: Bool
+}
+// Rust: Source/CmdCompile.rs:12381
+struct ForeignBuildCandidate {
+    key: String
+    build_dir: String
+    argv: [String]
+    inputs: [(String, String)]
+    outputs: [String]
+    toolchains: [(String, String)]
+    environment: [(String, String)]
+    workdirs: [String]
+    actions: [ForeignBuildAction]
+    unsupported: [String]
+    ownership: String
+}
+// Rust: Source/CmdCompile.rs:12396
+#Error
+enum ForeignBuildFailure { User(String) Internal(String) }
+// Rust: Source/CmdCompile.rs:12401
+fn ForeignBuildFailure.user(message: String) -> ForeignBuildFailure { .User(message) }
+// Rust: Source/CmdCompile.rs:12405
+fn ForeignBuildFailure.internal(message: String) -> ForeignBuildFailure { .Internal(message) }
+// Rust: Source/CmdCompile.rs:12410
+fn foreign_build_import.relative_path(value: String) -> OSPath ForeignBuildFailure! {
+    path :: OSPath.new(value)
+    invalid := path.is_absolute()
+    loop component in path.components() {
+        if component == {
+            .ParentDir -> invalid = true
+            .RootDir -> invalid = true
+            .Prefix(_) -> invalid = true
+            _ -> {}
+        }
+    }
+    if invalid -> return Err(.User("foreign build path `{value}` must be relative to the project"))
+    path.to_path_buf()
+}
+// Rust: Source/CmdCompile.rs:12427
+fn foreign_build_import.display_relative(path: &OSPath) -> String { path.to_string_lossy().replace("\\", "/") }
+// Rust: Source/CmdCompile.rs:12431
+fn foreign_build_import.ensure_directory(path: &OSPath) -> Void ForeignBuildFailure! {
+    // GATE #4409: preserve NotFound and AlreadyExists distinctions.
+    metadata :: fs.symlink_metadata(path) ?? {
+        if err.kind() != .NotFound -> return Err(.Internal("could not inspect `{path.display()}`: {err}"))
+        if path.parent() == .Val(parent) -> foreign_build_import.ensure_directory(parent)?
+        fs.create_dir(path) ?? {
+            if err.kind() == .AlreadyExists -> return foreign_build_import.ensure_directory(path)
+            return Err(.Internal("could not create `{path.display()}`: {err}"))
+        }
+        return
+    }
+    if metadata.file_type().is_symlink() -> return Err(.Internal("refusing symlinked directory `{path.display()}`"))
+    if metadata.is_dir() -> return
+    Err(.Internal("foreign build cache path `{path.display()}` is not a directory"))
+}
+// Rust: Source/CmdCompile.rs:12464
+fn foreign_build_import.read_regular(root: &OSPath, relative: String) -> [U8] ForeignBuildFailure! {
+    relative_path :: foreign_build_import.relative_path(relative)?
+    path :: root.join(relative_path)
+    metadata :: fs.symlink_metadata(path) ?? return Err(.User("foreign build input `{relative}` is unavailable: {err}"))
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(.User("foreign build input `{relative}` must be a regular non-symlink file"))
+    fs.read(path) ?? return Err(.User("could not read foreign build input `{relative}`: {err}"))
+}
+// Rust: Source/CmdCompile.rs:12484
+fn foreign_build_import.add_input(root: &OSPath, relative: String, inputs: &[(String, String)], unsupported: &[String]) -> Void ForeignBuildFailure! {
+    relative :: foreign_build_import.display_relative(foreign_build_import.relative_path(relative)?)
+    if inputs.iter().any(fn(pair) -> pair.0 == relative) -> return
+    bytes :: foreign_build_import.read_regular(root, relative) ?? {
+        if err == {
+            .User(message) -> { &unsupported.push(message); return }
+            _ -> return Err(err)
+        }
+    }
+    &inputs.push((relative, "sha256-{sha256_hex(bytes)}"))
+}
+// Rust: Source/CmdCompile.rs:12510
+fn foreign_build_import.cmake_calls(source: String, command: String) -> [[String]] {
+    lower :: source.to_ascii_lowercase()
+    needle :: command.to_ascii_lowercase()
+    bytes :: lower.bytes()
+    cursor := 0
+    calls := [[String]]{}
+    loop cursor < bytes.len() {
+        found :: lower.slice(cursor..<lower.len()).find(needle) ?? break
+        start :: cursor + found
+        before :: if start > 0 -> .Val(bytes[start - 1]) else -> None
+        after_name :: start + needle.len()
+        if before.is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == 95) || bytes.get(after_name).is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == 95) {
+            cursor = after_name
+            next
+        }
+        open_offset :: lower.slice(after_name..<lower.len()).find("(") ?? break
+        open :: after_name + open_offset
+        close_offset :: source.slice((open + 1)..<source.len()).find(")") ?? break
+        close :: open + 1 + close_offset
+        args := [String]{}
+        loop token in source.slice((open + 1)..<close).split_whitespace() {
+            value := token.trim_matches(fn(character) -> character == '"' || character == '\'').trim_end_matches(';') // #4303
+            if !value.is_empty() -> &args.push(value.to_string())
+        }
+        &calls.push(^args)
+        cursor = close + 1
+    }
+    calls
+}
+// Rust: Source/CmdCompile.rs:12557
+fn foreign_build_import.cmake_source_tokens(calls: &[[String]], root: &OSPath, inputs: &[(String, String)], unsupported: &[String]) -> Void ForeignBuildFailure! {
+    // Rust: Source/CmdCompile.rs:12563
+    FLAGS :: ["WIN32", "MACOSX_BUNDLE", "EXCLUDE_FROM_ALL", "STATIC", "SHARED", "MODULE", "OBJECT", "INTERFACE", "ALL"]
+    loop args in calls {
+        loop token in args.iter().skip(1) {
+            if FLAGS.contains(token) || token.starts_with("$") || token.contains("=") || !token.contains(".") -> next
+            path := token.trim_matches(fn(character) -> character == '"' || character == '\'') // #4303
+            extension :: (OSPath.new(path).extension().and_then(fn(extension) -> extension.to_str()) ?? "").to_ascii_lowercase()
+            if !["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "m", "mm"].contains(extension) -> next
+            if root.join(path).is_file() -> foreign_build_import.add_input(root, path, inputs, unsupported)?
+            else -> &unsupported.push("declared CMake source `{path}` is unavailable")
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:12604
+fn foreign_build_import.cmake_custom_dependencies(calls: &[[String]], root: &OSPath, inputs: &[(String, String)], unsupported: &[String]) -> Void ForeignBuildFailure! {
+    // Rust: Source/CmdCompile.rs:12610
+    FLAGS :: ["COMMAND", "DEPENDS", "OUTPUT", "BYPRODUCTS", "VERBATIM", "WORKING_DIRECTORY", "COMMENT", "USES_TERMINAL", "COMMAND_EXPAND_LISTS"]
+    loop args in calls {
+        depends :: args.iter().position(fn(value) -> value == "DEPENDS") ?? next
+        loop value in args.iter().skip(depends + 1) {
+            token := value.trim_matches(fn(character) -> character == '"' || character == '\'') // #4303
+            if token.is_empty() || FLAGS.contains(token) || token.starts_with("$") || token.contains("=") || token.starts_with("-") -> next
+            if root.join(token).is_file() -> foreign_build_import.add_input(root, token, inputs, unsupported)?
+            else -> &unsupported.push("declared CMake custom dependency `{token}` is unavailable")
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:12647
+fn foreign_build_import.cache_value(cache: String, key: String) -> String? {
+    loop raw in cache.lines() {
+        line := raw.trim() // #4303
+        pair :: line.split_once("=") ?? next
+        name :: pair.0.split(":").next() ?? pair.0
+        if name == key {
+            value := pair.1.trim() // #4303
+            return .Val(value.to_string())
+        }
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:12656
+fn foreign_build_import.cmake_target_outputs(build_dir: String, command: String, name: String) -> [String] {
+    if command == "add_library" -> return ["{build_dir}/lib{name}.a"]
+    if command == "add_executable" -> return ["{build_dir}/{name}"]
+    []
+}
+// Rust: Source/CmdCompile.rs:12665
+fn foreign_build_import.custom_outputs(build_dir: String, calls: &[[String]]) -> [String] {
+    outputs := [String]{}
+    loop args in calls {
+        key := String?{None}
+        loop value in args {
+            if key == .Val("OUTPUT") || key == .Val("BYPRODUCTS") {
+                if !value.starts_with("$") && !OSPath.new(value).is_absolute() -> &outputs.push("{build_dir}/{value}")
+                key = None
+            } else if value == "OUTPUT" || value == "BYPRODUCTS" -> key = .Val(value)
+        }
+    }
+    outputs
+}
+// Rust: Source/CmdCompile.rs:12685
+fn foreign_build_import.candidate_path(root: &OSPath, key: String) -> OSPath {
+    digest :: sha256_hex(key.bytes())
+    prefix :: digest.get(0..<16) ?? digest
+    name :: key.replace(":", "-").replace("/", "_")
+    root.join(".jet").join("cache").join("foreign-build").join("{name}-{prefix}.json")
+}
+// Rust: Source/CmdCompile.rs:12697
+fn foreign_build_import.write_atomic(path: &OSPath, bytes: [U8]) -> Void ForeignBuildFailure! {
+    parent :: path.parent() ?? return Err(.Internal("candidate `{path.display()}` has no parent"))
+    foreign_build_import.ensure_directory(parent)?
+    digest :: sha256_hex(bytes).get(0..<16) ?? "candidate"
+    // GATE #4494: process identity, exclusive creation, fsync and rename.
+    temporary :: parent.join(".foreign-build-{std.process.id()}-{digest}.tmp")
+    result :: fn() -> Void ForeignBuildFailure! {
+        file := fs.OpenOptions.new().write(true).create_new(true).open(temporary) ?? return Err(.Internal("could not stage candidate: {err}"))
+        file.write_all(bytes) ?? return Err(.Internal("could not write candidate: {err}"))
+        file.sync_all() ?? return Err(.Internal("could not sync candidate: {err}"))
+        if fs.symlink_metadata(path) == .Ok(metadata) {
+            if metadata.file_type().is_symlink() || metadata.is_dir() -> return Err(.Internal("candidate destination `{path.display()}` is not replaceable"))
+        }
+        fs.rename(temporary, path) ?? return Err(.Internal("could not publish candidate: {err}"))
+    }()
+    if result.is_err() -> _ :: fs.remove_file(temporary)
+    result
+}
+// Rust: Source/CmdCompile.rs:12741
+fn foreign_build_import.json_strings(values: &[String]) -> String {
+    values.iter().map(fn(value) -> "\"{json_escape(value)}\"").collect().join(",")
+}
+// Rust: Source/CmdCompile.rs:12749
+fn foreign_build_import.json_pairs(values: &[(String, String)]) -> String {
+    values.iter().map(fn(pair) -> "{{\"name\":\"{json_escape(pair.0)}\",\"value\":\"{json_escape(pair.1)}\"}}").collect().join(",")
+}
+// Rust: Source/CmdCompile.rs:12763
+fn foreign_build_import.action_json(action: &ForeignBuildAction) -> String {
+    inner :: action.inner_owner.map(fn(value) -> "\"{json_escape(value)}\"") ?? "null"
+    "{{\"id\":\"{json_escape(action.id)}\",\"owner\":\"{json_escape(action.owner)}\",\"inner_owner\":{inner},\"command\":[{foreign_build_import.json_strings(action.command)}],\"inputs\":[{foreign_build_import.json_strings(action.inputs)}],\"outputs\":[{foreign_build_import.json_strings(action.outputs)}],\"environment\":[{foreign_build_import.json_pairs(action.environment)}],\"workdir\":\"{json_escape(action.workdir)}\",\"custom_action\":{action.custom}}}"
+}
+// Rust: Source/CmdCompile.rs:12783
+fn foreign_build_import.candidate_json(candidate: &ForeignBuildCandidate) -> String {
+    actions :: candidate.actions.iter().map(fn(action) -> foreign_build_import.action_json(action)).collect().join(",")
+    dependencies :: candidate.inputs.iter().map(fn(pair) -> pair.0).collect()
+    inputs :: candidate.inputs.iter().map(fn(pair) -> "{{\"path\":\"{json_escape(pair.0)}\",\"digest\":\"{json_escape(pair.1)}\"}}").collect().join(",")
+    "{{\n  \"schema\":\"{CANDIDATE_SCHEMA}\",\n  \"selection_key\":\"{json_escape(candidate.key)}\",\n  \"kind\":\"cmake\",\n  \"build_dir\":\"{json_escape(candidate.build_dir)}\",\n  \"ownership\":\"{json_escape(candidate.ownership)}\",\n  \"argv\":[{foreign_build_import.json_strings(candidate.argv)}],\n  \"dependencies\":[{foreign_build_import.json_strings(dependencies)}],\n  \"inputs\":[{inputs}],\n  \"outputs\":[{foreign_build_import.json_strings(candidate.outputs)}],\n  \"toolchains\":[{foreign_build_import.json_pairs(candidate.toolchains)}],\n  \"environment\":[{foreign_build_import.json_pairs(candidate.environment)}],\n  \"workdirs\":[{foreign_build_import.json_strings(candidate.workdirs)}],\n  \"actions\":[{actions}],\n  \"unsupported_edges\":[{foreign_build_import.json_strings(candidate.unsupported)}]\n}}\n"
+}
+// Rust: Source/CmdCompile.rs:12824
+fn foreign_build_import.build_candidate(root: &OSPath, request: &ForeignBuildRequest) -> (OSPath, ForeignBuildCandidate, String) ForeignBuildFailure! {
+    if request.kind != "cmake" -> return Err(.User("unsupported foreign build importer `{request.kind}`; only `cmake:build` is currently supported"))
+    source_bytes :: foreign_build_import.read_regular(root, "CMakeLists.txt")?
+    cmake_source :: String.from_utf8(source_bytes) ?? return Err(.User("CMakeLists.txt must be UTF-8"))
+    cache_relative :: foreign_build_import.display_relative(foreign_build_import.relative_path("{request.build_dir}/CMakeCache.txt")?)
+    cache_bytes :: foreign_build_import.read_regular(root, cache_relative)?
+    cache :: String.from_utf8(cache_bytes) ?? return Err(.User("CMakeCache.txt must be UTF-8"))
+    compile_commands_relative :: foreign_build_import.display_relative(foreign_build_import.relative_path("{request.build_dir}/compile_commands.json")?)
+    compile_commands_present :: root.join(compile_commands_relative).is_file()
+    inputs := [(String, String)]{}
+    unsupported := [String]{}
+    foreign_build_import.add_input(root, "CMakeLists.txt", &inputs, &unsupported)?
+    foreign_build_import.add_input(root, cache_relative, &inputs, &unsupported)?
+    if compile_commands_present {
+        foreign_build_import.add_input(root, compile_commands_relative, &inputs, &unsupported)?
+        &unsupported.push("compilation database is evidence only; it cannot establish the complete graph")
+    }
+    if root.join("package.jet").is_file() -> foreign_build_import.add_input(root, "package.jet", &inputs, &unsupported)?
+    target_calls := [(String, [String])]{}
+    loop command in ["add_executable", "add_library", "add_custom_target"] {
+        loop args in foreign_build_import.cmake_calls(cmake_source, command) -> &target_calls.push((command, ^args))
+    }
+    foreign_build_import.cmake_source_tokens(target_calls.iter().map(fn(pair) -> pair.1).collect(), root, &inputs, &unsupported)?
+    custom_calls :: foreign_build_import.cmake_calls(cmake_source, "add_custom_command")
+    foreign_build_import.cmake_custom_dependencies(custom_calls, root, &inputs, &unsupported)?
+    if !custom_calls.is_empty() -> &unsupported.push("CMake custom actions retain their inner foreign owner until explicitly modeled")
+    loop dynamic in ["add_dependencies(", "include(", "execute_process(", "$<"] {
+        if cmake_source.contains(dynamic) -> &unsupported.push("unsupported dynamic CMake edge `{dynamic}`")
+    }
+    argv := ["cmake", "--build", request.build_dir.clone()]
+    if LegacyWrapperSpec.from_project_file(root, .CMake) == {
+        .Ok(spec) -> argv = ^spec.argv
+        .Err(error) -> &unsupported.push("typed CMake importer retained this edge: {error:?}")
+    }
+    outputs := [String]{}
+    actions := [ForeignBuildAction]{}
+    loop (index, pair) in target_calls {
+        command :: pair.0
+        args :: pair.1
+        name :: args.first() ?? { &unsupported.push("{command} has no literal target name"); next }
+        target_outputs :: foreign_build_import.cmake_target_outputs(request.build_dir, command, name)
+        &outputs.extend(target_outputs.iter().cloned())
+        &actions.push(ForeignBuildAction{
+            id: "cmake.target.{index}.{name}", owner: "cmake", inner_owner: None,
+            command: ["cmake", "--build", request.build_dir.clone(), "--target", name.clone()],
+            inputs: inputs.iter().map(fn(pair) -> pair.0.clone()).collect(), outputs: target_outputs,
+            environment: [], workdir: request.build_dir.clone(), custom: false,
+        })
+    }
+    loop (index, args) in custom_calls {
+        inner_owner :: args.iter().position(fn(value) -> value == "COMMAND").and_then(fn(position) -> args.get(position + 1)).cloned() ?? "cmake custom command"
+        action_outputs :: foreign_build_import.custom_outputs(request.build_dir, std.slice.from_ref(args))
+        &outputs.extend(action_outputs.iter().cloned())
+        &actions.push(ForeignBuildAction{
+            id: "cmake.custom.{index}", owner: "cmake", inner_owner: .Val(inner_owner),
+            command: ["cmake", "--build", request.build_dir.clone()],
+            inputs: inputs.iter().map(fn(pair) -> pair.0.clone()).collect(), outputs: action_outputs,
+            environment: [], workdir: ".", custom: true,
+        })
+    }
+    if actions.is_empty() -> &actions.push(ForeignBuildAction{
+        id: "cmake.build", owner: "cmake", inner_owner: .Val("cmake generator"), command: argv.clone(),
+        inputs: inputs.iter().map(fn(pair) -> pair.0.clone()).collect(), outputs: [], environment: [], workdir: ".", custom: true,
+    })
+    &outputs.sort()
+    &outputs.dedup()
+    if outputs.is_empty() -> &unsupported.push("CMake did not expose a declared artifact output")
+    toolchains := [(String, String)]{}
+    loop key in ["CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER", "CMAKE_LINKER", "CMAKE_GENERATOR", "CMAKE_BUILD_TYPE"] {
+        if foreign_build_import.cache_value(cache, key) == .Val(value) -> &toolchains.push((key, value))
+    }
+    environment := [(String, String)]{}
+    loop key in ["CMAKE_BUILD_TYPE", "CMAKE_GENERATOR", "CMAKE_TOOLCHAIN_FILE"] {
+        if foreign_build_import.cache_value(cache, key) == .Val(value) -> &environment.push((key, value))
+    }
+    &unsupported.sort()
+    &unsupported.dedup()
+    candidate := ForeignBuildCandidate{
+        key: "{request.kind}:{request.build_dir}", build_dir: request.build_dir.clone(),
+        argv: ^argv, inputs: ^inputs, outputs: ^outputs, toolchains: ^toolchains, environment: ^environment,
+        workdirs: ["."], actions: ^actions, unsupported: ^unsupported, ownership: "partial",
+    }
+    &candidate.inputs.sort()
+    &candidate.outputs.sort()
+    &candidate.toolchains.sort()
+    &candidate.environment.sort()
+    &candidate.workdirs.sort()
+    &candidate.actions.sort_by(fn(left, right) -> left.id.cmp(right.id))
+    bytes :: foreign_build_import.candidate_json(candidate).into_bytes()
+    digest :: "sha256-{sha256_hex(bytes)}"
+    path :: foreign_build_import.candidate_path(root, candidate.key)
+    foreign_build_import.write_atomic(path, bytes)?
+    (path, ^candidate, digest)
+}
+// Rust: Source/CmdCompile.rs:13053
+fn foreign_build_import.tree_field(tree: &DataTree, key: String) -> &DataTree ForeignBuildFailure! {
+    tree.get(key) ?? return Err(.Internal("candidate {err}"))
+}
+// Rust: Source/CmdCompile.rs:13058
+fn foreign_build_import.tree_string(tree: &DataTree, key: String) -> String ForeignBuildFailure! {
+    value :: foreign_build_import.tree_field(tree, key)?.as_str() ?? return Err(.Internal("candidate `{key}` {err}"))
+    value.to_string()
+}
+// Rust: Source/CmdCompile.rs:13065
+fn foreign_build_import.tree_array(tree: &DataTree, key: String) -> &[DataTree] ForeignBuildFailure! {
+    foreign_build_import.tree_field(tree, key)?.as_array() ?? return Err(.Internal("candidate `{key}` {err}"))
+}
+// Rust: Source/CmdCompile.rs:13072
+fn foreign_build_import.tree_object_field(tree: &DataTree, key: String) -> &DataTree ForeignBuildFailure! {
+    fields :: tree.as_object() ?? return Err(.Internal("candidate object {err}"))
+    loop (name, value) in fields {
+        if name == key -> return &value
+    }
+    Err(.Internal("candidate missing `{key}`"))
+}
+// Rust: Source/CmdCompile.rs:13082
+fn foreign_build_import.candidate_inputs(tree: &DataTree) -> [(String, String)] ForeignBuildFailure! {
+    result := [(String, String)]{}
+    loop entry in foreign_build_import.tree_array(tree, "inputs")? {
+        path :: foreign_build_import.tree_object_field(entry, "path")?.as_str() ?? return Err(.Internal("candidate input path {err}"))
+        digest :: foreign_build_import.tree_object_field(entry, "digest")?.as_str() ?? return Err(.Internal("candidate input digest {err}"))
+        &result.push((path.to_string(), digest.to_string()))
+    }
+    result
+}
+// Rust: Source/CmdCompile.rs:13104
+fn foreign_build_import.candidate_strings(tree: &DataTree, key: String) -> [String] ForeignBuildFailure! {
+    result := [String]{}
+    loop value in foreign_build_import.tree_array(tree, key)? {
+        text :: value.as_str() ?? return Err(.Internal("candidate `{key}` {err}"))
+        &result.push(text.to_string())
+    }
+    result
+}
+// Rust: Source/CmdCompile.rs:13115
+fn foreign_build_import.candidate_pairs(tree: &DataTree, key: String) -> [(String, String)] ForeignBuildFailure! {
+    result := [(String, String)]{}
+    loop entry in foreign_build_import.tree_array(tree, key)? {
+        name :: foreign_build_import.tree_object_field(entry, "name")?.as_str() ?? return Err(.Internal("candidate `{key}` name {err}"))
+        value :: foreign_build_import.tree_object_field(entry, "value")?.as_str() ?? return Err(.Internal("candidate `{key}` value {err}"))
+        &result.push((name.to_string(), value.to_string()))
+    }
+    result
+}
+// Rust: Source/CmdCompile.rs:13137
+fn foreign_build_import.load_candidate(root: &OSPath, request: &ForeignBuildRequest, expected_digest: String?) -> (DataTree, String, OSPath) ForeignBuildFailure! {
+    path :: foreign_build_import.candidate_path(root, "{request.kind}:{request.build_dir}")
+    metadata :: fs.symlink_metadata(path) ?? return Err(.User("no generated candidate for `{request.kind}:{request.build_dir}`; run preview first: {err}"))
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(.Internal("generated candidate `{path.display()}` is not a regular non-symlink file"))
+    bytes :: fs.read(path) ?? return Err(.Internal("could not read generated candidate `{path.display()}`: {err}"))
+    actual :: "sha256-{sha256_hex(bytes)}"
+    if expected_digest == .Val(expected) {
+        if expected != actual -> return Err(.User("stale plan digest: expected `{expected}`, found `{actual}`; previous selection was preserved"))
+    }
+    source :: String.from_utf8(bytes) ?? return Err(.Internal("generated candidate is not UTF-8"))
+    tree :: parse_json(source) ?? return Err(.Internal("generated candidate is not valid JSON: {err:?}"))
+    if foreign_build_import.tree_string(tree, "schema")? != CANDIDATE_SCHEMA -> return Err(.Internal("generated candidate has an unsupported schema"))
+    if foreign_build_import.tree_string(tree, "selection_key")? != "{request.kind}:{request.build_dir}" -> return Err(.User("generated candidate belongs to a different foreign build; previous selection was preserved"))
+    (tree, actual, path)
+}
+// Rust: Source/CmdCompile.rs:13188
+fn foreign_build_import.verify_inputs(root: &OSPath, tree: &DataTree) -> Void ForeignBuildFailure! {
+    loop (relative, expected) in foreign_build_import.candidate_inputs(tree)? {
+        bytes :: foreign_build_import.read_regular(root, relative) ?? {
+            if err == {
+                .User(message) -> return Err(.User("candidate input drifted: `{relative}` is unavailable ({message}); previous selection was preserved"))
+                .Internal(message) -> return Err(.Internal(message))
+            }
+        }
+        actual :: "sha256-{sha256_hex(bytes)}"
+        if actual != expected -> return Err(.User("candidate input drifted: `{relative}` expected `{expected}`, found `{actual}`; previous selection was preserved"))
+    }
+}
+// Rust: Source/CmdCompile.rs:13206
+fn foreign_build_import.lock_path(root: &OSPath) -> OSPath { root.join(".jet").join("lock") }
+// Rust: Source/CmdCompile.rs:13210
+fn foreign_build_import.selected_digest(root: &OSPath, key: String) -> String? ForeignBuildFailure! {
+    path :: foreign_build_import.lock_path(root)
+    metadata :: fs.symlink_metadata(path) ?? {
+        if err.kind() == .NotFound -> return None
+        return Err(.Internal("could not inspect `{path.display()}`: {err}"))
+    }
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(.Internal("lock `{path.display()}` is not a regular non-symlink file"))
+    raw :: fs.read_to_string(path) ?? return Err(.Internal("could not read `{path.display()}`: {err}"))
+    lock :: Lock.parse(raw) ?? return Err(.Internal("could not parse `{path.display()}`: {err}"))
+    lock.build_contributions.iter().find(fn(row) -> row.package == SELECTION_PACKAGE && row.key == key).map(fn(row) -> row.value.clone())
+}
+// Rust: Source/CmdCompile.rs:13241
+fn foreign_build_import.select_plan(root: &OSPath, key: String, digest: String) -> Void ForeignBuildFailure! {
+    path :: foreign_build_import.lock_path(root)
+    metadata :: fs.symlink_metadata(path) ?? return Err(.User("cannot activate a foreign build without the existing `.jet/lock`: {err}"))
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(.User("lock `{path.display()}` is not a regular non-symlink file"))
+    raw :: fs.read_to_string(path) ?? return Err(.Internal("could not read `{path.display()}`: {err}"))
+    lock := Lock.parse(raw) ?? return Err(.Internal("could not parse `{path.display()}`: {err}"))
+    &lock.build_contributions.retain(fn(row) -> !(row.package == SELECTION_PACKAGE && row.key == key))
+    &lock.build_contributions.push(Lock.LockedBuildContribution{
+        package: SELECTION_PACKAGE, key: key, value: digest, scope: "project", layer: "explicit-accept",
+        source: "jet build --import", reason: "reviewed foreign build plan selected explicitly",
+    })
+    replacement :: Lock.write(lock)
+    Lock.write_lock_atomically(root, replacement.bytes()) ?? return Err(.Internal("could not atomically select foreign plan: {err}"))
+}
+// Rust: Source/CmdCompile.rs:13278
+fn foreign_build_import.parse_request(args: &[String]) -> ForeignBuildRequest ForeignBuildFailure! {
+    position :: args.iter().position(fn(argument) -> argument == "--import") ?? return Err(.User("foreign build import requires `--import cmake:build`"))
+    spec :: args.get(position + 1) ?? return Err(.User("foreign build import requires a kind and build directory"))
+    (kind, build_dir) :: spec.split_once(":") ?? return Err(.User("foreign build import must use `kind:build-directory`"))
+    if kind.is_empty() || build_dir.is_empty() -> return Err(.User("foreign build import must use `kind:build-directory`"))
+    _ :: foreign_build_import.relative_path(build_dir)?
+    preview :: args.iter().any(fn(argument) -> argument == "--preview")
+    accept_position :: args.iter().position(fn(argument) -> argument == "--accept")
+    if preview && accept_position.is_some() -> return Err(.User("foreign build import accepts either `--preview` or `--accept`, not both"))
+    operation := ForeignBuildOperation.Preview
+    if !preview {
+        position :: accept_position ?? return Err(.User("foreign build import requires `--preview` or `--accept <plan-digest>`"))
+        digest :: args.get(position + 1) ?? return Err(.User("foreign build import `--accept` requires a plan digest"))
+        if digest.starts_with("-") -> return Err(.User("foreign build import `--accept` requires a plan digest"))
+        operation = .Accept(digest.clone())
+    }
+    ForeignBuildRequest{kind: kind.to_string(), build_dir: foreign_build_import.display_relative(foreign_build_import.relative_path(build_dir)?), operation: operation}
+}
+// Rust: Source/CmdCompile.rs:13326
+fn foreign_build_import.import_banned() -> Bool { env_truthy("CI") && !env_truthy("JET_ALLOW_FOREIGN_BUILD_IMPORT") }
+// Rust: Source/CmdCompile.rs:13330
+fn foreign_build_import.report_failure(error: ForeignBuildFailure, mode: OutputMode) -> Never {
+    if error == {
+        .User(message) -> {
+            cli_error_fix("E2104", message, "run the preview, review every action and input, then accept the exact plan digest")
+            exit(ExitCodes.USER_ERROR)
+        }
+        .Internal(message) -> {
+            write_mode_diagnostic(mode, render_ice_report("foreign build import failed", message, false))
+            exit(ExitCodes.ICE)
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:13354
+fn foreign_build_import.requested(args: &[String]) -> Bool { args.iter().any(fn(argument) -> argument == "--import") }
+// Rust: Source/CmdCompile.rs:13358
+fn foreign_build_import.run(args: &[String], mode: OutputMode) -> Never {
+    if foreign_build_import.import_banned() -> foreign_build_import.report_failure(.User("foreign build import is disabled by the CI build policy; set `JET_ALLOW_FOREIGN_BUILD_IMPORT=1` only for an explicitly reviewed job"), mode)
+    request :: foreign_build_import.parse_request(args) ?? foreign_build_import.report_failure(err, mode)
+    if request.operation == {
+        .Preview -> {
+            root :: std.env.current_dir() ?? foreign_build_import.report_failure(.Internal("could not resolve project root: {err}"), mode)
+            (path, candidate, digest) :: foreign_build_import.build_candidate(root, request) ?? foreign_build_import.report_failure(err, mode)
+            rendered :: foreign_build_import.candidate_json(candidate)
+            if mode.json -> write_mode_machine(mode, rendered)
+            else {
+                custom :: candidate.actions.iter().filter(fn(action) -> action.custom).map(fn(action) -> action.id).collect().join(", ")
+                unsupported :: if candidate.unsupported.is_empty() -> "none" else -> candidate.unsupported.join(" | ")
+                dependencies :: candidate.inputs.iter().map(fn(pair) -> pair.0).collect().join(", ")
+                commands :: candidate.actions.iter().map(fn(action) -> action.command.join(" ")).collect().join(" | ")
+                toolchains :: candidate.toolchains.iter().map(fn(pair) -> "{pair.0}={pair.1}").collect().join(", ")
+                inputs :: candidate.inputs.iter().map(fn(pair) -> "{pair.0} ({pair.1})").collect().join(", ")
+                environment :: candidate.environment.iter().map(fn(pair) -> "{pair.0}={pair.1}").collect().join(", ")
+                custom_text :: if custom.is_empty() -> "none" else -> custom
+                write_mode_renderable(mode, "foreign build import preview\nplan-digest: {digest}\nselection: {candidate.key}\nownership: {candidate.ownership}\ndependencies: {dependencies}\ncommands: {commands}\ntoolchain identities: {toolchains}\ninputs: {inputs}\noutputs: {candidate.outputs.join(", ")}\nenvironment: {environment}\nworkdirs: {candidate.workdirs.join(", ")}\ncustom actions: {custom_text}\nunsupported edges: {unsupported}\ncandidate: {path.display()}\n")
+            }
+        }
+        .Accept(digest) -> {
+            root :: std.env.current_dir() ?? foreign_build_import.report_failure(.Internal("could not resolve project root: {err}"), mode)
+            (tree, actual, _) :: foreign_build_import.load_candidate(root, request, .Val(digest)) ?? foreign_build_import.report_failure(err, mode)
+            foreign_build_import.verify_inputs(root, tree) ?? foreign_build_import.report_failure(err, mode)
+            if (foreign_build_import.tree_string(tree, "ownership") ?? "") != "partial" -> foreign_build_import.report_failure(.User("foreign build candidate did not disclose partial ownership; full ownership requires every action to be modeled"), mode)
+            key :: "{request.kind}:{request.build_dir}"
+            foreign_build_import.select_plan(root, key, actual) ?? foreign_build_import.report_failure(err, mode)
+            if mode.json -> write_mode_machine(mode, "{{\"schema\":\"jet-ffi-build-activation-v1\",\"status\":\"accepted\",\"selection_key\":\"{json_escape(key)}\",\"plan_digest\":\"{json_escape(actual)}\",\"ownership\":\"partial\"}}\n")
+            else -> write_mode_renderable(mode, "foreign build plan accepted: {key} ({actual})\n")
+        }
+    }
+    exit(ExitCodes.OK)
+}
+// Rust: Source/CmdCompile.rs:13478
+fn foreign_build_import.run_selected(mode: OutputMode) -> I32? {
+    root :: std.env.current_dir() ?? {
+        write_mode_diagnostic(mode, render_ice_report("selected foreign build failed", "could not resolve project root: {err}", false))
+        return .Val(ExitCodes.ICE)
+    }
+    key :: (foreign_build_import.selected_digest(root, "cmake:build") ?? {
+        if err == {
+            .User(message) -> { cli_error("E2104", message); return .Val(ExitCodes.USER_ERROR) }
+            .Internal(message) -> {
+                write_mode_diagnostic(mode, render_ice_report("selected foreign build failed", message, false))
+                return .Val(ExitCodes.ICE)
+            }
+        }
+    }) ?? return None
+    if foreign_build_import.import_banned() {
+        cli_error_fix("E2104", "the selected foreign build is disabled by the CI build policy", "set JET_ALLOW_FOREIGN_BUILD_IMPORT=1 only for an explicitly reviewed job")
+        return .Val(ExitCodes.USER_ERROR)
+    }
+    request :: ForeignBuildRequest{kind: "cmake", build_dir: "build", operation: .Accept(key.clone())}
+    result :: fn() -> I32? ForeignBuildFailure! {
+        (tree, actual, _) :: foreign_build_import.load_candidate(root, request, .Val(key))?
+        foreign_build_import.verify_inputs(root, tree)?
+        argv :: foreign_build_import.candidate_strings(tree, "argv")?
+        outputs :: foreign_build_import.candidate_strings(tree, "outputs")?
+        environment :: foreign_build_import.candidate_pairs(tree, "environment")?
+        workdirs :: foreign_build_import.candidate_strings(tree, "workdirs")?
+        workdir :: workdirs.first() ?? return Err(.Internal("selected foreign build has no working directory"))
+        workdir_path :: root.join(foreign_build_import.relative_path(workdir)?)
+        metadata :: fs.symlink_metadata(workdir_path) ?? return Err(.User("selected foreign build working directory is unavailable: {err}"))
+        if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(.User("selected foreign build working directory is not a regular directory"))
+        if argv.is_empty() -> return Err(.Internal("selected foreign build has no command"))
+        // GATE #4494: execute the selected foreign tool with real status/environment.
+        command := Command.new(argv[0])
+        &command.args(argv.iter().skip(1))
+        &command.current_dir(workdir_path)
+        loop (name, value) in environment -> &command.env(name, value)
+        status :: command.status() ?? return Err(.User("could not run selected foreign build: {err}"))
+        if !status.success() -> return .Val(status.code() ?? ExitCodes.USER_ERROR)
+        loop output in outputs {
+            path :: root.join(foreign_build_import.relative_path(output)?)
+            metadata :: fs.symlink_metadata(path) ?? return Err(.User("selected foreign build completed without declared output `{output}`: {err}"))
+            if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(.User("selected foreign build output `{output}` is not a regular file"))
+        }
+        if mode.json -> write_mode_machine(mode, "{{\"schema\":\"jet-ffi-build-execution-v1\",\"status\":\"built\",\"plan_digest\":\"{json_escape(actual)}\",\"ownership\":\"partial\"}}\n")
+        .Val(ExitCodes.OK)
+    }()
+    result ?? {
+        if err == {
+            .User(message) -> { cli_error("E2104", message); .Val(ExitCodes.USER_ERROR) }
+            .Internal(message) -> {
+                write_mode_diagnostic(mode, render_ice_report("selected foreign build failed", message, false))
+                .Val(ExitCodes.ICE)
+            }
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:13611
+pub fn foreign_build_import_requested(args: &[String]) -> Bool { foreign_build_import.requested(args) }
+// Rust: Source/CmdCompile.rs:13615
+pub fn run_foreign_build_import(args: &[String], mode: OutputMode) -> Never { foreign_build_import.run(args, mode) }
+// Rust: Source/CmdCompile.rs:13619
+pub fn run_selected_foreign_build(mode: OutputMode) -> I32? { foreign_build_import.run_selected(mode) }
+// Rust: Source/CmdCompile.rs:13720
+fn strip_manifest_source_map(manifest: String) -> String {
+    out := String.with_capacity(manifest.len())
+    loop line in manifest.lines() {
+        if line.trim_start().starts_with("\"sourceMap\":") -> next
+        &out.push_str(line)
+        &out.push('\n')
+    }
+    out
+}
+// Rust: Source/CmdCompile.rs:13741
+// Final component path plus the intermediate files kept for verbose reporting.
+pub struct PluginBuildPaths { wit: OSPath, guest_rust: OSPath, core_wasm: OSPath, component_wasm: OSPath }
+// Rust: Source/CmdCompile.rs:13754
+// Tool failures are user errors; rejection of generated guest Rust is an ICE.
+#Error
+pub enum PluginBuildError { ToolFailure(String) GeneratedCodeRejected(String) }
+// Rust: Source/CmdCompile.rs:13759
+// write_plugin_artifacts (next fragment) compiles the core Wasm, then embeds
+// the WIT world and lifts it with wasm-tools component new. Scalar exports
+// and Text/cabi_realloc use the canonical Component Model ABI.
 

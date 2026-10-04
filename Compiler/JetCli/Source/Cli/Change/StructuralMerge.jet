@@ -1,1033 +1,516 @@
-// PORT-PENDING 0709 source-cmdstructuralmerge-module-group: Source/CmdStructuralMerge.rs:1-1029
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-MERGE-* (Tower #143): semantic-index-backed structural diff and merge.
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{exit, Command};
-//RS 
-//RS use jet::Diagnostics::json_str as json_string;
-//RS use jet_foundation::Names::normalize_path;
-//RS use jet_foundation::ExitCodes;
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS use jet_semindex::{
-//RS     open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError, SemanticOp,
-//RS };
-//RS 
-//RS #[derive(Clone)]
-//RS struct Unit {
-//RS     fact: DefinitionFact,
-//RS     source: String,
-//RS     leading: String,
-//RS }
-//RS 
-//RS struct Document {
-//RS     path: PathBuf,
-//RS     units: Vec<Unit>,
-//RS     suffix: String,
-//RS     source_hash: String,
-//RS     semantic_ops: Vec<SemanticOp>,
-//RS }
-//RS 
-//RS struct UnitMatches {
-//RS     matched: BTreeMap<usize, Option<usize>>,
-//RS     ambiguous: BTreeMap<usize, Vec<usize>>,
-//RS }
-//RS 
-//RS #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-//RS enum ChangeKind {
-//RS     Added,
-//RS     Removed,
-//RS     Renamed,
-//RS     Moved,
-//RS     Signature,
-//RS     Body,
-//RS }
-//RS 
-//RS impl ChangeKind {
-//RS     fn name(&self) -> &'static str {
-//RS         match self {
-//RS             Self::Added => "added",
-//RS             Self::Removed => "removed",
-//RS             Self::Renamed => "renamed",
-//RS             Self::Moved => "moved",
-//RS             Self::Signature => "signature_changed",
-//RS             Self::Body => "body_changed",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct Change {
-//RS     kind: ChangeKind,
-//RS     stable_id: String,
-//RS     before: Option<String>,
-//RS     after: Option<String>,
-//RS     semantic_op: Option<SemanticOp>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct Conflict {
-//RS     kind: &'static str,
-//RS     stable_id: String,
-//RS     human_identity: String,
-//RS     ours: String,
-//RS     theirs: String,
-//RS }
-//RS 
-//RS pub(crate) fn run_diff(args: &[String]) {
-//RS     if wants_help(args) {
-//RS         print!("{}", diff_help());
-//RS         return;
-//RS     }
-//RS     if !args.iter().any(|arg| arg == "--structural") {
-//RS         fail(
-//RS             "`jet diff` currently requires `--structural`",
-//RS             "jet diff --structural before.jet after.jet",
-//RS         );
-//RS     }
-//RS     let paths = positional(args, "diff");
-//RS     if paths.len() != 2 {
-//RS         fail(
-//RS             "`jet diff --structural` needs two checked Jet files",
-//RS             "jet diff --structural before.jet after.jet",
-//RS         );
-//RS     }
-//RS     let before = load(Path::new(&paths[0]));
-//RS     let after = load(Path::new(&paths[1]));
-//RS     let ops = transition_ops(&before, &after);
-//RS     let changes = structural_diff(&before.units, &after.units, &ops);
-//RS     let report = report_mode(args);
-//RS     if report == "text" {
-//RS         if changes.is_empty() {
-//RS             println!("no structural changes");
-//RS         }
-//RS         for change in changes {
-//RS             println!(
-//RS                 "{}: {} [{}]",
-//RS                 change.kind.name(),
-//RS                 change
-//RS                     .after
-//RS                     .as_deref()
-//RS                     .or(change.before.as_deref())
-//RS                     .unwrap_or("definition"),
-//RS                 change.stable_id
-//RS             );
-//RS         }
-//RS     } else {
-//RS         let structural_diff = StatusValue::object(
-//RS             StatusFields::new().with(
-//RS                 "changes",
-//RS                 StatusValue::array(changes.iter().map(change_value)),
-//RS             ),
-//RS         );
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("diff.structural", true)
-//RS                 .with_field("structural_diff", structural_diff)
-//RS                 .json()
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn run_merge(args: &[String]) {
-//RS     if wants_help(args) {
-//RS         print!("{}", merge_help());
-//RS         return;
-//RS     }
-//RS     if args.get(1).map(String::as_str) == Some("install-driver") {
-//RS         install_driver(args);
-//RS         return;
-//RS     }
-//RS     if !args.iter().any(|arg| arg == "--structural") {
-//RS         fail(
-//RS             "`jet merge` currently requires `--structural`",
-//RS             "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet",
-//RS         );
-//RS     }
-//RS     let paths = positional(args, "merge");
-//RS     if paths.len() != 3 {
-//RS         fail(
-//RS             "`jet merge --structural` needs base, ours, and theirs",
-//RS             "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet",
-//RS         );
-//RS     }
-//RS     let base_path = Path::new(&paths[0]);
-//RS     let ours_path = Path::new(&paths[1]);
-//RS     let theirs_path = Path::new(&paths[2]);
-//RS     let base = load(base_path);
-//RS     let ours = load(ours_path);
-//RS     let theirs = load(theirs_path);
-//RS     let (candidate, conflicts) = merge_units(&base, &ours, &theirs);
-//RS     if !conflicts.is_empty() {
-//RS         render_conflicts(&conflicts, report_mode(args));
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let formatted = jet::format_source(&candidate).unwrap_or_else(|_| {
-//RS         fail(
-//RS             "structural merge produced source that does not parse",
-//RS             "resolve edits manually; no output was written",
-//RS         )
-//RS     });
-//RS     let output_path = absolute_normalized(
-//RS         &flag_value(args, "--out")
-//RS             .map(PathBuf::from)
-//RS             .unwrap_or_else(|| ours_path.to_path_buf()),
-//RS     );
-//RS     let overlays = [(output_path.as_path(), formatted.as_str())];
-//RS     if let Err(err) = open_structural_with_overlays(&output_path, &overlays) {
-//RS         render_index_error("merged output did not pass parser and sema", err);
-//RS     }
-//RS     if let Err(err) = fs::write(&output_path, formatted.as_bytes()) {
-//RS         fail(
-//RS             &format!("could not write `{}`: {err}", output_path.display()),
-//RS             "choose a writable --out path",
-//RS         );
-//RS     }
-//RS     if report_mode(args) == "text" {
-//RS         println!("merged: {}", output_path.display());
-//RS     } else {
-//RS         let payload = format!(
-//RS             "{{\"output\":{}}}",
-//RS             json_string(&output_path.display().to_string())
-//RS         );
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("merge.structural", true)
-//RS                 .with_field(
-//RS                     "structural_merge",
-//RS                     StatusValue::object(
-//RS                         jet_foundation::Report::StatusFields::new().with(
-//RS                             "output",
-//RS                             output_path.display().to_string(),
-//RS                         ),
-//RS                     ),
-//RS                 )
-//RS                 .json()
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn structural_help(command: &str) -> Option<&'static str> {
-//RS     match command {
-//RS         "diff" => Some(diff_help()),
-//RS         "merge" => Some(merge_help()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn load(path: &Path) -> Document {
-//RS     let source = fs::read_to_string(path).unwrap_or_else(|err| {
-//RS         fail(
-//RS             &format!("could not read `{}`: {err}", path.display()),
-//RS             "pass a readable Jet source file",
-//RS         )
-//RS     });
-//RS     let index = open_structural_with_overlays(path, &[]).unwrap_or_else(|err| {
-//RS         render_index_error(
-//RS             &format!("`{}` did not pass parser and sema", path.display()),
-//RS             err,
-//RS         )
-//RS     });
-//RS     let mut units = Vec::new();
-//RS     for fact in index
-//RS         .definition_facts()
-//RS         .iter()
-//RS         .filter(|fact| same_module(path, &fact.module_path))
-//RS     {
-//RS         let Some(slice) = source.get(fact.span.start..fact.span.end) else {
-//RS             fail(
-//RS                 "semantic index returned an invalid source span",
-//RS                 "run `jet check` and report this compiler bug",
-//RS             );
-//RS         };
-//RS         units.push(Unit {
-//RS             fact: fact.clone(),
-//RS             source: slice.trim().to_string(),
-//RS             leading: String::new(),
-//RS         });
-//RS     }
-//RS     units.sort_by_key(|unit| unit.fact.span.start);
-//RS     let mut cursor = 0;
-//RS     for unit in &mut units {
-//RS         unit.leading = source
-//RS             .get(cursor..unit.fact.span.start)
-//RS             .unwrap_or("")
-//RS             .to_string();
-//RS         cursor = unit.fact.span.end;
-//RS     }
-//RS     let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
-//RS     let semantic_ops = semantic_ops_for_file(path, &source_hash);
-//RS     Document {
-//RS         path: absolute_normalized(path),
-//RS         units,
-//RS         suffix: source.get(cursor..).unwrap_or("").to_string(),
-//RS         source_hash,
-//RS         semantic_ops,
-//RS     }
-//RS }
-//RS 
-//RS fn structural_diff(before: &[Unit], after: &[Unit], ops: &[SemanticOp]) -> Vec<Change> {
-//RS     let matches = match_units(before, after, ops);
-//RS     let mut used = BTreeSet::new();
-//RS     let mut changes = Vec::new();
-//RS     for (left, right) in before
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(i, unit)| (unit, matches.matched.get(&i).copied().flatten()))
-//RS     {
-//RS         match right {
-//RS             None => changes.push(change(ChangeKind::Removed, left, None)),
-//RS             Some(index) => {
-//RS                 used.insert(index);
-//RS                 let right = &after[index];
-//RS                 let rename = semantic_rename(left, right, ops);
-//RS                 let signature_changed = left.fact.signature_id != right.fact.signature_id;
-//RS                 let content_changed = left.fact.content_id != right.fact.content_id;
-//RS                 if rename.is_some() {
-//RS                     changes.push(change_with_op(
-//RS                         ChangeKind::Renamed,
-//RS                         left,
-//RS                         Some(right),
-//RS                         rename,
-//RS                     ));
-//RS                 }
-//RS                 // Comparing two standalone paths is often how editors present
-//RS                 // an unsaved/formatted buffer. A path change is a semantic move
-//RS                 // only when the declaration also changed; identical checked
-//RS                 // definitions do not manufacture move churn.
-//RS                 if left.fact.module_path != right.fact.module_path
-//RS                     && (rename.is_some() || signature_changed || content_changed)
-//RS                 {
-//RS                     changes.push(change(ChangeKind::Moved, left, Some(right)));
-//RS                 }
-//RS                 if signature_changed {
-//RS                     changes.push(change(ChangeKind::Signature, left, Some(right)));
-//RS                 } else if content_changed {
-//RS                     changes.push(change(ChangeKind::Body, left, Some(right)));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     for (index, unit) in after.iter().enumerate() {
-//RS         if !used.contains(&index) {
-//RS             changes.push(change(ChangeKind::Added, unit, Some(unit)));
-//RS         }
-//RS     }
-//RS     changes.sort_by(|a, b| a.stable_id.cmp(&b.stable_id).then(a.kind.cmp(&b.kind)));
-//RS     changes
-//RS }
-//RS 
-//RS fn change(kind: ChangeKind, before: &Unit, after: Option<&Unit>) -> Change {
-//RS     change_with_op(kind, before, after, None)
-//RS }
-//RS 
-//RS fn change_with_op(
-//RS     kind: ChangeKind,
-//RS     before: &Unit,
-//RS     after: Option<&Unit>,
-//RS     semantic_op: Option<&SemanticOp>,
-//RS ) -> Change {
-//RS     let stable_id = semantic_op
-//RS         .and_then(|op| op.targets.first().map(|target| target.stable_id.clone()))
-//RS         .or_else(|| after.map(|unit| unit.fact.stable_id.clone()))
-//RS         .unwrap_or_else(|| before.fact.stable_id.clone());
-//RS     Change {
-//RS         kind,
-//RS         stable_id,
-//RS         before: Some(before.fact.human_identity.clone()),
-//RS         after: after.map(|u| u.fact.human_identity.clone()),
-//RS         semantic_op: semantic_op.cloned(),
-//RS     }
-//RS }
-//RS 
-//RS fn match_units(base: &[Unit], side: &[Unit], ops: &[SemanticOp]) -> UnitMatches {
-//RS     let mut result = BTreeMap::new();
-//RS     let mut ambiguous = BTreeMap::new();
-//RS     let mut used = BTreeSet::new();
-//RS 
-//RS     // Reserve exact checked identities first. A later fuzzy match must never
-//RS     // steal an unchanged declaration from a same-shape sibling.
-//RS     for (index, unit) in base.iter().enumerate() {
-//RS         let base_count = base
-//RS             .iter()
-//RS             .filter(|candidate| exact_key(candidate) == exact_key(unit))
-//RS             .count();
-//RS         let candidates: Vec<usize> = side
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(_, candidate)| exact_key(candidate) == exact_key(unit))
-//RS             .map(|(i, _)| i)
-//RS             .collect();
-//RS         if base_count == 1 && candidates.len() == 1 {
-//RS             result.insert(index, Some(candidates[0]));
-//RS             used.insert(candidates[0]);
-//RS         }
-//RS     }
-//RS 
-//RS     for (index, unit) in base.iter().enumerate() {
-//RS         if result.contains_key(&index) {
-//RS             continue;
-//RS         }
-//RS         let semantic = candidates(side, &used, |candidate| {
-//RS             semantic_rename(unit, candidate, ops).is_some()
-//RS         });
-//RS         let signature = candidates(side, &used, |candidate| {
-//RS             candidate.fact.signature_id == unit.fact.signature_id
-//RS         });
-//RS         let ancestry = candidates(side, &used, |candidate| {
-//RS             candidate.fact.stable_id == unit.fact.stable_id
-//RS         });
-//RS         let selected = [semantic, signature, ancestry]
-//RS             .into_iter()
-//RS             .find(|set| !set.is_empty())
-//RS             .unwrap_or_default();
-//RS         if selected.len() == 1 {
-//RS             used.insert(selected[0]);
-//RS             result.insert(index, Some(selected[0]));
-//RS         } else {
-//RS             if selected.len() > 1 {
-//RS                 ambiguous.insert(index, selected);
-//RS             }
-//RS             result.insert(index, None);
-//RS         }
-//RS     }
-//RS     UnitMatches {
-//RS         matched: result,
-//RS         ambiguous,
-//RS     }
-//RS }
-//RS 
-//RS fn exact_key(unit: &Unit) -> (&str, &str) {
-//RS     (&unit.fact.kind, &unit.fact.name)
-//RS }
-//RS 
-//RS fn candidates<F>(side: &[Unit], used: &BTreeSet<usize>, predicate: F) -> Vec<usize>
-//RS where
-//RS     F: Fn(&Unit) -> bool,
-//RS {
-//RS     side.iter()
-//RS         .enumerate()
-//RS         .filter(|(i, candidate)| !used.contains(i) && predicate(candidate))
-//RS         .map(|(i, _)| i)
-//RS         .collect()
-//RS }
-//RS 
-//RS fn semantic_rename<'a>(
-//RS     before: &Unit,
-//RS     after: &Unit,
-//RS     ops: &'a [SemanticOp],
-//RS ) -> Option<&'a SemanticOp> {
-//RS     ops.iter().find(|op| {
-//RS         op.kind == "rename"
-//RS             && op.from.as_deref() == Some(before.fact.name.as_str())
-//RS             && op.to.as_deref() == Some(after.fact.name.as_str())
-//RS             && op.targets.iter().any(|target| {
-//RS                 target.stable_id == before.fact.stable_id
-//RS                     || target.before == before.fact.human_identity
-//RS                     || (target.kind == before.fact.kind
-//RS                         && target.module_path == before.fact.module_path)
-//RS             })
-//RS     })
-//RS }
-//RS 
-//RS fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, Vec<Conflict>) {
-//RS     let ours_ops = transition_ops(base, ours);
-//RS     let theirs_ops = transition_ops(base, theirs);
-//RS     let ours_matches = match_units(&base.units, &ours.units, &ours_ops);
-//RS     let theirs_matches = match_units(&base.units, &theirs.units, &theirs_ops);
-//RS     let mut ours_used = BTreeSet::new();
-//RS     let mut theirs_used = BTreeSet::new();
-//RS     let mut merged = String::new();
-//RS     let mut conflicts = Vec::new();
-//RS     for (index, original) in base.units.iter().enumerate() {
-//RS         if let Some(indices) = ours_matches.ambiguous.get(&index) {
-//RS             ours_used.extend(indices.iter().copied());
-//RS             conflicts.push(ambiguous_conflict(original, "ours", indices, &ours.units));
-//RS             continue;
-//RS         }
-//RS         if let Some(indices) = theirs_matches.ambiguous.get(&index) {
-//RS             theirs_used.extend(indices.iter().copied());
-//RS             conflicts.push(ambiguous_conflict(
-//RS                 original,
-//RS                 "theirs",
-//RS                 indices,
-//RS                 &theirs.units,
-//RS             ));
-//RS             continue;
-//RS         }
-//RS         let oi = ours_matches.matched.get(&index).copied().flatten();
-//RS         let ti = theirs_matches.matched.get(&index).copied().flatten();
-//RS         if let Some(i) = oi {
-//RS             ours_used.insert(i);
-//RS         }
-//RS         if let Some(i) = ti {
-//RS             theirs_used.insert(i);
-//RS         }
-//RS         let leading = match (oi.map(|i| &ours.units[i]), ti.map(|i| &theirs.units[i])) {
-//RS             (Some(o), Some(t)) => merge_text(
-//RS                 "inter_item_trivia",
-//RS                 original,
-//RS                 &original.leading,
-//RS                 &o.leading,
-//RS                 &t.leading,
-//RS                 &mut conflicts,
-//RS             ),
-//RS             (Some(o), None) => o.leading.clone(),
-//RS             (None, Some(t)) => t.leading.clone(),
-//RS             (None, None) => String::new(),
-//RS         };
-//RS         match (oi.map(|i| &ours.units[i]), ti.map(|i| &theirs.units[i])) {
-//RS             (None, None) => {}
-//RS             (Some(o), None) if o.fact.content_id == original.fact.content_id => {}
-//RS             (None, Some(t)) if t.fact.content_id == original.fact.content_id => {}
-//RS             (Some(o), Some(t)) if o.fact.content_id == t.fact.content_id => {
-//RS                 push_unit(&mut merged, &leading, &o.source)
-//RS             }
-//RS             (Some(o), Some(t)) if o.fact.content_id == original.fact.content_id => {
-//RS                 push_unit(&mut merged, &leading, &t.source)
-//RS             }
-//RS             (Some(o), Some(t)) if t.fact.content_id == original.fact.content_id => {
-//RS                 push_unit(&mut merged, &leading, &o.source)
-//RS             }
-//RS             (Some(o), None) | (None, Some(o)) => {
-//RS                 conflicts.push(conflict("delete_edit", original, o, o))
-//RS             }
-//RS             (Some(o), Some(t)) => {
-//RS                 if let Some(source) = merge_recorded_rename(original, o, t, &ours_ops, &theirs_ops)
-//RS                 {
-//RS                     push_unit(&mut merged, &leading, &source);
-//RS                 } else {
-//RS                     conflicts.push(conflict("overlapping_edit", original, o, t));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let ours_added: Vec<&Unit> = ours
-//RS         .units
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter(|(i, _)| !ours_used.contains(i))
-//RS         .map(|(_, u)| u)
-//RS         .collect();
-//RS     let theirs_added: Vec<&Unit> = theirs
-//RS         .units
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter(|(i, _)| !theirs_used.contains(i))
-//RS         .map(|(_, u)| u)
-//RS         .collect();
-//RS     let mut theirs_paired = BTreeSet::new();
-//RS     for ours_unit in ours_added {
-//RS         let candidates: Vec<usize> = theirs_added
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(index, theirs_unit)| {
-//RS                 !theirs_paired.contains(index) && exact_key(theirs_unit) == exact_key(ours_unit)
-//RS             })
-//RS             .map(|(index, _)| index)
-//RS             .collect();
-//RS         match candidates.as_slice() {
-//RS             [] => push_unit(&mut merged, &ours_unit.leading, &ours_unit.source),
-//RS             [index] => {
-//RS                 theirs_paired.insert(*index);
-//RS                 let theirs_unit = theirs_added[*index];
-//RS                 if ours_unit.fact.content_id != theirs_unit.fact.content_id {
-//RS                     conflicts.push(conflict("competing_add", ours_unit, ours_unit, theirs_unit));
-//RS                 } else {
-//RS                     let leading = merge_text(
-//RS                         "inter_item_trivia",
-//RS                         ours_unit,
-//RS                         "",
-//RS                         &ours_unit.leading,
-//RS                         &theirs_unit.leading,
-//RS                         &mut conflicts,
-//RS                     );
-//RS                     push_unit(&mut merged, &leading, &ours_unit.source);
-//RS                 }
-//RS             }
-//RS             _ => conflicts.push(Conflict {
-//RS                 kind: "ambiguous_identity",
-//RS                 stable_id: ours_unit.fact.stable_id.clone(),
-//RS                 human_identity: ours_unit.fact.human_identity.clone(),
-//RS                 ours: ours_unit.fact.content_id.clone(),
-//RS                 theirs: "ambiguous additions".to_string(),
-//RS             }),
-//RS         }
-//RS     }
-//RS     for (index, theirs_unit) in theirs_added.into_iter().enumerate() {
-//RS         if !theirs_paired.contains(&index) {
-//RS             push_unit(&mut merged, &theirs_unit.leading, &theirs_unit.source);
-//RS         }
-//RS     }
-//RS     let suffix = merge_shell(
-//RS         "suffix",
-//RS         &base.suffix,
-//RS         &ours.suffix,
-//RS         &theirs.suffix,
-//RS         &mut conflicts,
-//RS     );
-//RS     merged.push_str(&suffix);
-//RS     (merged, conflicts)
-//RS }
-//RS 
-//RS fn transition_ops(before: &Document, after: &Document) -> Vec<SemanticOp> {
-//RS     let mut out = Vec::new();
-//RS     for op in before
-//RS         .semantic_ops
-//RS         .iter()
-//RS         .chain(after.semantic_ops.iter())
-//RS         .filter(|op| {
-//RS             op.matches_file_transition(
-//RS                 &[before.path.as_path(), after.path.as_path()],
-//RS                 &before.source_hash,
-//RS                 &after.source_hash,
-//RS             )
-//RS         })
-//RS     {
-//RS         if !out.contains(op) {
-//RS             out.push(op.clone());
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn merge_recorded_rename(
-//RS     base: &Unit,
-//RS     ours: &Unit,
-//RS     theirs: &Unit,
-//RS     ours_ops: &[SemanticOp],
-//RS     theirs_ops: &[SemanticOp],
-//RS ) -> Option<String> {
-//RS     let ours_rename = semantic_rename(base, ours, ours_ops);
-//RS     let theirs_rename = semantic_rename(base, theirs, theirs_ops);
-//RS     let (from, to) = match (ours_rename.as_ref(), theirs_rename.as_ref()) {
-//RS         (Some(ours), Some(theirs)) if ours.to == theirs.to => {
-//RS             (base.fact.name.as_str(), ours.to.as_deref()?)
-//RS         }
-//RS         (Some(ours), None) => (base.fact.name.as_str(), ours.to.as_deref()?),
-//RS         (None, Some(theirs)) => (base.fact.name.as_str(), theirs.to.as_deref()?),
-//RS         _ => return None,
-//RS     };
-//RS     let renamed_base = rename_source(&base.source, from, to)?;
-//RS     let other = if ours_rename.is_some() && theirs_rename.is_none() {
-//RS         rename_source(&theirs.source, from, to)?
-//RS     } else if theirs_rename.is_some() && ours_rename.is_none() {
-//RS         rename_source(&ours.source, from, to)?
-//RS     } else {
-//RS         theirs.source.clone()
-//RS     };
-//RS     if ours.source == theirs.source {
-//RS         Some(ours.source.clone())
-//RS     } else if ours.source == renamed_base {
-//RS         Some(other)
-//RS     } else if theirs.source == renamed_base {
-//RS         Some(ours.source.clone())
-//RS     } else {
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS fn rename_source(source: &str, from: &str, to: &str) -> Option<String> {
-//RS     let (start, _) = source.match_indices(from).find(|(start, _)| {
-//RS         let before = source[..*start].chars().next_back();
-//RS         let end = *start + from.len();
-//RS         let after = source[end..].chars().next();
-//RS         before.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
-//RS             && after.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
-//RS     })?;
-//RS     let mut renamed = source.to_string();
-//RS     renamed.replace_range(start..start + from.len(), to);
-//RS     Some(renamed)
-//RS }
-//RS 
-//RS fn push_unit(output: &mut String, leading: &str, source: &str) {
-//RS     output.push_str(leading);
-//RS     output.push_str(source);
-//RS }
-//RS 
-//RS fn merge_text(
-//RS     kind: &'static str,
-//RS     unit: &Unit,
-//RS     base: &str,
-//RS     ours: &str,
-//RS     theirs: &str,
-//RS     conflicts: &mut Vec<Conflict>,
-//RS ) -> String {
-//RS     if ours == theirs {
-//RS         return ours.to_string();
-//RS     }
-//RS     if ours == base {
-//RS         return theirs.to_string();
-//RS     }
-//RS     if theirs == base {
-//RS         return ours.to_string();
-//RS     }
-//RS     conflicts.push(Conflict {
-//RS         kind,
-//RS         stable_id: unit.fact.stable_id.clone(),
-//RS         human_identity: unit.fact.human_identity.clone(),
-//RS         ours: format!("sha256:{}", jet::SHA256::sha256_hex(ours.as_bytes())),
-//RS         theirs: format!("sha256:{}", jet::SHA256::sha256_hex(theirs.as_bytes())),
-//RS     });
-//RS     base.to_string()
-//RS }
-//RS 
-//RS fn ambiguous_conflict(base: &Unit, side: &str, indices: &[usize], units: &[Unit]) -> Conflict {
-//RS     let ids = indices
-//RS         .iter()
-//RS         .map(|index| units[*index].fact.human_identity.as_str())
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     Conflict {
-//RS         kind: "ambiguous_identity",
-//RS         stable_id: base.fact.stable_id.clone(),
-//RS         human_identity: base.fact.human_identity.clone(),
-//RS         ours: if side == "ours" {
-//RS             format!("ambiguous:{ids}")
-//RS         } else {
-//RS             base.fact.content_id.clone()
-//RS         },
-//RS         theirs: if side == "theirs" {
-//RS             format!("ambiguous:{ids}")
-//RS         } else {
-//RS             base.fact.content_id.clone()
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn merge_shell(
-//RS     label: &'static str,
-//RS     base: &str,
-//RS     ours: &str,
-//RS     theirs: &str,
-//RS     conflicts: &mut Vec<Conflict>,
-//RS ) -> String {
-//RS     if ours == theirs {
-//RS         return ours.to_string();
-//RS     }
-//RS     if ours == base {
-//RS         return theirs.to_string();
-//RS     }
-//RS     if theirs == base {
-//RS         return ours.to_string();
-//RS     }
-//RS     conflicts.push(Conflict {
-//RS         kind: "file_scope_edit",
-//RS         stable_id: format!("file:{label}"),
-//RS         human_identity: format!("file {label}"),
-//RS         ours: format!("sha256:{}", jet::SHA256::sha256_hex(ours.as_bytes())),
-//RS         theirs: format!("sha256:{}", jet::SHA256::sha256_hex(theirs.as_bytes())),
-//RS     });
-//RS     base.to_string()
-//RS }
-//RS 
-//RS fn conflict(kind: &'static str, base: &Unit, ours: &Unit, theirs: &Unit) -> Conflict {
-//RS     Conflict {
-//RS         kind,
-//RS         stable_id: base.fact.stable_id.clone(),
-//RS         human_identity: base.fact.human_identity.clone(),
-//RS         ours: ours.fact.content_id.clone(),
-//RS         theirs: theirs.fact.content_id.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn render_conflicts(conflicts: &[Conflict], mode: &str) {
-//RS     if mode == "text" {
-//RS         for conflict in conflicts {
-//RS             eprintln!(
-//RS                 "conflict: {} ({})\n stable id: {}\n ours: {}\n theirs: {}",
-//RS                 conflict.human_identity,
-//RS                 conflict.kind,
-//RS                 conflict.stable_id,
-//RS                 conflict.ours,
-//RS                 conflict.theirs
-//RS             );
-//RS         }
-//RS         eprintln!("merge stopped: resolve conflicts manually; no output was written");
-//RS     } else {
-//RS         let structural_merge = StatusValue::object(
-//RS             StatusFields::new().with(
-//RS                 "conflicts",
-//RS                 StatusValue::array(conflicts.iter().map(conflict_value)),
-//RS             ),
-//RS         );
-//RS         eprintln!(
-//RS             "{}",
-//RS             StatusEnvelope::new("merge.structural", false)
-//RS                 .with_field("structural_merge", structural_merge)
-//RS                 .json()
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn install_driver(args: &[String]) {
-//RS     let repo = flag_value(args, "--repo")
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|| PathBuf::from("."));
-//RS     let config = git_config_path(&repo);
-//RS     git_config_set(&config, "merge.jetstruct.name", "Jet structural merge");
-//RS     git_config_set(
-//RS         &config,
-//RS         "merge.jetstruct.driver",
-//RS         "jet merge --structural %O %A %B --out %A",
-//RS     );
-//RS     for (key, expected) in [
-//RS         ("merge.jetstruct.name", "Jet structural merge"),
-//RS         (
-//RS             "merge.jetstruct.driver",
-//RS             "jet merge --structural %O %A %B --out %A",
-//RS         ),
-//RS     ] {
-//RS         let actual = git_config_get(&config, key);
-//RS         if actual.trim() != expected {
-//RS             fail(
-//RS                 &format!("Git did not retain `{key}` exactly"),
-//RS                 "check repository config permissions and includes",
-//RS             );
-//RS         }
-//RS     }
-//RS     let attributes = repo.join(".gitattributes");
-//RS     let mut attrs = fs::read_to_string(&attributes).unwrap_or_default();
-//RS     let line = "*.jet merge=jetstruct";
-//RS     if !attrs.lines().any(|existing| existing.trim() == line) {
-//RS         if !attrs.is_empty() && !attrs.ends_with('\n') {
-//RS             attrs.push('\n');
-//RS         }
-//RS         attrs.push_str(line);
-//RS         attrs.push('\n');
-//RS         write_file(&attributes, &attrs);
-//RS     }
-//RS     println!("installed structural merge driver in {}", repo.display());
-//RS }
-//RS 
-//RS fn git_config_path(repo: &Path) -> PathBuf {
-//RS     let output = Command::new("git")
-//RS         .arg("-C")
-//RS         .arg(repo)
-//RS         .args(["rev-parse", "--git-path", "config"])
-//RS         .output()
-//RS         .unwrap_or_else(|err| {
-//RS             fail(
-//RS                 &format!("could not run Git: {err}"),
-//RS                 "install Git before enabling its merge driver",
-//RS             )
-//RS         });
-//RS     if !output.status.success() {
-//RS         fail(
-//RS             &format!("`{}` is not a Git worktree", repo.display()),
-//RS             "run inside a Git repository or pass --repo <path>",
-//RS         );
-//RS     }
-//RS     let raw = String::from_utf8(output.stdout).unwrap_or_else(|_| {
-//RS         fail(
-//RS             "Git returned a non-UTF-8 config path",
-//RS             "repair the Git worktree metadata",
-//RS         )
-//RS     });
-//RS     let reported = Path::new(raw.trim());
-//RS     let config = if reported.is_absolute() {
-//RS         normalize_path(reported)
-//RS     } else {
-//RS         normalize_path(&repo.join(reported))
-//RS     };
-//RS     if !config.is_file() {
-//RS         fail(
-//RS             &format!("`{}` has no Git config", repo.display()),
-//RS             "repair the Git worktree metadata",
-//RS         );
-//RS     }
-//RS     config
-//RS }
-//RS 
-//RS fn git_config_set(config: &Path, key: &str, value: &str) {
-//RS     let output = Command::new("git")
-//RS         .args(["config", "--file"])
-//RS         .arg(config)
-//RS         .args(["--replace-all", key, value])
-//RS         .output()
-//RS         .unwrap_or_else(|err| {
-//RS             fail(
-//RS                 &format!("could not run Git: {err}"),
-//RS                 "install Git before enabling its merge driver",
-//RS             )
-//RS         });
-//RS     if !output.status.success() {
-//RS         fail(
-//RS             &format!("could not update Git config `{key}`"),
-//RS             "fix repository config permissions",
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn git_config_get(config: &Path, key: &str) -> String {
-//RS     let output = Command::new("git")
-//RS         .args(["config", "--file"])
-//RS         .arg(config)
-//RS         .args(["--get", key])
-//RS         .output()
-//RS         .unwrap_or_else(|err| {
-//RS             fail(
-//RS                 &format!("could not run Git: {err}"),
-//RS                 "install Git before enabling its merge driver",
-//RS             )
-//RS         });
-//RS     if !output.status.success() {
-//RS         fail(
-//RS             &format!("could not read back Git config `{key}`"),
-//RS             "repair the repository config",
-//RS         );
-//RS     }
-//RS     String::from_utf8(output.stdout).unwrap_or_else(|_| {
-//RS         fail(
-//RS             "Git config contained non-UTF-8 data",
-//RS             "repair the repository config",
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn write_file(path: &Path, content: &str) {
-//RS     if let Err(err) = fs::write(path, content) {
-//RS         fail(
-//RS             &format!("could not write `{}`: {err}", path.display()),
-//RS             "fix repository permissions",
-//RS         );
-//RS     }
-//RS }
-//RS fn positional(args: &[String], command: &str) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let mut skip_value = false;
-//RS     for arg in args
-//RS         .iter()
-//RS         .skip_while(|arg| arg.as_str() != command)
-//RS         .skip(1)
-//RS     {
-//RS         if skip_value {
-//RS             skip_value = false;
-//RS             continue;
-//RS         }
-//RS         if matches!(arg.as_str(), "--out" | "--repo") {
-//RS             skip_value = true;
-//RS             continue;
-//RS         }
-//RS         if !arg.starts_with('-') && arg.as_str() != "install-driver" {
-//RS             out.push(arg.clone());
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-//RS     args.windows(2)
-//RS         .find(|pair| pair[0] == name)
-//RS         .map(|pair| pair[1].as_str())
-//RS }
-//RS fn report_mode(args: &[String]) -> &str {
-//RS     if jet::CLI::machine_output_requested(args) {
-//RS         "json"
-//RS     } else {
-//RS         "text"
-//RS     }
-//RS }
-//RS fn wants_help(args: &[String]) -> bool {
-//RS     args.iter().any(|arg| jet::CLI::is_help_flag(arg))
-//RS         || args.get(1).is_some_and(|arg| arg == "help")
-//RS }
-//RS fn diff_help() -> &'static str {
-//RS     "usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n"
-//RS }
-//RS fn merge_help() -> &'static str {
-//RS     "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--json]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n"
-//RS }
-//RS fn same_module(path: &Path, module: &str) -> bool {
-//RS     absolute_normalized(path) == absolute_normalized(Path::new(module))
-//RS }
-//RS fn absolute_normalized(path: &Path) -> PathBuf {
-//RS     if path.is_absolute() {
-//RS         normalize_path(path)
-//RS     } else {
-//RS         normalize_path(
-//RS             &std::env::current_dir()
-//RS                 .unwrap_or_else(|err| {
-//RS                     fail(
-//RS                         &format!("could not read current directory: {err}"),
-//RS                         "run from a readable directory",
-//RS                     )
-//RS                 })
-//RS                 .join(path),
-//RS         )
-//RS     }
-//RS }
-//RS fn change_value(change: &Change) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("kind", change.kind.name())
-//RS             .with("stable_id", change.stable_id.as_str())
-//RS             .with(
-//RS                 "before",
-//RS                 change
-//RS                     .before
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "after",
-//RS                 change
-//RS                     .after
-//RS                     .as_deref()
-//RS                     .map(StatusValue::from)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             )
-//RS             .with(
-//RS                 "semantic_op",
-//RS                 change
-//RS                     .semantic_op
-//RS                     .as_ref()
-//RS                     .map(semantic_op_value)
-//RS                     .unwrap_or(StatusValue::Null),
-//RS             ),
-//RS     )
-//RS }
-//RS fn semantic_op_value(op: &SemanticOp) -> StatusValue {
-//RS     let optional = |value: &Option<String>| {
-//RS         value
-//RS             .as_deref()
-//RS             .map(StatusValue::from)
-//RS             .unwrap_or(StatusValue::Null)
-//RS     };
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("kind", op.kind.as_str())
-//RS             .with("rule_id", optional(&op.rule_id))
-//RS             .with("from", optional(&op.from))
-//RS             .with("to", optional(&op.to))
-//RS             .with("node", optional(&op.node))
-//RS             .with("match", optional(&op.match_template))
-//RS             .with("replace", optional(&op.replace_template)),
-//RS     )
-//RS }
-//RS fn conflict_value(conflict: &Conflict) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("kind", conflict.kind)
-//RS             .with("stable_id", conflict.stable_id.as_str())
-//RS             .with("human_identity", conflict.human_identity.as_str())
-//RS             .with("ours", conflict.ours.as_str())
-//RS             .with("theirs", conflict.theirs.as_str()),
-//RS     )
-//RS }
-//RS fn render_index_error(context: &str, error: SemIndexError) -> ! {
-//RS     crate::cli_error!(@fix "E2105", context, "correct source errors; structural tools never merge unchecked code");
-//RS     let SemIndexError::Load(diags) = error;
-//RS     for diagnostic in diags {
-//RS         eprintln!("  {}: {}", diagnostic.code, diagnostic.what);
-//RS     }
-//RS     exit(ExitCodes::USER_ERROR)
-//RS }
-//RS fn fail(message: &str, fix: &str) -> ! {
-//RS     crate::cli_error!(@fix "E2104", message, fix);
-//RS     exit(ExitCodes::USAGE)
-//RS }
-// END-PORT-PENDING 0709 Source/CmdStructuralMerge.rs:1-1029
+// Rust: Source/CmdStructuralMerge.rs:1
+// D-MERGE-* (Tower #143): semantic-index-backed structural diff and merge.
+use jet.Diagnostics.json_str as json_string
+use jet_foundation.Names.normalize_path
+use jet_foundation.ExitCodes
+use jet_foundation.Report.[StatusEnvelope, StatusFields, StatusValue]
+use jet_semindex.[open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError, SemanticOp]
+use std.fs
+use std.env
+// GATE #4494: native process execution and exit use the canonical substrate.
+use std.process.[Command, exit]
 
+// Rust: Source/CmdStructuralMerge.rs:16
+struct Unit { fact: DefinitionFact, source: String, leading: String }
+// Rust: Source/CmdStructuralMerge.rs:23
+struct Document {
+    path: OSPath
+    units: [Unit]
+    suffix: String
+    source_hash: String
+    semantic_ops: [SemanticOp]
+}
+// Rust: Source/CmdStructuralMerge.rs:31
+struct UnitMatches { matched: [Int:Int?], ambiguous: [Int:[Int]] }
+// Rust: Source/CmdStructuralMerge.rs:36
+#Derive(Clone, Eq, Ord)
+enum ChangeKind { Added, Removed, Renamed, Moved, Signature, Body }
+impl ChangeKind {
+    // Rust: Source/CmdStructuralMerge.rs:47
+    fn name(&self) -> String {
+        if self == {
+            .Added -> "added"
+            .Removed -> "removed"
+            .Renamed -> "renamed"
+            .Moved -> "moved"
+            .Signature -> "signature_changed"
+            .Body -> "body_changed"
+        }
+    }
+}
+// Rust: Source/CmdStructuralMerge.rs:59
+struct Change {
+    kind: ChangeKind
+    stable_id: String
+    before: String?
+    after: String?
+    semantic_op: SemanticOp?
+}
+// Rust: Source/CmdStructuralMerge.rs:68
+struct Conflict { kind: String, stable_id: String, human_identity: String, ours: String, theirs: String }
+
+// Rust: Source/CmdStructuralMerge.rs:77
+pub fn run_diff(args: [String]) -> {
+    if wants_help(args) { print(diff_help()); return }
+    if !args.iter().any(arg -> arg == "--structural") {
+        fail("`jet diff` currently requires `--structural`", "jet diff --structural before.jet after.jet")
+    }
+    paths :: positional(args, "diff")
+    if paths.len() != 2 {
+        fail("`jet diff --structural` needs two checked Jet files", "jet diff --structural before.jet after.jet")
+    }
+    before :: load(OSPath.from(paths[0]))
+    after :: load(OSPath.from(paths[1]))
+    ops :: transition_ops(&before, &after)
+    changes :: structural_diff(before.units, after.units, ops)
+    report :: report_mode(args)
+    if report == "text" {
+        if changes.is_empty() -> println("no structural changes")
+        loop item in changes {
+            identity :: item.after ?? item.before ?? "definition"
+            println("{item.kind.name()}: {identity} [{item.stable_id}]")
+        }
+    } else {
+        payload :: StatusValue.object(StatusFields.new().with("changes", StatusValue.array(changes.iter().map(item -> change_value(&item)))))
+        println(StatusEnvelope.new("diff.structural", true).with_field("structural_diff", payload).json())
+    }
+}
+// Rust: Source/CmdStructuralMerge.rs:132
+pub fn run_merge(args: [String]) -> {
+    if wants_help(args) { print(merge_help()); return }
+    if args.get(1) == Val("install-driver") { install_driver(args); return }
+    if !args.iter().any(arg -> arg == "--structural") {
+        fail("`jet merge` currently requires `--structural`", "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet")
+    }
+    paths :: positional(args, "merge")
+    if paths.len() != 3 {
+        fail("`jet merge --structural` needs base, ours, and theirs", "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet")
+    }
+    base_path :: OSPath.from(paths[0])
+    ours_path :: OSPath.from(paths[1])
+    theirs_path :: OSPath.from(paths[2])
+    base :: load(base_path)
+    ours :: load(ours_path)
+    theirs :: load(theirs_path)
+    (candidate, conflicts) :: merge_units(&base, &ours, &theirs)
+    if !conflicts.is_empty() {
+        render_conflicts(conflicts, report_mode(args))
+        exit(ExitCodes.USER_ERROR)
+    }
+    formatted :: jet.format_source(candidate) ?? fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
+    output_path :: absolute_normalized(flag_value(args, "--out").map(value -> OSPath.from(value)) ?? ours_path)
+    overlays :: [(output_path, formatted)]
+    _ :: open_structural_with_overlays(output_path, overlays) ?? render_index_error("merged output did not pass parser and sema", err)
+    _ :: fs.write(output_path, formatted.bytes()) ?? fail("could not write `{output_path.display()}`: {err}", "choose a writable --out path")
+    if report_mode(args) == "text" {
+        println("merged: {output_path.display()}")
+    } else {
+        println(StatusEnvelope.new("merge.structural", true).with_field("structural_merge", StatusValue.object(StatusFields.new().with("output", output_path.display()))).json())
+    }
+}
+// Rust: Source/CmdStructuralMerge.rs:210
+pub fn structural_help(command: String) -> String? {
+    if command == { "diff" -> Val(diff_help()) "merge" -> Val(merge_help()) else -> None }
+}
+// Rust: Source/CmdStructuralMerge.rs:218
+fn load(path: OSPath) -> Document {
+    source :: fs.read_to_string(path) ?? fail("could not read `{path.display()}`: {err}", "pass a readable Jet source file")
+    index :: open_structural_with_overlays(path, []) ?? render_index_error("`{path.display()}` did not pass parser and sema", err)
+    units := [Unit]{}
+    loop fact in index.definition_facts() {
+        if !same_module(path, fact.module_path) -> continue
+        slice :: source.get(fact.span.start..<fact.span.end) ?? fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug")
+        trimmed := slice.trim() // #4303
+        &units.push(Unit{fact: ~fact, source: trimmed.to_string(), leading: ""})
+    }
+    &units.sort_by_key(unit -> unit.fact.span.start)
+    cursor := 0
+    loop unit in &units {
+        unit.leading = (source.get(cursor..<unit.fact.span.start) ?? "").to_string()
+        cursor = unit.fact.span.end
+    }
+    source_hash :: jet.SHA256.sha256_hex(source.bytes())
+    semantic_ops :: semantic_ops_for_file(path, source_hash)
+    Document{path: absolute_normalized(path), units: ^units, suffix: (source.get(cursor..) ?? "").to_string(), source_hash: source_hash, semantic_ops: semantic_ops}
+}
+// Rust: Source/CmdStructuralMerge.rs:269
+fn structural_diff(before: [Unit], after: [Unit], ops: [SemanticOp]) -> [Change] {
+    matches :: match_units(before, after, ops)
+    used := [Int:Bool]{}
+    changes := [Change]{}
+    loop i in 0..<before.len() {
+        left :: &before[i]
+        right :: matches.matched.get(i) ?? None
+        if right == {
+            None -> &changes.push(change(.Removed, left, None))
+            .Val(index) -> {
+                &used.insert(index, true)
+                other :: &after[index]
+                rename :: semantic_rename(left, other, ops)
+                signature_changed :: left.fact.signature_id != other.fact.signature_id
+                content_changed :: left.fact.content_id != other.fact.content_id
+                if rename.is_some() -> &changes.push(change_with_op(.Renamed, left, Val(other), rename))
+                // A standalone buffer path change is a move only if the declaration changed.
+                if left.fact.module_path != other.fact.module_path && (rename.is_some() || signature_changed || content_changed) {
+                    &changes.push(change(.Moved, left, Val(other)))
+                }
+                if signature_changed { &changes.push(change(.Signature, left, Val(other))) }
+                else if content_changed { &changes.push(change(.Body, left, Val(other))) }
+            }
+        }
+    }
+    loop i in 0..<after.len() {
+        if !used.has_key(i) -> &changes.push(change(.Added, &after[i], Val(&after[i])))
+    }
+    &changes.sort_by((a, b) -> a.stable_id.cmp(b.stable_id).then(a.kind.cmp(b.kind)))
+    ^changes
+}
+// Rust: Source/CmdStructuralMerge.rs:320
+fn change(kind: ChangeKind, before: &Unit, after: &Unit?) -> Change { change_with_op(kind, before, after, None) }
+// Rust: Source/CmdStructuralMerge.rs:324
+fn change_with_op(kind: ChangeKind, before: &Unit, after: &Unit?, semantic_op: &SemanticOp?) -> Change {
+    stable_id :: semantic_op.and_then(op -> op.targets.first().map(target -> ~target.stable_id)) ?? after.map(unit -> ~unit.fact.stable_id) ?? ~before.fact.stable_id
+    Change{kind: kind, stable_id: stable_id, before: Val(~before.fact.human_identity), after: after.map(unit -> ~unit.fact.human_identity), semantic_op: semantic_op.map(op -> ~op)}
+}
+// Rust: Source/CmdStructuralMerge.rs:343
+fn match_units(base: [Unit], side: [Unit], ops: [SemanticOp]) -> UnitMatches {
+    result := [Int:Int?]{}
+    ambiguous := [Int:[Int]]{}
+    used := [Int:Bool]{}
+    // Reserve exact identities before any fuzzy match steals an unchanged sibling.
+    loop index in 0..<base.len() {
+        unit :: &base[index]
+        base_count :: base.iter().filter(candidate -> exact_key(&candidate) == exact_key(unit)).count()
+        exact := [Int]{}
+        loop i in 0..<side.len() {
+            if exact_key(&side[i]) == exact_key(unit) -> &exact.push(i)
+        }
+        if base_count == 1 && exact.len() == 1 {
+            &result.insert(index, Val(exact[0]))
+            &used.insert(exact[0], true)
+        }
+    }
+    loop index in 0..<base.len() {
+        if result.has_key(index) -> continue
+        unit :: &base[index]
+        semantic :: candidates(side, &used, candidate -> semantic_rename(unit, candidate, ops).is_some())
+        signature :: candidates(side, &used, candidate -> candidate.fact.signature_id == unit.fact.signature_id)
+        ancestry :: candidates(side, &used, candidate -> candidate.fact.stable_id == unit.fact.stable_id)
+        selected :: if !semantic.is_empty() -> semantic else if !signature.is_empty() -> signature else -> ancestry
+        if selected.len() == 1 {
+            &used.insert(selected[0], true)
+            &result.insert(index, Val(selected[0]))
+        } else {
+            if selected.len() > 1 -> &ambiguous.insert(index, selected)
+            &result.insert(index, None)
+        }
+    }
+    UnitMatches{matched: ^result, ambiguous: ^ambiguous}
+}
+// Rust: Source/CmdStructuralMerge.rs:400
+fn exact_key(unit: &Unit) -> (String, String) { (unit.fact.kind, unit.fact.name) }
+// Rust: Source/CmdStructuralMerge.rs:404
+fn candidates(side: [Unit], used: &[Int:Bool], predicate: fn(&Unit) -> Bool) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<side.len() {
+        if !used.has_key(i) && predicate(&side[i]) -> &out.push(i)
+    }
+    ^out
+}
+// Rust: Source/CmdStructuralMerge.rs:415
+fn semantic_rename(before: &Unit, after: &Unit, ops: [SemanticOp]) -> &SemanticOp? {
+    loop op in ops {
+        if op.kind == "rename" && op.from == Val(before.fact.name) && op.to == Val(after.fact.name) && op.targets.iter().any(target ->
+            target.stable_id == before.fact.stable_id || target.before == before.fact.human_identity || (target.kind == before.fact.kind && target.module_path == before.fact.module_path)) {
+            return Val(&op)
+        }
+    }
+    None
+}
+// Rust: Source/CmdStructuralMerge.rs:433
+fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, [Conflict]) {
+    ours_ops :: transition_ops(base, ours)
+    theirs_ops :: transition_ops(base, theirs)
+    ours_matches :: match_units(base.units, ours.units, ours_ops)
+    theirs_matches :: match_units(base.units, theirs.units, theirs_ops)
+    ours_used := [Int:Bool]{}
+    theirs_used := [Int:Bool]{}
+    merged := ""
+    conflicts := [Conflict]{}
+    loop index in 0..<base.units.len() {
+        original :: &base.units[index]
+        if ours_matches.ambiguous.get(index) == .Val(indices) {
+            loop i in indices -> &ours_used.insert(i, true)
+            &conflicts.push(ambiguous_conflict(original, "ours", indices, ours.units))
+            continue
+        }
+        if theirs_matches.ambiguous.get(index) == .Val(indices) {
+            loop i in indices -> &theirs_used.insert(i, true)
+            &conflicts.push(ambiguous_conflict(original, "theirs", indices, theirs.units))
+            continue
+        }
+        oi :: ours_matches.matched.get(index) ?? None
+        ti :: theirs_matches.matched.get(index) ?? None
+        if oi == .Val(i) -> &ours_used.insert(i, true)
+        if ti == .Val(i) -> &theirs_used.insert(i, true)
+        o :: oi.map(i -> &ours.units[i])
+        t :: ti.map(i -> &theirs.units[i])
+        leading :: if (o, t) == {
+            (.Val(ou), .Val(th)) -> merge_text("inter_item_trivia", original, original.leading, ou.leading, th.leading, &conflicts)
+            (.Val(ou), None) -> ~ou.leading
+            (None, .Val(th)) -> ~th.leading
+            (None, None) -> ""
+        }
+        if (o, t) == {
+            (None, None) -> {}
+            (.Val(ou), None) -> {
+                if ou.fact.content_id != original.fact.content_id -> &conflicts.push(conflict("delete_edit", original, ou, ou))
+            }
+            (None, .Val(th)) -> {
+                if th.fact.content_id != original.fact.content_id -> &conflicts.push(conflict("delete_edit", original, th, th))
+            }
+            (.Val(ou), .Val(th)) -> {
+                if ou.fact.content_id == th.fact.content_id { push_unit(&merged, leading, ou.source) }
+                else if ou.fact.content_id == original.fact.content_id { push_unit(&merged, leading, th.source) }
+                else if th.fact.content_id == original.fact.content_id { push_unit(&merged, leading, ou.source) }
+                else {
+                    if merge_recorded_rename(original, ou, th, ours_ops, theirs_ops) == {
+                        .Val(source) -> push_unit(&merged, leading, source)
+                        None -> &conflicts.push(conflict("overlapping_edit", original, ou, th))
+                    }
+                }
+            }
+        }
+    }
+    ours_added := [&Unit]{}
+    theirs_added := [&Unit]{}
+    loop i in 0..<ours.units.len() { if !ours_used.has_key(i) -> &ours_added.push(&ours.units[i]) }
+    loop i in 0..<theirs.units.len() { if !theirs_used.has_key(i) -> &theirs_added.push(&theirs.units[i]) }
+    theirs_paired := [Int:Bool]{}
+    loop ours_unit in ours_added {
+        matches := [Int]{}
+        loop i in 0..<theirs_added.len() {
+            if !theirs_paired.has_key(i) && exact_key(theirs_added[i]) == exact_key(ours_unit) -> &matches.push(i)
+        }
+        if matches.is_empty() { push_unit(&merged, ours_unit.leading, ours_unit.source) }
+        else if matches.len() == 1 {
+            index :: matches[0]
+            &theirs_paired.insert(index, true)
+            theirs_unit :: theirs_added[index]
+            if ours_unit.fact.content_id != theirs_unit.fact.content_id {
+                &conflicts.push(conflict("competing_add", ours_unit, ours_unit, theirs_unit))
+            } else {
+                leading :: merge_text("inter_item_trivia", ours_unit, "", ours_unit.leading, theirs_unit.leading, &conflicts)
+                push_unit(&merged, leading, ours_unit.source)
+            }
+        } else {
+            &conflicts.push(Conflict{kind: "ambiguous_identity", stable_id: ~ours_unit.fact.stable_id, human_identity: ~ours_unit.fact.human_identity, ours: ~ours_unit.fact.content_id, theirs: "ambiguous additions"})
+        }
+    }
+    loop i in 0..<theirs_added.len() {
+        if !theirs_paired.has_key(i) -> push_unit(&merged, theirs_added[i].leading, theirs_added[i].source)
+    }
+    suffix :: merge_shell("suffix", base.suffix, ours.suffix, theirs.suffix, &conflicts)
+    &merged.push_str(suffix)
+    (^merged, ^conflicts)
+}
+// Rust: Source/CmdStructuralMerge.rs:573
+fn transition_ops(before: &Document, after: &Document) -> [SemanticOp] {
+    out := [SemanticOp]{}
+    loop op in before.semantic_ops.iter().chain(after.semantic_ops.iter()) {
+        if op.matches_file_transition([before.path, after.path], before.source_hash, after.source_hash) && !out.contains(op) {
+            &out.push(~op)
+        }
+    }
+    ^out
+}
+// Rust: Source/CmdStructuralMerge.rs:594
+fn merge_recorded_rename(base: &Unit, ours: &Unit, theirs: &Unit, ours_ops: [SemanticOp], theirs_ops: [SemanticOp]) -> String? {
+    ours_rename :: semantic_rename(base, ours, ours_ops)
+    theirs_rename :: semantic_rename(base, theirs, theirs_ops)
+    to :: if (ours_rename, theirs_rename) == {
+        (.Val(o), .Val(t)) -> { if o.to != t.to -> return None; o.to ?? return None }
+        (.Val(o), None) -> o.to ?? return None
+        (None, .Val(t)) -> t.to ?? return None
+        else -> return None
+    }
+    from :: base.fact.name
+    renamed_base :: rename_source(base.source, from, to) ?? return None
+    other :: if ours_rename.is_some() && theirs_rename.is_none() -> rename_source(theirs.source, from, to) ?? return None
+        else if theirs_rename.is_some() && ours_rename.is_none() -> rename_source(ours.source, from, to) ?? return None
+        else -> ~theirs.source
+    if ours.source == theirs.source -> Val(~ours.source)
+    else if ours.source == renamed_base -> Val(other)
+    else if theirs.source == renamed_base -> Val(~ours.source)
+    else -> None
+}
+// Rust: Source/CmdStructuralMerge.rs:630
+fn rename_source(source: String, from: String, to: String) -> String? {
+    loop (start, _) in source.match_indices(from) {
+        before :: source[..start].chars().next_back()
+        end :: start + from.len()
+        after :: source[end..].chars().next()
+        if before.is_none_or(ch -> !ch.is_alphanumeric() && ch != '_') && after.is_none_or(ch -> !ch.is_alphanumeric() && ch != '_') {
+            renamed := ~source
+            &renamed.replace_range(start..<end, to)
+            return Val(^renamed)
+        }
+    }
+    None
+}
+// Rust: Source/CmdStructuralMerge.rs:643
+fn push_unit(output: &String, leading: String, source: String) -> { &output.push_str(leading); &output.push_str(source) }
+// Rust: Source/CmdStructuralMerge.rs:648
+fn merge_text(kind: String, unit: &Unit, base: String, ours: String, theirs: String, conflicts: &[Conflict]) -> String {
+    if ours == theirs -> return ~ours
+    if ours == base -> return ~theirs
+    if theirs == base -> return ~ours
+    &conflicts.push(Conflict{kind: kind, stable_id: ~unit.fact.stable_id, human_identity: ~unit.fact.human_identity, ours: "sha256:{jet.SHA256.sha256_hex(ours.bytes())}", theirs: "sha256:{jet.SHA256.sha256_hex(theirs.bytes())}"})
+    ~base
+}
+// Rust: Source/CmdStructuralMerge.rs:675
+fn ambiguous_conflict(base: &Unit, side: String, indices: [Int], units: [Unit]) -> Conflict {
+    ids :: indices.iter().map(index -> units[index].fact.human_identity).collect().join(",")
+    Conflict{kind: "ambiguous_identity", stable_id: ~base.fact.stable_id, human_identity: ~base.fact.human_identity,
+        ours: if side == "ours" -> "ambiguous:{ids}" else -> ~base.fact.content_id,
+        theirs: if side == "theirs" -> "ambiguous:{ids}" else -> ~base.fact.content_id}
+}
+// Rust: Source/CmdStructuralMerge.rs:698
+fn merge_shell(label: String, base: String, ours: String, theirs: String, conflicts: &[Conflict]) -> String {
+    if ours == theirs -> return ~ours
+    if ours == base -> return ~theirs
+    if theirs == base -> return ~ours
+    &conflicts.push(Conflict{kind: "file_scope_edit", stable_id: "file:{label}", human_identity: "file {label}", ours: "sha256:{jet.SHA256.sha256_hex(ours.bytes())}", theirs: "sha256:{jet.SHA256.sha256_hex(theirs.bytes())}"})
+    ~base
+}
+// Rust: Source/CmdStructuralMerge.rs:724
+fn conflict(kind: String, base: &Unit, ours: &Unit, theirs: &Unit) -> Conflict {
+    Conflict{kind: kind, stable_id: ~base.fact.stable_id, human_identity: ~base.fact.human_identity, ours: ~ours.fact.content_id, theirs: ~theirs.fact.content_id}
+}
+// Rust: Source/CmdStructuralMerge.rs:734
+fn render_conflicts(conflicts: [Conflict], mode: String) -> {
+    if mode == "text" {
+        loop item in conflicts -> eprintln("conflict: {item.human_identity} ({item.kind})\n stable id: {item.stable_id}\n ours: {item.ours}\n theirs: {item.theirs}")
+        eprintln("merge stopped: resolve conflicts manually; no output was written")
+    } else {
+        payload :: StatusValue.object(StatusFields.new().with("conflicts", StatusValue.array(conflicts.iter().map(item -> conflict_value(&item)))))
+        eprintln(StatusEnvelope.new("merge.structural", false).with_field("structural_merge", payload).json())
+    }
+}
+// Rust: Source/CmdStructuralMerge.rs:763
+fn install_driver(args: [String]) -> {
+    repo :: OSPath.from(flag_value(args, "--repo") ?? ".")
+    config :: git_config_path(repo)
+    git_config_set(config, "merge.jetstruct.name", "Jet structural merge")
+    git_config_set(config, "merge.jetstruct.driver", "jet merge --structural %O %A %B --out %A")
+    loop (key, expected) in [("merge.jetstruct.name", "Jet structural merge"), ("merge.jetstruct.driver", "jet merge --structural %O %A %B --out %A")] {
+        actual :: git_config_get(config, key)
+        trimmed := actual.trim() // #4303
+        if trimmed != expected -> fail("Git did not retain `{key}` exactly", "check repository config permissions and includes")
+    }
+    attributes :: repo.join(".gitattributes")
+    attrs := fs.read_to_string(attributes) ?? ""
+    line :: "*.jet merge=jetstruct"
+    if !attrs.lines().any(existing -> existing.trim() == line) {
+        if !attrs.is_empty() && !attrs.ends_with('\n') -> &attrs.push('\n')
+        &attrs.push_str(line)
+        &attrs.push('\n')
+        write_file(attributes, attrs)
+    }
+    println("installed structural merge driver in {repo.display()}")
+}
+// Rust: Source/CmdStructuralMerge.rs:803
+fn git_config_path(repo: OSPath) -> OSPath {
+    // GATE #4494: real child process and captured output, never a fake Git result.
+    output :: Command.new("git").arg("-C").arg(repo).args(["rev-parse", "--git-path", "config"]).output() ?? fail("could not run Git: {err}", "install Git before enabling its merge driver")
+    if !output.status.success() -> fail("`{repo.display()}` is not a Git worktree", "run inside a Git repository or pass --repo <path>")
+    raw :: String.from_utf8(output.stdout) ?? fail("Git returned a non-UTF-8 config path", "repair the Git worktree metadata")
+    trimmed := raw.trim() // #4303
+    reported :: OSPath.from(trimmed)
+    config :: if reported.is_absolute() -> normalize_path(reported) else -> normalize_path(repo.join(reported))
+    if !config.is_file() -> fail("`{repo.display()}` has no Git config", "repair the Git worktree metadata")
+    config
+}
+// Rust: Source/CmdStructuralMerge.rs:842
+fn git_config_set(config: OSPath, key: String, value: String) -> {
+    // GATE #4494: native child process.
+    output :: Command.new("git").args(["config", "--file"]).arg(config).args(["--replace-all", key, value]).output() ?? fail("could not run Git: {err}", "install Git before enabling its merge driver")
+    if !output.status.success() -> fail("could not update Git config `{key}`", "fix repository config permissions")
+}
+// Rust: Source/CmdStructuralMerge.rs:862
+fn git_config_get(config: OSPath, key: String) -> String {
+    // GATE #4494: native child process.
+    output :: Command.new("git").args(["config", "--file"]).arg(config).args(["--get", key]).output() ?? fail("could not run Git: {err}", "install Git before enabling its merge driver")
+    if !output.status.success() -> fail("could not read back Git config `{key}`", "repair the repository config")
+    String.from_utf8(output.stdout) ?? fail("Git config contained non-UTF-8 data", "repair the repository config")
+}
+// Rust: Source/CmdStructuralMerge.rs:888
+fn write_file(path: OSPath, content: String) -> {
+    _ :: fs.write(path, content) ?? fail("could not write `{path.display()}`: {err}", "fix repository permissions")
+}
+// Rust: Source/CmdStructuralMerge.rs:896
+fn positional(args: [String], command: String) -> [String] {
+    out := [String]{}
+    skip_value := false
+    started := false
+    loop arg in args {
+        if !started { if arg == command -> started = true; continue }
+        if skip_value { skip_value = false; continue }
+        if arg == "--out" || arg == "--repo" { skip_value = true; continue }
+        if !arg.starts_with('-') && arg != "install-driver" -> &out.push(~arg)
+    }
+    ^out
+}
+// Rust: Source/CmdStructuralMerge.rs:918
+fn flag_value(args: [String], name: String) -> String? {
+    loop pair in args.windows(2) { if pair[0] == name -> return Val(pair[1]) }
+    None
+}
+// Rust: Source/CmdStructuralMerge.rs:923
+fn report_mode(args: [String]) -> String { if jet.CLI.machine_output_requested(args) -> "json" else -> "text" }
+// Rust: Source/CmdStructuralMerge.rs:930
+fn wants_help(args: [String]) -> Bool { args.iter().any(arg -> jet.CLI.is_help_flag(arg)) || args.get(1).is_some_and(arg -> arg == "help") }
+// Rust: Source/CmdStructuralMerge.rs:934
+fn diff_help() -> String { "usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n" }
+// Rust: Source/CmdStructuralMerge.rs:937
+fn merge_help() -> String { "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--json]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n" }
+// Rust: Source/CmdStructuralMerge.rs:940
+fn same_module(path: OSPath, module: String) -> Bool { absolute_normalized(path) == absolute_normalized(OSPath.from(module)) }
+// Rust: Source/CmdStructuralMerge.rs:943
+fn absolute_normalized(path: OSPath) -> OSPath {
+    if path.is_absolute() -> normalize_path(path)
+    else {
+        cwd :: env.current_dir() ?? fail("could not read current directory: {err}", "run from a readable directory")
+        normalize_path(cwd.join(path))
+    }
+}
+// Rust: Source/CmdStructuralMerge.rs:959
+fn change_value(change: &Change) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("kind", change.kind.name()).with("stable_id", change.stable_id)
+        .with("before", change.before.map(value -> StatusValue.from(value)) ?? StatusValue.Null)
+        .with("after", change.after.map(value -> StatusValue.from(value)) ?? StatusValue.Null)
+        .with("semantic_op", change.semantic_op.map(op -> semantic_op_value(&op)) ?? StatusValue.Null))
+}
+// Rust: Source/CmdStructuralMerge.rs:990
+fn semantic_op_value(op: &SemanticOp) -> StatusValue {
+    optional :: (value: String?) -> value.map(text -> StatusValue.from(text)) ?? StatusValue.Null
+    StatusValue.object(StatusFields.new().with("kind", op.kind).with("rule_id", optional(op.rule_id))
+        .with("from", optional(op.from)).with("to", optional(op.to)).with("node", optional(op.node))
+        .with("match", optional(op.match_template)).with("replace", optional(op.replace_template)))
+}
+// Rust: Source/CmdStructuralMerge.rs:1008
+fn conflict_value(conflict: &Conflict) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("kind", conflict.kind).with("stable_id", conflict.stable_id)
+        .with("human_identity", conflict.human_identity).with("ours", conflict.ours).with("theirs", conflict.theirs))
+}
+// Rust: Source/CmdStructuralMerge.rs:1018
+fn render_index_error(context: String, error: SemIndexError) -> Never {
+    jet_cli_error_fix("E2105", context, "correct source errors; structural tools never merge unchecked code")
+    if error == .Load(diags) { loop diagnostic in diags -> eprintln("  {diagnostic.code}: {diagnostic.what}") }
+    exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdStructuralMerge.rs:1026
+fn fail(message: String, fix: String) -> Never {
+    jet_cli_error_fix("E2104", message, fix)
+    exit(ExitCodes.USAGE)
+}

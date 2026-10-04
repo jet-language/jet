@@ -1,1801 +1,792 @@
-// PORT-PENDING 0813 source-fetch-slice-1: Source/Fetch.rs:1-1797
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Package fetch operations (M12.1, D-PM4).
-//RS //!
-//RS //! Network access is entirely via git subprocess — no HTTP in the compiler.
-//RS //! Path dependencies are resolved in-place (no fetch needed).
-//RS //! Path and git results retain the legacy source store; verified registry
-//RS //! results are installed in the canonical Jetpack Hangar.
-//RS 
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
-//RS use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
-//RS use crate::Package::PackagePolicyException;
-//RS use crate::Publish::SemVer::SemVer;
-//RS use crate::Publish::{self, ResolveMode, SolverCandidate, VersionConstraint, VersionReq};
-//RS use crate::Store;
-//RS use crate::Syntax;
-//RS use std::collections::{BTreeMap, BTreeSet, HashMap};
-//RS use std::net::{IpAddr, ToSocketAddrs};
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS use jet_foundation::Names::normalize_path;
-//RS use std::process::Command;
-//RS 
-//RS #[cfg(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS ))]
-//RS use std::fs::File;
-//RS 
-//RS #[cfg(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS ))]
-//RS use std::os::fd::AsRawFd;
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // Main entry points
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// Options for a fetch operation.
-//RS pub struct FetchOptions {
-//RS     /// If true, refuse network; verify lock only (--locked CI mode).
-//RS     pub locked: bool,
-//RS     /// If true, re-resolve moving selectors (@latest, branches).
-//RS     pub update: bool,
-//RS     /// If Some, only update this specific dep name.
-//RS     pub update_dep: Option<String>,
-//RS     /// How registry versions are selected when no exact lock is reused.
-//RS     pub resolution: ResolveMode,
-//RS }
-//RS 
-//RS /// Resolve, fetch, and install all dependencies from a manifest.
-//RS /// Returns the written lock file and a map of dep name → source directory.
-//RS pub fn fetch(
-//RS     project_root: &Path,
-//RS     manifest: &Manifest,
-//RS     existing_lock: Option<&LockFile>,
-//RS     opts: &FetchOptions,
-//RS ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
-//RS     // Validate toolchain constraint.
-//RS     let manifest_path = crate::Manifest::manifest_path_in(project_root)
-//RS         .display()
-//RS         .to_string();
-//RS     if let Err(d) = check_toolchain(manifest, &manifest_path) {
-//RS         return Err(vec![d]);
-//RS     }
-//RS 
-//RS     // --locked: verify lock matches manifest, then stop.
-//RS     if opts.locked {
-//RS         let lock = existing_lock.ok_or_else(|| {
-//RS             vec![Lock::e1202(
-//RS                 &project_root
-//RS                     .join(Syntax::UNIFIED_LOCK_FILE)
-//RS                     .display()
-//RS                     .to_string(),
-//RS             )]
-//RS         })?;
-//RS         if let Err(d) = Lock::verify_lock_matches_manifest(
-//RS             lock,
-//RS             manifest,
-//RS             &project_root
-//RS                 .join(Syntax::UNIFIED_LOCK_FILE)
-//RS                 .display()
-//RS                 .to_string(),
-//RS         ) {
-//RS             return Err(vec![d]);
-//RS         }
-//RS         // D-SUPPLY1 Step 2: every manifest dep must retain all facts needed by
-//RS         // a locked/offline realization.
-//RS         if let Err(error) = Lock::verify_all_manifest_deps_locked(manifest, lock) {
-//RS             return Err(vec![error.diagnostic()]);
-//RS         }
-//RS         if let Err(error) = lock.validate_completeness() {
-//RS             return Err(vec![error.diagnostic()]);
-//RS         }
-//RS         if let Err(d) = enforce_provenance_policy(lock, manifest) {
-//RS             return Err(vec![d]);
-//RS         }
-//RS         let dep_dirs = build_dep_dirs_from_lock(lock, project_root, manifest)?;
-//RS         return Ok((lock.clone(), dep_dirs));
-//RS     }
-//RS 
-//RS     // Resolve the full dependency graph. Load an offline advisory feed only
-//RS     // when a new registry candidate needs authorization; an exact existing
-//RS     // lock remains the explicit freshness escape.
-//RS     let mut resolver = Resolver::new(project_root, existing_lock, opts, &manifest.policy);
-//RS     let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
-//RS     if let Err(d) = enforce_provenance_policy(&new_lock, manifest) {
-//RS         return Err(vec![d]);
-//RS     }
-//RS     Lock::ensure_build_stamp(project_root, &mut new_lock);
-//RS 
-//RS     let semantic_update = if opts.update
-//RS         || manifest.policy.licenses.is_some()
-//RS         || !manifest.policy.exceptions.is_empty()
-//RS         || new_lock
-//RS             .packages
-//RS             .iter()
-//RS             .any(|package| matches!(&package.source, LockSource::Registry { .. }))
-//RS         || semantic_policy_needs_update(project_root, manifest)
-//RS     {
-//RS         Some(
-//RS             registry_update_rationales(project_root, &new_lock, manifest, opts)
-//RS                 .map_err(|diagnostic| vec![diagnostic])?,
-//RS         )
-//RS     } else {
-//RS         None
-//RS     };
-//RS 
-//RS     // Write the lock file, inside the project's `.jet/` managed folder (U2).
-//RS     let lock_str = Lock::write(&new_lock);
-//RS     let lock_bytes = match semantic_update.as_ref() {
-//RS         Some(semantic)
-//RS             if !semantic.records.is_empty()
-//RS                 || !semantic.inputs.is_empty()
-//RS                 || !semantic.source_maps.is_empty() =>
-//RS         {
-//RS             format!(
-//RS                 "{}\n\n{}",
-//RS                 lock_str.trim_end(),
-//RS                 jetpack::SemanticLock::write(semantic)
-//RS             )
-//RS             .into_bytes()
-//RS         }
-//RS         _ => lock_str.into_bytes(),
-//RS     };
-//RS     Lock::write_lock_atomically(project_root, &lock_bytes).map_err(|e| {
-//RS         vec![Diagnostic::error(
-//RS             "E1206",
-//RS             format!("couldn't write {}", Syntax::UNIFIED_LOCK_FILE),
-//RS             "the lock file records exact package versions".to_string(),
-//RS             format!("check write permissions: {}", e),
-//RS             None,
-//RS         )]
-//RS     })?;
-//RS 
-//RS     Ok((new_lock, dep_dirs))
-//RS }
-//RS 
-//RS 
-//RS fn enforce_provenance_policy(lock: &LockFile, manifest: &Manifest) -> Result<(), Diagnostic> {
-//RS     let requirement = manifest
-//RS         .authority
-//RS         .trust
-//RS         .as_ref()
-//RS         .and_then(|trust| trust.require)
-//RS         .unwrap_or(crate::Package::ProvenanceRequirement::None);
-//RS     Lock::enforce_provenance_requirement(lock, requirement).map_err(|error| {
-//RS         Diagnostic::error(
-//RS             "E1207",
-//RS             error,
-//RS             "authority.trust.require is an explicit provenance floor; Jet will not silently downgrade it".to_string(),
-//RS             "record the required transparency or build evidence, or set `authority: { trust: { require: none } }`".to_string(),
-//RS             None,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn foreign_provider_diagnostic(error: &jetpack::Provider::ProviderError) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         error.code().unwrap_or("E1256"),
-//RS         "couldn't realize the foreign package provider".to_string(),
-//RS         format!("the verified provider projection failed: {error:?}"),
-//RS         "provide a pinned, hash-verified provider artifact with its generated binding, then run `jet fetch` again".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn foreign_dependency_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1256",
-//RS         format!("foreign dependency `{dep_name}` has no valid provider projection"),
-//RS         detail.to_string(),
-//RS         "run `jet fetch` with the pinned provider artifact available; Jet will not invent or bypass a binding".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // Resolver
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS struct Resolver<'a> {
-//RS     project_root: &'a Path,
-//RS     existing_lock: Option<&'a LockFile>,
-//RS     opts: &'a FetchOptions,
-//RS     policy: &'a crate::Package::PackagePolicy,
-//RS     advisory_policy: Option<Result<Option<Publish::AdvisoryPolicy>, Diagnostic>>,
-//RS     /// name → (version, source_dir, fingerprint, content hash, deps, provenance)
-//RS     resolved: BTreeMap<String, ResolvedPkg>,
-//RS     /// name → Vec<chain> — for E1201 blame chains.
-//RS     version_seen: HashMap<String, (String, Vec<String>)>,
-//RS     /// Selected registry entries from the graph solver.
-//RS     registry_plan: BTreeMap<String, Publish::IndexEntry>,
-//RS     /// Packages allowed to move during `jet update <package>`.
-//RS     update_scope: BTreeSet<String>,
-//RS     /// Verified package-provider projections for foreign namespace deps.
-//RS     foreign: BTreeMap<String, jetpack::Foreign::Realization>,
-//RS }
-//RS 
-//RS struct ResolvedPkg {
-//RS     version: String,
-//RS     source: Lock::LockSource,
-//RS     locked: Option<LockedRevision>,
-//RS     fingerprint: String,
-//RS     content_hash: Option<String>,
-//RS     deps: Vec<String>,
-//RS     source_dir: PathBuf,
-//RS     provenance: Option<Lock::DependencyProvenance>,
-//RS     envelope: Option<Lock::LockEnvelope>,
-//RS     receipt: Option<String>,
-//RS }
-//RS 
-//RS impl<'a> Resolver<'a> {
-//RS     fn new(
-//RS         project_root: &'a Path,
-//RS         existing_lock: Option<&'a LockFile>,
-//RS         opts: &'a FetchOptions,
-//RS         policy: &'a crate::Package::PackagePolicy,
-//RS     ) -> Self {
-//RS         Resolver {
-//RS             project_root,
-//RS             existing_lock,
-//RS             opts,
-//RS             policy,
-//RS             advisory_policy: None,
-//RS             resolved: BTreeMap::new(),
-//RS             version_seen: HashMap::new(),
-//RS             registry_plan: BTreeMap::new(),
-//RS             update_scope: compute_update_scope(existing_lock, opts),
-//RS             foreign: BTreeMap::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn resolve_manifest(
-//RS         &mut self,
-//RS         manifest: &Manifest,
-//RS     ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
-//RS         self.realize_foreign_dependencies(manifest)?;
-//RS         self.registry_plan = self.prepare_registry_plan(manifest)?;
-//RS         let root_deps: Vec<String> = manifest.dependencies.keys().cloned().collect();
-//RS 
-//RS         // Resolve each direct dep recursively.
-//RS         for (dep_name, spec) in &manifest.dependencies {
-//RS             let chain = vec![
-//RS                 format!("{} (root)", manifest.package.name),
-//RS                 dep_name.clone(),
-//RS             ];
-//RS             self.resolve_dep(dep_name, spec, self.project_root, &chain)?;
-//RS         }
-//RS 
-//RS         // Build the lock file.
-//RS         let mut packages: Vec<LockedPackage> = Vec::new();
-//RS 
-//RS         // Root package.
-//RS         packages.push(LockedPackage {
-//RS             name: manifest.package.name.clone(),
-//RS             version: manifest.package.version.clone(),
-//RS             source: LockSource::Root,
-//RS             nix_closure: None,
-//RS             locked: None,
-//RS             fingerprint: String::new(),
-//RS             content_hash: None,
-//RS             dependencies: root_deps.clone(),
-//RS             layer: Lock::layer_from_manifest(manifest),
-//RS             inferred_layer: None,
-//RS             // D-EFFBUDGET1: effect provenance is filled in after `jet build`
-//RS             // computes it (fetch/resolve runs before sema); see
-//RS             // `EffectBudget::update_lock_provenance`.
-//RS             effects: Vec::new(),
-//RS             effect_grants: Vec::new(),
-//RS             required_effects: Vec::new(),
-//RS             granted_effects: Vec::new(),
-//RS             denied_effects: Vec::new(),
-//RS             effect_authority: None,
-//RS             envelope: None,
-//RS             receipt: Default::default(),
-//RS             provenance: None,
-//RS         });
-//RS 
-//RS         // Dependency packages in stable order.
-//RS         for (name, pkg) in &self.resolved {
-//RS             packages.push(LockedPackage {
-//RS                 name: name.clone(),
-//RS                 version: pkg.version.clone(),
-//RS                 nix_closure: None,
-//RS                 source: pkg.source.clone(),
-//RS                 locked: pkg.locked.clone(),
-//RS                 fingerprint: pkg.fingerprint.clone(),
-//RS                 content_hash: pkg.content_hash.clone(),
-//RS                 dependencies: pkg.deps.clone(),
-//RS                 layer: None,
-//RS                 inferred_layer: None,
-//RS                 effects: Vec::new(),
-//RS                 effect_grants: Vec::new(),
-//RS                 required_effects: Vec::new(),
-//RS                 granted_effects: Vec::new(),
-//RS                 denied_effects: Vec::new(),
-//RS                 effect_authority: None,
-//RS                 provenance: pkg.provenance.clone(),
-//RS                 envelope: pkg.envelope.clone(),
-//RS                 receipt: pkg.receipt.clone(),
-//RS             });
-//RS         }
-//RS 
-//RS         let mut new_lock = LockFile {
-//RS             version: Lock::LOCK_VERSION,
-//RS             packages,
-//RS             root_dependencies: root_deps,
-//RS             authority: (manifest.authority != Default::default())
-//RS                 .then(|| manifest.authority.clone()),
-//RS             workspace_members: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.workspace_members.clone())
-//RS                 .unwrap_or_default(),
-//RS             workspace_source_digest: self
-//RS                 .existing_lock
-//RS                 .and_then(|lock| lock.workspace_source_digest.clone()),
-//RS             workspace_overlay_policy: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.workspace_overlay_policy.clone())
-//RS                 .unwrap_or_default(),
-//RS             comptime_inputs: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.comptime_inputs.clone())
-//RS                 .unwrap_or_default(),
-//RS             toolchains: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.toolchains.clone())
-//RS                 .unwrap_or_default(),
-//RS             browsers: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.browsers.clone())
-//RS                 .unwrap_or_default(),
-//RS             source_channels: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.source_channels.clone())
-//RS                 .unwrap_or_default(),
-//RS             build_stamp: self.existing_lock.and_then(|lock| lock.build_stamp.clone()),
-//RS             build_contributions: self
-//RS                 .existing_lock
-//RS                 .map(|lock| lock.build_contributions.clone())
-//RS                 .unwrap_or_default(),
-//RS         };
-//RS         self.preserve_unrelated_records(&mut new_lock);
-//RS 
-//RS         // Build dep_dirs map.
-//RS         let mut dep_dirs = HashMap::new();
-//RS         for (name, pkg) in &self.resolved {
-//RS             dep_dirs.insert(name.clone(), pkg.source_dir.clone());
-//RS         }
-//RS 
-//RS         Ok((new_lock, dep_dirs))
-//RS     }
-//RS 
-//RS     fn realize_foreign_dependencies(&mut self, manifest: &Manifest) -> Result<(), Vec<Diagnostic>> {
-//RS         if !manifest
-//RS             .dependencies
-//RS             .values()
-//RS             .any(|spec| matches!(spec, DepSpec::Foreign { .. }))
-//RS         {
-//RS             return Ok(());
-//RS         }
-//RS 
-//RS         let roots = jetpack::Store::resolve();
-//RS         let store_dir = roots.hangar_dir();
-//RS         let fixtures = jetpack::Provider::fixtures_from_env(None);
-//RS         let context = jetpack::Provider::Ctx {
-//RS             fixtures: fixtures.as_deref(),
-//RS             store_dir: &store_dir,
-//RS             offline: false,
-//RS             project_dir: Some(self.project_root),
-//RS             nix_index: None,
-//RS             nix_roots: None,
-//RS             allow_local_nix_catalog: false,
-//RS         };
-//RS         let realized = jetpack::Foreign::realize_manifest_dependencies(
-//RS             &roots,
-//RS             self.project_root,
-//RS             manifest,
-//RS             &context,
-//RS         )
-//RS         .map_err(|error| vec![foreign_provider_diagnostic(&error)])?;
-//RS         self.foreign = realized
-//RS             .into_iter()
-//RS             .map(|item| (item.name.clone(), item))
-//RS             .collect();
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn prepare_registry_plan(
-//RS         &self,
-//RS         manifest: &Manifest,
-//RS     ) -> Result<BTreeMap<String, Publish::IndexEntry>, Vec<Diagnostic>> {
-//RS         let mut roots = Vec::new();
-//RS         let mut direct = BTreeSet::new();
-//RS         let mut pending = BTreeSet::new();
-//RS         let mut owners: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-//RS         for (name, spec) in &manifest.dependencies {
-//RS             let DepSpec::Registry(requirement) = spec else {
-//RS                 continue;
-//RS             };
-//RS             let req = VersionReq::parse(requirement).ok_or_else(|| {
-//RS                 vec![registry_diagnostic(
-//RS                     name,
-//RS                     &format!("invalid version requirement `{requirement}`"),
-//RS                     "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`",
-//RS                 )]
-//RS             })?;
-//RS             roots.push(VersionConstraint {
-//RS                 package: name.clone(),
-//RS                 req,
-//RS                 from: format!("{} (root)", manifest.package.name),
-//RS             });
-//RS             direct.insert(name.clone());
-//RS             pending.insert(name.clone());
-//RS             owners
-//RS                 .entry(name.clone())
-//RS                 .or_default()
-//RS                 .insert(manifest.package.name.clone());
-//RS         }
-//RS         if roots.is_empty() {
-//RS             return Ok(BTreeMap::new());
-//RS         }
-//RS 
-//RS         let mut visited = BTreeSet::new();
-//RS         let mut candidate_map: BTreeMap<String, Vec<SolverCandidate>> = BTreeMap::new();
-//RS         let mut entry_map: BTreeMap<(String, String), Publish::IndexEntry> = BTreeMap::new();
-//RS         while let Some(name) = pending.pop_first() {
-//RS             if !visited.insert(name.clone()) {
-//RS                 continue;
-//RS             }
-//RS             let update_requested = self.registry_update_requested(&name);
-//RS             let registry = if update_requested {
-//RS                 Publish::resolve_publish_registry()
-//RS             } else {
-//RS                 self.locked_registry_config(&name)
-//RS                     .unwrap_or_else(Publish::resolve_publish_registry)
-//RS             };
-//RS             let (all, _warnings) =
-//RS                 Publish::resolve_and_verify_all(&registry, &name).map_err(|diagnostic| {
-//RS                     vec![registry_diagnostic(
-//RS                         &name,
-//RS                         &diagnostic.what,
-//RS                         &diagnostic.fix,
-//RS                     )]
-//RS                 })?;
-//RS             let locked_version = (!update_requested)
-//RS                 .then(|| self.find_locked_registry_version(&name))
-//RS                 .flatten();
-//RS             let mut solver_candidates = Vec::new();
-//RS             for entry in all {
-//RS                 if entry.yanked && locked_version.as_deref() != Some(entry.version.as_str()) {
-//RS                     continue;
-//RS                 }
-//RS                 let version = SemVer::parse(&entry.version).ok_or_else(|| {
-//RS                     vec![registry_diagnostic(
-//RS                         &name,
-//RS                         &format!("registry entry has invalid SemVer `{}`", entry.version),
-//RS                         "publish a new immutable version with a valid SemVer identity",
-//RS                     )]
-//RS                 })?;
-//RS                 let repo = Publish::index_repo_path(&registry);
-//RS                 let artifact_snapshot = Publish::snapshot_verified_artifact(&repo, &entry)
-//RS                     .map_err(|error| {
-//RS                         vec![registry_diagnostic(
-//RS                             &name,
-//RS                             &format!("published artifact is unavailable or corrupt: {error}"),
-//RS                             "refresh the registry mirror or publish the immutable source artifact",
-//RS                         )]
-//RS                     })?;
-//RS                 let artifact = artifact_snapshot.path();
-//RS                 let dep_manifest = self.load_dep_manifest(artifact, &name)?;
-//RS                 if dep_manifest.package.name != name
-//RS                     || dep_manifest.package.version != entry.version
-//RS                 {
-//RS                     return Err(vec![registry_diagnostic(
-//RS                         &name,
-//RS                         "published source metadata disagrees with its registry index entry",
-//RS                         "republish a new immutable version with matching payload identity",
-//RS                     )]);
-//RS                 }
-//RS                 let registry_metadata =
-//RS                     self.load_registry_metadata(artifact, &name, &entry.version)?;
-//RS                 let registry_dependencies =
-//RS                     registry_dependency_edges(&dep_manifest, registry_metadata.as_ref(), &name)?;
-//RS                 Publish::authorize_package_candidate(
-//RS                     self.policy,
-//RS                     &name,
-//RS                     &entry.version,
-//RS                     dep_manifest.package.license.as_deref(),
-//RS                     &registry.name,
-//RS                 )
-//RS                 .map_err(|error| {
-//RS                     let owner = owners
-//RS                         .get(&name)
-//RS                         .map(|owners| owners.iter().cloned().collect::<Vec<_>>().join(" | "))
-//RS                         .unwrap_or_else(|| manifest.package.name.clone());
-//RS                     let edge = format!("{owner} -> {}#{}", name, entry.version);
-//RS                     vec![Publish::package_policy_edge_diagnostic(
-//RS                         &owner,
-//RS                         &edge,
-//RS                         &registry.name,
-//RS                         &error,
-//RS                     )]
-//RS                 })?;
-//RS                 let mut dependencies = Vec::new();
-//RS                 let mut rejected = BTreeMap::new();
-//RS                 let mut preferred = BTreeMap::new();
-//RS                 let mut strict = BTreeSet::new();
-//RS                 for dependency in registry_dependencies {
-//RS                     for requirement in &dependency.requirements {
-//RS                         let req = VersionReq::parse(requirement).ok_or_else(|| {
-//RS                             vec![registry_diagnostic(
-//RS                                 &dependency.name,
-//RS                                 &format!(
-//RS                                     "invalid version requirement `{requirement}` in {name} {entry}",
-//RS                                     entry = entry.version
-//RS                                 ),
-//RS                                 "publish a package with a valid SemVer dependency requirement",
-//RS                             )]
-//RS                         })?;
-//RS                         let roles = dependency
-//RS                             .roles
-//RS                             .iter()
-//RS                             .cloned()
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(",");
-//RS                         dependencies.push(VersionConstraint {
-//RS                             package: dependency.name.clone(),
-//RS                             req,
-//RS                             from: format!("{} {} ({roles})", name, entry.version),
-//RS                         });
-//RS                     }
-//RS                     for requirement in dependency.prefer {
-//RS                         let req = VersionReq::parse(&requirement).ok_or_else(|| {
-//RS                             vec![registry_diagnostic(
-//RS                                 &dependency.name,
-//RS                                 "registry dependency has an invalid prefer constraint",
-//RS                                 "publish a valid SemVer requirement in registry.json",
-//RS                             )]
-//RS                         })?;
-//RS                         preferred
-//RS                             .entry(dependency.name.clone())
-//RS                             .or_insert_with(Vec::new)
-//RS                             .push(req);
-//RS                     }
-//RS                     let mut rejected_versions = BTreeSet::new();
-//RS                     for version in dependency.reject {
-//RS                         let version = SemVer::parse(&version).ok_or_else(|| {
-//RS                             vec![registry_diagnostic(
-//RS                                 &dependency.name,
-//RS                                 "registry dependency has an invalid reject version",
-//RS                                 "publish exact SemVer reject values in registry.json",
-//RS                             )]
-//RS                         })?;
-//RS                         rejected_versions.insert(version);
-//RS                     }
-//RS                     if !rejected_versions.is_empty() {
-//RS                         rejected
-//RS                             .entry(dependency.name.clone())
-//RS                             .or_insert_with(BTreeSet::new)
-//RS                             .extend(rejected_versions);
-//RS                     }
-//RS                     if dependency.strict {
-//RS                         strict.insert(dependency.name.clone());
-//RS                     }
-//RS                     owners
-//RS                         .entry(dependency.name.clone())
-//RS                         .or_default()
-//RS                         .insert(format!("{}#{}", name, entry.version));
-//RS                     pending.insert(dependency.name);
-//RS                 }
-//RS                 entry_map.insert((name.clone(), entry.version.clone()), entry);
-//RS                 solver_candidates.push(SolverCandidate {
-//RS                     version,
-//RS                     dependencies,
-//RS                     rejected,
-//RS                     preferred,
-//RS                     strict,
-//RS                 });
-//RS             }
-//RS             candidate_map.insert(name, solver_candidates);
-//RS         }
-//RS 
-//RS         let locked = self
-//RS             .existing_lock
-//RS             .into_iter()
-//RS             .flat_map(|lock| lock.packages.iter())
-//RS             .filter_map(|package| {
-//RS                 matches!(&package.source, LockSource::Registry { .. })
-//RS                     .then(|| (package.name.clone(), package.version.clone()))
-//RS             })
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         let selected = Publish::solve_registry(
-//RS             &roots,
-//RS             &candidate_map,
-//RS             &locked,
-//RS             &self.update_scope,
-//RS             self.opts.resolution,
-//RS             &direct,
-//RS         )
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS         let mut plan = BTreeMap::new();
-//RS         for (name, version) in selected {
-//RS             let entry = entry_map
-//RS                 .iter()
-//RS                 .find(|((candidate_name, _), candidate)| {
-//RS                     candidate_name == &name
-//RS                         && SemVer::parse(&candidate.version)
-//RS                             .is_some_and(|candidate_version| candidate_version == version)
-//RS                 })
-//RS                 .map(|(_, entry)| entry.clone())
-//RS                 .ok_or_else(|| {
-//RS                     vec![registry_diagnostic(
-//RS                         &name,
-//RS                         "resolver selected a registry candidate with no immutable index entry",
-//RS                         "refresh the registry checkpoint and retry resolution",
-//RS                     )]
-//RS                 })?;
-//RS             plan.insert(name, entry);
-//RS         }
-//RS         Ok(plan)
-//RS     }
-//RS 
-//RS     fn preserve_unrelated_records(&self, lock: &mut LockFile) {
-//RS         let Some(target) = self.opts.update_dep.as_deref() else {
-//RS             return;
-//RS         };
-//RS         let Some(previous) = self.existing_lock else {
-//RS             return;
-//RS         };
-//RS         let mut related = lock_closure(previous, target);
-//RS         related.extend(lock_closure(lock, target));
-//RS         for package in &mut lock.packages {
-//RS             if related.contains(&package.name) {
-//RS                 continue;
-//RS             }
-//RS             if let Some(previous_package) = previous
-//RS                 .packages
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.name == package.name)
-//RS             {
-//RS                 *package = previous_package.clone();
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn resolve_dep(
-//RS         &mut self,
-//RS         dep_name: &str,
-//RS         spec: &DepSpec,
-//RS         parent_dir: &Path,
-//RS         chain: &[String],
-//RS     ) -> Result<(), Vec<Diagnostic>> {
-//RS         if self.resolved.contains_key(dep_name) {
-//RS             // Already resolved — check for version conflict.
-//RS             let existing = &self.resolved[dep_name];
-//RS             let existing_version = existing.version.clone();
-//RS             if let Some((prev_version, prev_chain)) = self.version_seen.get(dep_name).cloned() {
-//RS                 if prev_version != existing_version {
-//RS                     return Err(vec![Lock::e1201(
-//RS                         dep_name,
-//RS                         &prev_version,
-//RS                         &prev_chain,
-//RS                         &existing_version,
-//RS                         chain,
-//RS                     )]);
-//RS                 }
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS 
-//RS         match spec {
-//RS             DepSpec::Path { path } => {
-//RS                 let abs_path = if Path::new(path).is_absolute() {
-//RS                     PathBuf::from(path)
-//RS                 } else {
-//RS                     normalize_path(&parent_dir.join(path))
-//RS                 };
-//RS 
-//RS                 // A fetched package controls its own transitive path strings,
-//RS                 // but it must not turn that control into a read of an
-//RS                 // unrelated host directory. Root package paths retain their
-//RS                 // existing sibling-path behavior; paths declared by a
-//RS                 // dependency stay below that dependency's source root.
-//RS                 if parent_dir != self.project_root {
-//RS                     let lexical_escape =
-//RS                         Path::new(path).is_absolute() || !abs_path.starts_with(parent_dir);
-//RS                     let canonical_escape = std::fs::canonicalize(parent_dir)
-//RS                         .and_then(|parent_root| {
-//RS                             std::fs::canonicalize(&abs_path)
-//RS                                 .map(|resolved| !resolved.starts_with(parent_root))
-//RS                         })
-//RS                         .unwrap_or(true);
-//RS                     if lexical_escape || canonical_escape {
-//RS                         return Err(vec![path_dependency_escape_diagnostic(
-//RS                             dep_name, path, parent_dir,
-//RS                         )]);
-//RS                     }
-//RS                 }
-//RS 
-//RS                 // Freeze the source before reading its manifest, dependency
-//RS                 // metadata, or hash. Everything below consumes this exact
-//RS                 // snapshot; the project path is never used as package input
-//RS                 // again.
-//RS                 let snapshot = Store::snapshot_tree(&abs_path).map_err(|d| vec![d])?;
-//RS                 let source = snapshot.path();
-//RS 
-//RS                 // Load the dep's manifest from the held snapshot.
-//RS                 let dep_manifest = self.load_dep_manifest(source, dep_name)?;
-//RS 
-//RS                 let dep_version = dep_manifest.package.version.clone();
-//RS                 let dep_name_in_manifest = dep_manifest.package.name.clone();
-//RS 
-//RS                 // Check for version conflict with another dep that has the same package name.
-//RS                 if let Some((prev_ver, prev_chain)) =
-//RS                     self.version_seen.get(&dep_name_in_manifest).cloned()
-//RS                 {
-//RS                     if prev_ver != dep_version {
-//RS                         return Err(vec![Lock::e1201(
-//RS                             &dep_name_in_manifest,
-//RS                             &prev_ver,
-//RS                             &prev_chain,
-//RS                             &dep_version,
-//RS                             chain,
-//RS                         )]);
-//RS                     }
-//RS                 } else {
-//RS                     self.version_seen.insert(
-//RS                         dep_name_in_manifest.clone(),
-//RS                         (dep_version.clone(), chain.to_vec()),
-//RS                     );
-//RS                 }
-//RS 
-//RS                 // Compute tree hash (for fingerprint and store).
-//RS                 let th = snapshot.content_hash().to_string();
-//RS 
-//RS                 // Resolve transitive deps.
-//RS                 let mut trans_deps = Vec::new();
-//RS                 for (trans_name, trans_spec) in &dep_manifest.dependencies {
-//RS                     let mut child_chain = chain.to_vec();
-//RS                     child_chain.push(trans_name.clone());
-//RS                     self.resolve_dep(trans_name, trans_spec, source, &child_chain)?;
-//RS                     trans_deps.push(trans_name.clone());
-//RS                 }
-//RS 
-//RS                 // Compute fingerprint.
-//RS                 let dep_fps: Vec<&str> = trans_deps
-//RS                     .iter()
-//RS                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
-//RS                     .collect();
-//RS                 // c129: fold the dep's frozen capability contract into its pin.
-//RS                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(source);
-//RS                 let fp = Lock::compute_fingerprint(&th, &dep_fps, &cap_digest);
-//RS 
-//RS                 // Store the path dep (copy to store for inode sharing).
-//RS                 // D-CASTORE1=A: returns (path, content_hash) for lock recording.
-//RS                 let (store_path, content_hash) =
-//RS                     Store::ensure_path_dep(dep_name, &dep_version, &fp, source)
-//RS                         .map_err(|d| vec![d])?;
-//RS 
-//RS                 // Integrity floor (D-PKGSIGN1): the store entry must match its
-//RS                 // recorded content hash before it is linked into the build.
-//RS                 Store::verify_entry(dep_name, &store_path, &th).map_err(|d| vec![d])?;
-//RS 
-//RS                 // Link into project build dir.
-//RS                 let link_dir = self
-//RS                     .project_root
-//RS                     .join(".jet")
-//RS                     .join("build")
-//RS                     .join("deps")
-//RS                     .join(dep_name);
-//RS                 Store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
-//RS                 let provenance = self.existing_provenance(dep_name, &dep_version, &content_hash);
-//RS 
-//RS                 self.resolved.insert(
-//RS                     dep_name.to_string(),
-//RS                     ResolvedPkg {
-//RS                         version: dep_version,
-//RS                         source: LockSource::Path(path.clone()),
-//RS                         locked: None,
-//RS                         fingerprint: fp,
-//RS                         content_hash: Some(content_hash),
-//RS                         deps: trans_deps,
-//RS                         source_dir: store_path,
-//RS                         provenance,
-//RS                         envelope: None,
-//RS                         receipt: None,
-//RS                     },
-//RS                 );
-//RS             }
-//RS 
-//RS             DepSpec::Git { url, selector } => {
-//RS                 let transport = match validate_git_transport_url(url, self.project_root) {
-//RS                     Ok(transport) => transport,
-//RS                     Err(reason) => return Err(vec![git_transport_diagnostic(url, &reason)]),
-//RS                 };
-//RS                 // Check if git is available after validating the transport.
-//RS                 if !git_available() {
-//RS                     return Err(vec![Lock::e1203()]);
-//RS                 }
-//RS 
-//RS                 // Determine what rev to fetch.
-//RS                 let rev_to_fetch = self.resolve_git_rev(dep_name, url, selector, &transport)?;
-//RS                 let clone_dir = git_cache_dir(url, &rev_to_fetch).map_err(|d| vec![d])?;
-//RS 
-//RS                 // Open an existing checkout through its final authority. A
-//RS                 // missing entry is published only after Git has populated a
-//RS                 // private descriptor-relative staging directory.
-//RS                 let snapshot = match Store::open_directory_authority(&clone_dir) {
-//RS                     Ok(cache) => Store::snapshot_directory_authority(&cache).map_err(|d| vec![d])?,
-//RS                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                         git_clone(url, &rev_to_fetch, &clone_dir, &transport)?
-//RS                     }
-//RS                     Err(error) => {
-//RS                         return Err(vec![Diagnostic::error(
-//RS                             "E1206",
-//RS                             format!("couldn't open git cache `{}`: {}", clone_dir.display(), error),
-//RS                             "the git cache must be held through a no-follow directory authority"
-//RS                                 .to_string(),
-//RS                             "remove the cache entry or run `jet fetch` again".to_string(),
-//RS                             None,
-//RS                         )])
-//RS                     }
-//RS                 };
-//RS 
-//RS                 // Freeze the checkout before reading package metadata. The
-//RS                 // mutable Git cache is never used as the resolved source.
-//RS                 let source = snapshot.path();
-//RS                 let dep_manifest = self.load_dep_manifest(source, dep_name)?;
-//RS                 let dep_version = dep_manifest.package.version.clone();
-//RS 
-//RS                 // Content hash of the checked-out source tree. This MUST use the
-//RS                 // same algorithm as path deps (`SHA256::tree_hash`), because the
-//RS                 // integrity floor (c122) re-hashes the *store* entry with that same
-//RS                 // function and compares — git's own `HEAD^{tree}` object id is a
-//RS                 // different hash space and would never match, falsely tripping
-//RS                 // E1204 on every git dep. Git identity is already recorded by the
-//RS                 // locked `rev`; this field is the content fingerprint.
-//RS                 let git_tree_hash = snapshot.content_hash().to_string();
-//RS 
-//RS                 // Check for version conflicts.
-//RS                 let dep_name_in_manifest = dep_manifest.package.name.clone();
-//RS                 if let Some((prev_ver, prev_chain)) =
-//RS                     self.version_seen.get(&dep_name_in_manifest).cloned()
-//RS                 {
-//RS                     if prev_ver != dep_version {
-//RS                         return Err(vec![Lock::e1201(
-//RS                             &dep_name_in_manifest,
-//RS                             &prev_ver,
-//RS                             &prev_chain,
-//RS                             &dep_version,
-//RS                             chain,
-//RS                         )]);
-//RS                     }
-//RS                 } else {
-//RS                     self.version_seen.insert(
-//RS                         dep_name_in_manifest.clone(),
-//RS                         (dep_version.clone(), chain.to_vec()),
-//RS                     );
-//RS                 }
-//RS 
-//RS                 // Resolve transitive deps.
-//RS                 let mut trans_deps = Vec::new();
-//RS                 for (trans_name, trans_spec) in &dep_manifest.dependencies {
-//RS                     let mut child_chain = chain.to_vec();
-//RS                     child_chain.push(trans_name.clone());
-//RS                     self.resolve_dep(trans_name, trans_spec, source, &child_chain)?;
-//RS                     trans_deps.push(trans_name.clone());
-//RS                 }
-//RS 
-//RS                 // Compute fingerprint.
-//RS                 let dep_fps: Vec<&str> = trans_deps
-//RS                     .iter()
-//RS                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
-//RS                     .collect();
-//RS                 // c129: fold the dep's frozen capability contract into its pin.
-//RS                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(source);
-//RS                 let fp = Lock::compute_fingerprint(&git_tree_hash, &dep_fps, &cap_digest);
-//RS 
-//RS                 // Store.
-//RS                 // D-CASTORE1=A: returns (path, content_hash).
-//RS                 let (store_path, _content_hash) =
-//RS                     Store::ensure_git_dep(dep_name, &dep_version, &fp, source)
-//RS                         .map_err(|d| vec![d])?;
-//RS 
-//RS                 // Integrity floor (D-PKGSIGN1): the store entry must match its
-//RS                 // recorded content hash before it is linked into the build.
-//RS                 Store::verify_entry(dep_name, &store_path, &git_tree_hash).map_err(|d| vec![d])?;
-//RS 
-//RS                 // Link into project build dir.
-//RS                 let link_dir = self
-//RS                     .project_root
-//RS                     .join(".jet")
-//RS                     .join("build")
-//RS                     .join("deps")
-//RS                     .join(dep_name);
-//RS                 Store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
-//RS 
-//RS                 let locked = LockedRevision {
-//RS                     rev: rev_to_fetch.clone(),
-//RS                     tree_hash: git_tree_hash.clone(),
-//RS                     last_modified: unix_now(),
-//RS                 };
-//RS                 let provenance = self.existing_provenance(dep_name, &dep_version, &git_tree_hash);
-//RS 
-//RS                 self.resolved.insert(
-//RS                     dep_name.to_string(),
-//RS                     ResolvedPkg {
-//RS                         version: dep_version,
-//RS                         source: LockSource::Git {
-//RS                             url: url.clone(),
-//RS                             selector: Lock::git_selector_str(selector),
-//RS                         },
-//RS                         locked: Some(locked),
-//RS                         fingerprint: fp,
-//RS                         content_hash: Some(git_tree_hash.clone()),
-//RS                         deps: trans_deps,
-//RS                         source_dir: store_path,
-//RS                         provenance,
-//RS                         envelope: None,
-//RS                         receipt: None,
-//RS                     },
-//RS                 );
-//RS             }
-//RS 
-//RS             DepSpec::Registry(version_req) => {
-//RS                 let update_requested = self.registry_update_requested(dep_name);
-//RS                 let registry = if update_requested {
-//RS                     Publish::resolve_publish_registry()
-//RS                 } else {
-//RS                     self.locked_registry_config(dep_name)
-//RS                         .unwrap_or_else(Publish::resolve_publish_registry)
-//RS                 };
-//RS                 let (available, _warnings) = Publish::resolve_and_verify_all(&registry, dep_name)
-//RS                     .map_err(|diagnostic| {
-//RS                     vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         &diagnostic.what,
-//RS                         &diagnostic.fix,
-//RS                     )]
-//RS                 })?;
-//RS                 let requirement = VersionReq::parse(version_req).ok_or_else(|| {
-//RS                     vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         &format!("invalid version requirement `{version_req}`"),
-//RS                         "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`",
-//RS                     )]
-//RS                 })?;
-//RS                 let locked_version = (!update_requested
-//RS                     && self.opts.resolution == ResolveMode::Conservative)
-//RS                     .then(|| self.find_locked_registry_version(dep_name))
-//RS                     .flatten();
-//RS                 let locked_candidate = locked_version
-//RS                     .as_deref()
-//RS                     .filter(|version| {
-//RS                         SemVer::parse(version).is_some_and(|parsed| requirement.matches(&parsed))
-//RS                     })
-//RS                     .and_then(|version| available.iter().find(|entry| entry.version == version))
-//RS                     .cloned();
-//RS                 let planned = self
-//RS                     .registry_plan
-//RS                     .get(dep_name)
-//RS                     .filter(|entry| {
-//RS                         SemVer::parse(&entry.version)
-//RS                             .is_some_and(|version| requirement.matches(&version))
-//RS                     })
-//RS                     .cloned();
-//RS                 let selected = planned.or(locked_candidate).or_else(|| {
-//RS                     let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
-//RS                         .into_iter()
-//RS                         .filter(|entry| !entry.yanked)
-//RS                         .filter_map(|entry| {
-//RS                             let version = SemVer::parse(&entry.version)?;
-//RS                             requirement.matches(&version).then_some((version, entry))
-//RS                         })
-//RS                         .collect();
-//RS                     let versions: Vec<SemVer> = candidates
-//RS                         .iter()
-//RS                         .map(|(version, _)| version.clone())
-//RS                         .collect();
-//RS                     let constraint = crate::Publish::VersionConstraint {
-//RS                         package: dep_name.to_string(),
-//RS                         req: requirement.clone(),
-//RS                         from: chain.first().cloned().unwrap_or_default(),
-//RS                     };
-//RS                     let mode = match self.opts.resolution {
-//RS                         ResolveMode::LowestDirect if chain.len() > 2 => ResolveMode::Latest,
-//RS                         ResolveMode::Conservative => ResolveMode::Latest,
-//RS                         mode => mode,
-//RS                     };
-//RS                     let selected_version =
-//RS                         Publish::select_compatible(dep_name, &[&constraint], &versions, mode)
-//RS                             .ok()
-//RS                             .cloned()?;
-//RS                     let selected_entry = candidates
-//RS                         .drain(..)
-//RS                         .find(|(version, _)| *version == selected_version)
-//RS                         .map(|(_, entry)| entry);
-//RS                     selected_entry
-//RS                 });
-//RS                 let Some(selected) = selected else {
-//RS                     return Err(vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         &format!("no published version satisfies `{version_req}`"),
-//RS                         "the configured registry has no compatible non-yanked artifact",
-//RS                     )]);
-//RS                 };
-//RS                 let reused_exact_lock = !update_requested
-//RS                     && locked_version.as_deref() == Some(selected.version.as_str());
-//RS                 let source_exception = Publish::active_source_exception(
-//RS                     &self.policy.exceptions,
-//RS                     dep_name,
-//RS                     &selected.version,
-//RS                 )
-//RS                 .cloned();
-//RS                 if !reused_exact_lock {
-//RS                     if let Some(policy) = self.load_advisory_policy()? {
-//RS                         Publish::authorize_registry_candidate_with_source_exception(
-//RS                             policy,
-//RS                             dep_name,
-//RS                             &selected.version,
-//RS                             source_exception.as_ref(),
-//RS                         )
-//RS                         .map_err(|diagnostic| {
-//RS                             vec![contextualize_dependency_diagnostic(
-//RS                                 diagnostic,
-//RS                                 chain,
-//RS                                 dep_name,
-//RS                                 &selected.version,
-//RS                             )]
-//RS                         })?;
-//RS                     }
-//RS                 }
-//RS                 let registry_repo = Publish::index_repo_path(&registry);
-//RS                 let artifact_snapshot =
-//RS                     Publish::snapshot_verified_artifact(&registry_repo, &selected).map_err(
-//RS                         |error| {
-//RS                             vec![registry_diagnostic(
-//RS                             dep_name,
-//RS                             &format!("published artifact is unavailable or corrupt: {error}"),
-//RS                             "refresh the registry mirror or publish the immutable source artifact",
-//RS                         )]
-//RS                         },
-//RS                     )?;
-//RS                 let artifact = artifact_snapshot.path();
-//RS                 let dep_manifest = self.load_dep_manifest(artifact, dep_name)?;
-//RS                 if dep_manifest.package.name != dep_name
-//RS                     || dep_manifest.package.version != selected.version
-//RS                 {
-//RS                     return Err(vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         "published source metadata disagrees with its registry index entry",
-//RS                         "republish a new immutable version with matching payload identity",
-//RS                     )]);
-//RS                 }
-//RS                 let registry_metadata =
-//RS                     self.load_registry_metadata(artifact, dep_name, &selected.version)?;
-//RS                 let registry_dependencies =
-//RS                     registry_dependency_edges(&dep_manifest, registry_metadata.as_ref(), dep_name)?;
-//RS                 let policy_receipt = Publish::authorize_package_candidate(
-//RS                     self.policy,
-//RS                     dep_name,
-//RS                     &selected.version,
-//RS                     dep_manifest.package.license.as_deref(),
-//RS                     &registry.name,
-//RS                 )
-//RS                 .map_err(|error| {
-//RS                     vec![Publish::package_policy_edge_diagnostic(
-//RS                         &dependency_owner(chain),
-//RS                         &dependency_edge(chain, dep_name, &selected.version),
-//RS                         &registry.name,
-//RS                         &error,
-//RS                     )]
-//RS                 })?;
-//RS                 if selected.content_hash.is_empty() || selected.fingerprint.is_empty() {
-//RS                     return Err(vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         "published registry metadata has no complete source identity",
-//RS                         "republish the package with its source hash and plan fingerprint",
-//RS                     )]);
-//RS                 }
-//RS                 let dep_version = selected.version.clone();
-//RS                 let content_hash = selected.content_hash.clone();
-//RS                 let publisher = (!selected.public_key.is_empty() && !selected.signature.is_empty())
-//RS                     .then(|| format!("ed25519:{}", selected.public_key));
-//RS                 if let Some((prev_ver, prev_chain)) = self.version_seen.get(dep_name).cloned() {
-//RS                     if prev_ver != dep_version {
-//RS                         return Err(vec![Lock::e1201(
-//RS                             dep_name,
-//RS                             &prev_ver,
-//RS                             &prev_chain,
-//RS                             &dep_version,
-//RS                             chain,
-//RS                         )]);
-//RS                     }
-//RS                 } else {
-//RS                     self.version_seen
-//RS                         .insert(dep_name.to_string(), (dep_version.clone(), chain.to_vec()));
-//RS                 }
-//RS 
-//RS                 let mut trans_specs = Vec::new();
-//RS                 for (trans_name, trans_spec) in &dep_manifest.dependencies {
-//RS                     if let DepSpec::Registry(requirement) = trans_spec {
-//RS                         if let Some(metadata) = registry_metadata.as_ref() {
-//RS                             if let Some(dependency) = registry_dependencies
-//RS                                 .iter()
-//RS                                 .find(|dependency| dependency.name == *trans_name)
-//RS                             {
-//RS                                 trans_specs.push((
-//RS                                     trans_name.clone(),
-//RS                                     DepSpec::Registry(
-//RS                                         dependency
-//RS                                             .requirements
-//RS                                             .first()
-//RS                                             .cloned()
-//RS                                             .unwrap_or_else(|| "*".to_string()),
-//RS                                     ),
-//RS                                 ));
-//RS                             } else if metadata.contains_dependency(trans_name) {
-//RS                                 // A dev/test-only edge is retained in metadata
-//RS                                 // but is outside a production install closure.
-//RS                             } else {
-//RS                                 trans_specs.push((
-//RS                                     trans_name.clone(),
-//RS                                     DepSpec::Registry(requirement.clone()),
-//RS                                 ));
-//RS                             }
-//RS                         } else {
-//RS                             trans_specs
-//RS                                 .push((trans_name.clone(), DepSpec::Registry(requirement.clone())));
-//RS                         }
-//RS                     } else {
-//RS                         trans_specs.push((trans_name.clone(), trans_spec.clone()));
-//RS                     }
-//RS                 }
-//RS                 for dependency in &registry_dependencies {
-//RS                     if !dep_manifest.dependencies.contains_key(&dependency.name) {
-//RS                         trans_specs.push((
-//RS                             dependency.name.clone(),
-//RS                             DepSpec::Registry(
-//RS                                 dependency
-//RS                                     .requirements
-//RS                                     .first()
-//RS                                     .cloned()
-//RS                                     .unwrap_or_else(|| "*".to_string()),
-//RS                             ),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS 
-//RS                 let mut trans_deps = Vec::new();
-//RS                 for (trans_name, trans_spec) in trans_specs {
-//RS                     let mut child_chain = chain.to_vec();
-//RS                     child_chain.push(trans_name.clone());
-//RS                     self.resolve_dep(&trans_name, &trans_spec, &artifact, &child_chain)?;
-//RS                     if !trans_deps.contains(&trans_name) {
-//RS                         trans_deps.push(trans_name);
-//RS                     }
-//RS                 }
-//RS                 let dep_fps: Vec<&str> = trans_deps
-//RS                     .iter()
-//RS                     .filter_map(|dep| self.resolved.get(dep).map(|pkg| pkg.fingerprint.as_str()))
-//RS                     .collect();
-//RS                 let hangar_references = trans_deps
-//RS                     .iter()
-//RS                     .filter_map(|dep| {
-//RS                         let pkg = self.resolved.get(dep)?;
-//RS                         if !matches!(&pkg.source, LockSource::Registry { .. }) {
-//RS                             return None;
-//RS                         }
-//RS                         jetpack::Envelope::try_output_hash_of(&pkg.source_dir.to_string_lossy())
-//RS                             .ok()
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&artifact);
-//RS                 let fp = Lock::compute_fingerprint(&content_hash, &dep_fps, &cap_digest);
-//RS                 let advisory_receipt = if reused_exact_lock {
-//RS                     None
-//RS                 } else {
-//RS                     self.advisory_policy
-//RS                         .as_ref()
-//RS                         .and_then(|result| result.as_ref().ok())
-//RS                         .and_then(Option::as_ref)
-//RS                         .map(|policy| &policy.receipt)
-//RS                 };
-//RS                 let store_path = ingest_registry_artifact(
-//RS                     &registry,
-//RS                     &selected,
-//RS                     &artifact,
-//RS                     &hangar_references,
-//RS                     advisory_receipt,
-//RS                     Some(&policy_receipt),
-//RS                     source_exception.as_ref(),
-//RS                 )
-//RS                 .map_err(|error| {
-//RS                     vec![registry_diagnostic(
-//RS                         dep_name,
-//RS                         &error,
-//RS                         "repair the canonical Jetpack Hangar or retry the verified registry ingest",
-//RS                     )]
-//RS                 })?;
-//RS                 verify_registry_hangar_entry(dep_name, &store_path, &content_hash)?;
-//RS                 let link_dir = self
-//RS                     .project_root
-//RS                     .join(".jet")
-//RS                     .join("build")
-//RS                     .join("deps")
-//RS                     .join(dep_name);
-//RS                 Store::copy_into_project(&store_path, &link_dir)
-//RS                     .map_err(|diagnostic| vec![diagnostic])?;
-//RS                 let mut provenance = self
-//RS                     .existing_provenance(dep_name, &dep_version, &content_hash)
-//RS                     .unwrap_or_default();
-//RS                 if let Some(publisher) = publisher {
-//RS                     provenance.publisher = Some(publisher);
-//RS                 }
-//RS                 let provenance = (provenance.transparency.is_some()
-//RS                     || provenance.publisher.is_some()
-//RS                     || provenance.build.is_some())
-//RS                 .then_some(provenance);
-//RS                 self.resolved.insert(
-//RS                     dep_name.to_string(),
-//RS                     ResolvedPkg {
-//RS                         version: dep_version,
-//RS                         source: LockSource::Registry {
-//RS                             registry: registry.name,
-//RS                             reference: format!("{}#{}", selected.name, selected.version),
-//RS                             output: store_path.to_string_lossy().into_owned(),
-//RS                             source_hash: content_hash.clone(),
-//RS                             repository: registry.url,
-//RS                             authority: "jet-registry-index".to_string(),
-//RS                             tier: selected.tier.label().to_string(),
-//RS                             gate_status: selected.gate_status.summary(),
-//RS                         },
-//RS                         locked: None,
-//RS                         fingerprint: fp,
-//RS                         content_hash: Some(content_hash),
-//RS                         deps: trans_deps,
-//RS                         source_dir: store_path,
-//RS                         provenance,
-//RS                         envelope: None,
-//RS                         receipt: None,
-//RS                     },
-//RS                 );
-//RS             }
-//RS 
-//RS             DepSpec::Foreign {
-//RS                 language,
-//RS                 reference,
-//RS             } => {
-//RS                 let Some(realization) = self.foreign.get(dep_name).cloned() else {
-//RS                     return Err(vec![foreign_dependency_diagnostic(
-//RS                         dep_name,
-//RS                         "the provider projection was not produced for this dependency",
-//RS                     )]);
-//RS                 };
-//RS                 if realization.language != *language || realization.reference != *reference {
-//RS                     return Err(vec![foreign_dependency_diagnostic(
-//RS                         dep_name,
-//RS                         "the provider projection identity disagrees with package.jet",
-//RS                     )]);
-//RS                 }
-//RS                 let dep_version = realization.entry.version.clone();
-//RS                 if let Some((previous, previous_chain)) = self.version_seen.get(dep_name).cloned() {
-//RS                     if previous != dep_version {
-//RS                         return Err(vec![Lock::e1201(
-//RS                             dep_name,
-//RS                             &previous,
-//RS                             &previous_chain,
-//RS                             &dep_version,
-//RS                             chain,
-//RS                         )]);
-//RS                     }
-//RS                 } else {
-//RS                     self.version_seen
-//RS                         .insert(dep_name.to_string(), (dep_version.clone(), chain.to_vec()));
-//RS                 }
-//RS                 self.resolved.insert(
-//RS                     dep_name.to_string(),
-//RS                     ResolvedPkg {
-//RS                         version: dep_version,
-//RS                         source: LockSource::Foreign {
-//RS                             language: *language,
-//RS                             reference: reference.clone(),
-//RS                             output: realization.entry.out.clone(),
-//RS                         },
-//RS                         locked: None,
-//RS                         fingerprint: realization.entry.envelope.output_hash.clone(),
-//RS                         content_hash: Some(realization.entry.envelope.output_hash.clone()),
-//RS                         deps: Vec::new(),
-//RS                         source_dir: PathBuf::from(&realization.entry.out),
-//RS                         provenance: None,
-//RS                         envelope: Some(Lock::LockEnvelope {
-//RS                             output_hash: realization.entry.envelope.output_hash.clone(),
-//RS                             platform: realization.entry.envelope.platform.clone(),
-//RS                             signature: realization.entry.envelope.signature.clone(),
-//RS                             provenance: realization.entry.envelope.provenance.clone(),
-//RS                             catalog_tier: String::new(),
-//RS                             catalog_trust: String::new(),
-//RS                         }),
-//RS                         receipt: (!realization.entry.receipt.is_empty())
-//RS                             .then(|| realization.entry.receipt.clone()),
-//RS                     },
-//RS                 );
-//RS             }
-//RS         }
-//RS 
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn load_dep_manifest(&self, dir: &Path, dep_name: &str) -> Result<Manifest, Vec<Diagnostic>> {
-//RS         load_dep_manifest(dir, dep_name)
-//RS     }
-//RS 
-//RS     fn load_registry_metadata(
-//RS         &self,
-//RS         artifact: &Path,
-//RS         dep_name: &str,
-//RS         version: &str,
-//RS     ) -> Result<Option<Publish::RegistryPackageMetadata>, Vec<Diagnostic>> {
-//RS         Publish::read_registry_package_metadata(artifact, dep_name, version).map_err(|error| {
-//RS             vec![registry_diagnostic(
-//RS                 dep_name,
-//RS                 &format!("registry dependency metadata is invalid: {error}"),
-//RS                 "republish the immutable artifact with a valid registry.json record",
-//RS             )]
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS fn registry_dependency_edges(
-//RS     manifest: &Manifest,
-//RS     metadata: Option<&Publish::RegistryPackageMetadata>,
-//RS     package: &str,
-//RS ) -> Result<Vec<Publish::RegistryDependency>, Vec<Diagnostic>> {
-//RS     if let Some(metadata) = metadata {
-//RS         for (name, spec) in &manifest.dependencies {
-//RS             if matches!(spec, DepSpec::Registry(_)) && !metadata.contains_dependency(name) {
-//RS                 return Err(vec![registry_diagnostic(
-//RS                     package,
-//RS                     &format!("registry.json omits declared dependency `{name}`"),
-//RS                     "publish registry.json with every registry dependency in package.jet",
-//RS                 )]);
-//RS             }
-//RS         }
-//RS         return Ok(metadata.active_dependencies());
-//RS     }
-//RS 
-//RS     Ok(manifest
-//RS         .dependencies
-//RS         .iter()
-//RS         .filter_map(|(name, spec)| match spec {
-//RS             DepSpec::Registry(requirement) => Some(Publish::RegistryDependency {
-//RS                 name: name.clone(),
-//RS                 requirements: vec![requirement.clone()],
-//RS                 roles: BTreeSet::from(["normal".to_string()]),
-//RS                 prefer: Vec::new(),
-//RS                 reject: BTreeSet::new(),
-//RS                 strict: false,
-//RS                 enabled_by_default: true,
-//RS             }),
-//RS             _ => None,
-//RS         })
-//RS         .collect())
-//RS }
-//RS 
-//RS fn load_dep_manifest(dir: &Path, dep_name: &str) -> Result<Manifest, Vec<Diagnostic>> {
-//RS     match crate::Manifest::load(dir) {
-//RS         None => Err(vec![Diagnostic::error(
-//RS             "E1206",
-//RS             format!(
-//RS                 "dependency `{}` has no `{}`",
-//RS                 dep_name,
-//RS                 crate::Syntax::PACKAGE_FILE
-//RS             ),
-//RS             format!(
-//RS                 "every Jet package must have a `{}` manifest",
-//RS                 crate::Syntax::PACKAGE_FILE
-//RS             ),
-//RS             format!(
-//RS                 "add a `{}` to `{}`",
-//RS                 crate::Syntax::PACKAGE_FILE,
-//RS                 dir.display()
-//RS             ),
-//RS             None,
-//RS         )]),
-//RS         Some(Err(d)) => Err(vec![d]),
-//RS         Some(Ok(m)) => Ok(m),
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Resolver<'a> {
-//RS     fn resolve_git_rev(
-//RS         &self,
-//RS         dep_name: &str,
-//RS         url: &str,
-//RS         selector: &GitSelector,
-//RS         transport: &ValidatedGitTransport,
-//RS     ) -> Result<String, Vec<Diagnostic>> {
-//RS         match selector {
-//RS             GitSelector::Rev(r) => validate_cached_revision(r)
-//RS                 .map(|_| r.clone())
-//RS                 .map_err(|reason| vec![git_revision_diagnostic(r, &reason)]),
-//RS             GitSelector::Tag(t) if t != "@latest" => {
-//RS                 // If we have an existing lock and not updating, use locked rev.
-//RS                 if !self.dependency_update_requested(dep_name) {
-//RS                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
-//RS                         return validate_cached_revision(&locked_rev)
-//RS                             .map(|_| locked_rev)
-//RS                             .map_err(|reason| {
-//RS                                 vec![git_revision_diagnostic("locked revision", &reason)]
-//RS                             });
-//RS                     }
-//RS                 }
-//RS                 // Resolve the tag to a specific commit via ls-remote.
-//RS                 git_resolve_ref(url, t, transport).map_err(|d| vec![d])
-//RS             }
-//RS             GitSelector::Branch(b) | GitSelector::Tag(b) => {
-//RS                 // Moving selector: always re-resolve if updating.
-//RS                 if !self.dependency_update_requested(dep_name) {
-//RS                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
-//RS                         return validate_cached_revision(&locked_rev)
-//RS                             .map(|_| locked_rev)
-//RS                             .map_err(|reason| {
-//RS                                 vec![git_revision_diagnostic("locked revision", &reason)]
-//RS                             });
-//RS                     }
-//RS                 }
-//RS                 git_resolve_ref(url, b, transport).map_err(|d| vec![d])
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn dependency_update_requested(&self, dep_name: &str) -> bool {
-//RS         self.opts.update && (self.opts.update_dep.is_none() || self.update_scope.contains(dep_name))
-//RS     }
-//RS 
-//RS     fn registry_update_requested(&self, dep_name: &str) -> bool {
-//RS         self.dependency_update_requested(dep_name)
-//RS     }
-//RS 
-//RS     fn load_advisory_policy(
-//RS         &mut self,
-//RS     ) -> Result<Option<&Publish::AdvisoryPolicy>, Vec<Diagnostic>> {
-//RS         if self.advisory_policy.is_none() {
-//RS             self.advisory_policy = Some(Publish::load_advisory_policy(self.project_root));
-//RS         }
-//RS         match self
-//RS             .advisory_policy
-//RS             .as_ref()
-//RS             .expect("advisory policy is loaded")
-//RS         {
-//RS             Ok(policy) => Ok(policy.as_ref()),
-//RS             Err(diagnostic) => Err(vec![diagnostic.clone()]),
-//RS         }
-//RS     }
-//RS 
-//RS     fn locked_registry_config(&self, dep_name: &str) -> Option<Publish::RegistryConfig> {
-//RS         let package = self.existing_lock?.packages.iter().find(|package| {
-//RS             package.name == dep_name && matches!(&package.source, LockSource::Registry { .. })
-//RS         })?;
-//RS         let LockSource::Registry {
-//RS             registry,
-//RS             repository,
-//RS             tier,
-//RS             ..
-//RS         } = &package.source
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let tier = Publish::RegistryTier::parse(tier).unwrap_or(Publish::RegistryTier::Core);
-//RS         Some(Publish::RegistryConfig {
-//RS             name: registry.clone(),
-//RS             url: repository.clone(),
-//RS             mirror: false,
-//RS             require_signed: tier == Publish::RegistryTier::Community,
-//RS             tier,
-//RS         })
-//RS     }
-//RS 
-//RS     fn find_locked_registry_version(&self, dep_name: &str) -> Option<String> {
-//RS         self.existing_lock?
-//RS             .packages
-//RS             .iter()
-//RS             .find(|package| {
-//RS                 package.name == dep_name && matches!(&package.source, LockSource::Registry { .. })
-//RS             })
-//RS             .map(|package| package.version.clone())
-//RS     }
-//RS 
-//RS     fn existing_provenance(
-//RS         &self,
-//RS         dep_name: &str,
-//RS         version: &str,
-//RS         content_hash: &str,
-//RS     ) -> Option<Lock::DependencyProvenance> {
-//RS         self.existing_lock?
-//RS             .packages
-//RS             .iter()
-//RS             .find(|package| {
-//RS                 package.name == dep_name
-//RS                     && package.version == version
-//RS                     && package.provenance_report().integrity.value == content_hash
-//RS             })
-//RS             .and_then(|package| package.provenance.clone())
-//RS     }
-//RS 
-//RS     fn find_locked_rev(&self, dep_name: &str) -> Option<String> {
-//RS         let lock = self.existing_lock?;
-//RS         lock.packages
-//RS             .iter()
-//RS             .find(|p| p.name == dep_name)
-//RS             .and_then(|p| p.locked.as_ref())
-//RS             .map(|l| l.rev.clone())
-//RS     }
-//RS }
-//RS 
-//RS fn compute_update_scope(existing_lock: Option<&LockFile>, opts: &FetchOptions) -> BTreeSet<String> {
-//RS     if !opts.update {
-//RS         return BTreeSet::new();
-//RS     }
-//RS     match opts.update_dep.as_deref() {
-//RS         None => existing_lock
-//RS             .into_iter()
-//RS             .flat_map(|lock| lock.packages.iter().map(|package| package.name.clone()))
-//RS             .collect(),
-//RS         Some(target) => {
-//RS             let mut scope = existing_lock
-//RS                 .map(|lock| lock_closure(lock, target))
-//RS                 .unwrap_or_default();
-//RS             scope.insert(target.to_string());
-//RS             scope
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lock_closure(lock: &LockFile, target: &str) -> BTreeSet<String> {
-//RS     let mut scope = BTreeSet::new();
-//RS     let mut pending = vec![target.to_string()];
-//RS     while let Some(name) = pending.pop() {
-//RS         if !scope.insert(name.clone()) {
-//RS             continue;
-//RS         }
-//RS         if let Some(package) = lock.packages.iter().find(|package| package.name == name) {
-//RS             pending.extend(package.dependencies.iter().cloned());
-//RS         }
-//RS     }
-//RS     scope
-//RS }
-//RS 
-//RS fn registry_update_rationales(
-//RS     project_root: &Path,
-//RS     lock: &LockFile,
-//RS     manifest: &Manifest,
-//RS     opts: &FetchOptions,
-//RS ) -> Result<jetpack::SemanticLock::SemanticLockFile, Diagnostic> {
-//RS     let mut packages = lock
-//RS         .packages
-//RS         .iter()
-//RS         .filter(|package| matches!(&package.source, LockSource::Registry { .. }))
-//RS         .collect::<Vec<_>>();
-//RS     let mut semantic = jetpack::SemanticLock::load(project_root).unwrap_or_default();
-//RS     semantic.source_maps = manifest
-//RS         .policy
-//RS         .source_maps
-//RS         .iter()
-//RS         .map(|(pattern, sources)| jetpack::SemanticLock::SourceMapEntry {
-//RS             pattern: pattern.clone(),
-//RS             sources: sources.clone(),
-//RS         })
-//RS         .collect();
-//RS     if packages.is_empty() {
-//RS         return Ok(semantic);
-//RS     }
-//RS     if let Some(target) = opts.update_dep.as_deref() {
-//RS         let scope = lock_closure(lock, target);
-//RS         packages.retain(|package| scope.contains(&package.name));
-//RS     }
-//RS     if packages.is_empty() {
-//RS         return Ok(semantic);
-//RS     }
-//RS 
-//RS     for package in packages {
-//RS         let LockSource::Registry {
-//RS             registry,
-//RS             reference,
-//RS             output,
-//RS             source_hash,
-//RS             repository,
-//RS             ..
-//RS         } = &package.source
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let dep_manifest = load_dep_manifest(Path::new(output), &package.name)
-//RS             .map_err(|mut diagnostics| {
-//RS                 diagnostics.pop().unwrap_or_else(|| {
-//RS                     Diagnostic::error(
-//RS                         "E1207",
-//RS                         format!(
-//RS                             "registry dependency `{}` has no readable installed manifest",
-//RS                             package.name
-//RS                         ),
-//RS                         "registry package policy evidence must remain explainable after ingest"
-//RS                             .to_string(),
-//RS                         "repair the canonical Hangar object or rerun `jet fetch` from the trusted registry"
-//RS                             .to_string(),
-//RS                         None,
-//RS                     )
-//RS                 })
-//RS             })?;
-//RS         let policy_receipt = Publish::authorize_package_candidate(
-//RS             &manifest.policy,
-//RS             &package.name,
-//RS             &package.version,
-//RS             dep_manifest.package.license.as_deref(),
-//RS             registry,
-//RS         )
-//RS         .map_err(|error| {
-//RS             let edge = format!(
-//RS                 "{} -> {}#{}",
-//RS                 manifest.package.name, package.name, package.version
-//RS             );
-//RS             Publish::package_policy_edge_diagnostic(&manifest.package.name, &edge, registry, &error)
-//RS         })?;
-//RS         let registry_metadata = Publish::read_registry_package_metadata(
-//RS             Path::new(output),
-//RS             &package.name,
-//RS             &package.version,
-//RS         )
-//RS         .map_err(|error| {
-//RS             registry_diagnostic(
-//RS                 &package.name,
-//RS                 &format!("registry dependency metadata is invalid: {error}"),
-//RS                 "repair the canonical Hangar object or republish registry.json",
-//RS             )
-//RS         })?;
-//RS         let key = format!("registry:{registry}:{}", package.name);
-//RS         let mut record = jetpack::SemanticLock::SemanticRecord::new(
-//RS             jetpack::SemanticLock::LockIdentity {
-//RS                 kind: jetpack::SemanticLock::LockRecordKind::Package,
-//RS                 key,
-//RS                 exact: reference.clone(),
-//RS                 hash: source_hash.clone(),
-//RS                 platform: jetpack::Envelope::host_platform(),
-//RS             },
-//RS             jetpack::SemanticLock::LockRationale {
-//RS                 owner_package: manifest.package.name.clone(),
-//RS                 reason: format!(
-//RS                     "selected `{}` with {} resolution; registry policy record; package-policy={}{}",
-//RS                     package.version,
-//RS                     opts.resolution.label(),
-//RS                     policy_receipt.summary(),
-//RS                     Publish::active_source_exception(
-//RS                         &manifest.policy.exceptions,
-//RS                         &package.name,
-//RS                         &package.version,
-//RS                     )
-//RS                     .map(|exception| {
-//RS                         format!("; source-policy-exception={}", exception.summary())
-//RS                     })
-//RS                     .unwrap_or_default()
-//RS                 ),
-//RS                 source_ref: format!(
-//RS                     "registry:{registry};repository={}",
-//RS                     Publish::redact_registry_url(repository)
-//RS                 ),
-//RS                 provider: "jet-registry".to_string(),
-//RS                 channel_input: opts.resolution.label().to_string(),
-//RS                 exact_output: output.clone(),
-//RS                 policy_fingerprint: Publish::policy_fingerprint(&manifest.policy),
-//RS                 recipe_id: String::new(),
-//RS                 adapter_id: "registry.pubgrub".to_string(),
-//RS                 signature: String::new(),
-//RS                 cache_provenance: "verified-registry".to_string(),
-//RS                 update_command: opts
-//RS                     .update_dep
-//RS                     .as_deref()
-//RS                     .map(|name| format!("jet update {name}"))
-//RS                     .unwrap_or_else(|| "jet update".to_string()),
-//RS             },
-//RS         );
-//RS         if let Some(metadata) = registry_metadata {
-//RS             record.future_fields.insert(
-//RS                 "dependency-metadata".to_string(),
-//RS                 metadata.canonical().to_string(),
-//RS             );
-//RS         }
-//RS         jetpack::SemanticLock::selective_update(&mut semantic, record);
-//RS     }
-//RS     jetpack::SemanticLock::revalidate(&semantic).map_err(|issues| {
-//RS         Diagnostic::error(
-//RS             "E1206",
-//RS             "couldn't record the registry resolution rationale".to_string(),
-//RS             "the package lock was resolved, but its update explanation failed semantic lock validation".to_string(),
-//RS             issues
-//RS                 .iter()
-//RS                 .map(jetpack::SemanticLock::ValidationIssue::message)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("; "),
-//RS             None,
-//RS         )
-//RS     })?;
-//RS     Ok(semantic)
-//RS }
-//RS 
-//RS fn semantic_policy_needs_update(project_root: &Path, manifest: &Manifest) -> bool {
-//RS     let mut expected_maps = manifest
-//RS         .policy
-//RS         .source_maps
-//RS         .iter()
-//RS         .map(|(pattern, sources)| jetpack::SemanticLock::SourceMapEntry {
-//RS             pattern: pattern.clone(),
-//RS             sources: sources.clone(),
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     expected_maps.sort_by(|left, right| left.pattern.cmp(&right.pattern));
-//RS     let semantic = jetpack::SemanticLock::load(project_root).unwrap_or_default();
-//RS     if semantic.source_maps != expected_maps {
-//RS         return true;
-//RS     }
-//RS     let fingerprint = Publish::policy_fingerprint(&manifest.policy);
-//RS     semantic.records.iter().any(|record| {
-//RS         record.identity.kind == jetpack::SemanticLock::LockRecordKind::Package
-//RS             && record.identity.key.starts_with("registry:")
-//RS             && record
-//RS                 .rationales
-//RS                 .first()
-//RS                 .map(|rationale| rationale.policy_fingerprint.as_str())
-//RS                 != Some(fingerprint.as_str())
-//RS     })
-//RS }
-//RS 
-//RS fn dependency_owner(chain: &[String]) -> String {
-//RS     if chain.len() > 1 {
-//RS         chain[..chain.len() - 1].join(" -> ")
-//RS     } else {
-//RS         "package root".to_string()
-//RS     }
-//RS }
-//RS 
-//RS fn dependency_edge(chain: &[String], package: &str, version: &str) -> String {
-//RS     format!("{} -> {package}#{version}", dependency_owner(chain))
-//RS }
-//RS 
-//RS fn contextualize_dependency_diagnostic(
-//RS     mut diagnostic: Diagnostic,
-//RS     chain: &[String],
-//RS     package: &str,
-//RS     version: &str,
-//RS ) -> Diagnostic {
-//RS     let edge = dependency_edge(chain, package, version);
-//RS     diagnostic.what = format!("dependency edge `{edge}` was rejected: {}", diagnostic.what);
-//RS     diagnostic.why = format!(
-//RS         "package `{}` owns this source decision; {}",
-//RS         dependency_owner(chain),
-//RS         diagnostic.why
-//RS     );
-//RS     diagnostic
-//RS }
-//RS 
-//RS fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1207",
-//RS         format!("registry dependency `{name}` cannot be resolved: {what}"),
-//RS         "registry package identity is source-backed and must be verified before it enters the lock"
-//RS             .to_string(),
-//RS         fix.to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-// END-PORT-PENDING 0813 Source/Fetch.rs:1-1797
+// Rust: Source/Fetch.rs:1
+// Package fetch operations (M12.1, D-PM4). Network access is via Git subprocesses.
+// Path and Git sources retain the source store; verified registry sources use Hangar.
+use jet.Diagnostics.Diagnostic
+use jet.Lock
+use jet.Lock.[LockFile, LockSource, LockedPackage, LockedRevision]
+use jet.Manifest
+use jet.Manifest.[check_toolchain, DepSpec, GitSelector]
+use jet.Package
+use jet.Publish
+use jet.Publish.SemVer.SemVer
+use jet.Publish.[ResolveMode, SolverCandidate, VersionConstraint, VersionReq]
+use jet.Store
+use jet.Syntax
+use jet_foundation.Names.normalize_path
+use std.collections.BTreeSet
+use std.fs
+// GATE #4494: canonical subprocess, network-address and descriptor primitives.
+use std.process.Command
+use std.net.[IpAddr, ToSocketAddrs]
+use std.fs.File
+use std.os.fd.AsRawFd
 
+// Rust: Source/Fetch.rs:44
+pub struct FetchOptions {
+    pub locked: Bool
+    pub update: Bool
+    pub update_dep: String?
+    pub resolution: ResolveMode
+}
+// Rust: Source/Fetch.rs:57
+pub fn fetch(project_root: OSPath, manifest: Manifest.Manifest, existing_lock: LockFile?, opts: FetchOptions) -> (LockFile, [String:OSPath]) [Diagnostic]! {
+    manifest_path :: Manifest.manifest_path_in(project_root).display().to_string()
+    check_toolchain(manifest, manifest_path).map_err(d -> [d])?
+    if opts.locked {
+        lock :: existing_lock.ok_or_else(() -> [Lock.e1202(project_root.join(Syntax.UNIFIED_LOCK_FILE).display().to_string())])?
+        Lock.verify_lock_matches_manifest(lock, manifest, project_root.join(Syntax.UNIFIED_LOCK_FILE).display().to_string()).map_err(d -> [d])?
+        Lock.verify_all_manifest_deps_locked(manifest, lock).map_err(error -> [error.diagnostic()])?
+        lock.validate_completeness().map_err(error -> [error.diagnostic()])?
+        enforce_provenance_policy(lock, manifest).map_err(d -> [d])?
+        dep_dirs :: build_dep_dirs_from_lock(lock, project_root, manifest)?
+        return Ok((lock.clone(), dep_dirs))
+    }
+    resolver := Resolver.new(project_root, existing_lock, opts, manifest.policy)
+    (new_lock, dep_dirs) := &resolver.resolve_manifest(manifest)?
+    enforce_provenance_policy(new_lock, manifest).map_err(d -> [d])?
+    Lock.ensure_build_stamp(project_root, &new_lock)
+    semantic_update :: if opts.update || manifest.policy.licenses.is_some() || !manifest.policy.exceptions.is_empty()
+        || new_lock.packages.iter().any(package -> if package.source == { .Registry{..} -> true, else -> false })
+        || semantic_policy_needs_update(project_root, manifest) {
+        Val(registry_update_rationales(project_root, new_lock, manifest, opts).map_err(d -> [d])?)
+    } else { None }
+    lock_str :: Lock.write(new_lock)
+    lock_bytes :: if semantic_update == {
+        .Val(semantic) -> {
+            if !semantic.records.is_empty() || !semantic.inputs.is_empty() || !semantic.source_maps.is_empty() {
+                trimmed := lock_str.trim_end() // #4303
+                "{trimmed}\n\n{jetpack.SemanticLock.write(semantic)}".into_bytes()
+            } else { lock_str.into_bytes() }
+        }
+        None -> lock_str.into_bytes()
+    }
+    Lock.write_lock_atomically(project_root, lock_bytes).map_err(e -> [
+        Diagnostic.error("E1206", "couldn't write {Syntax.UNIFIED_LOCK_FILE}",
+            "the lock file records exact package versions", "check write permissions: {e}", None)
+    ])?
+    Ok((new_lock, dep_dirs))
+}
+// Rust: Source/Fetch.rs:164
+fn enforce_provenance_policy(lock: LockFile, manifest: Manifest.Manifest) -> Unit Diagnostic! {
+    requirement :: manifest.authority.trust.and_then(trust -> trust.require).unwrap_or(Package.ProvenanceRequirement.None)
+    Lock.enforce_provenance_requirement(lock, requirement).map_err(error ->
+        Diagnostic.error("E1207", error,
+            "authority.trust.require is an explicit provenance floor; Jet will not silently downgrade it",
+            "record the required transparency or build evidence, or set `authority: { trust: { require: none } }`", None))
+}
+// Rust: Source/Fetch.rs:182
+fn foreign_provider_diagnostic(error: jetpack.Provider.ProviderError) -> Diagnostic {
+    Diagnostic.error(error.code().unwrap_or("E1256"), "couldn't realize the foreign package provider",
+        "the verified provider projection failed: {error:?}",
+        "provide a pinned, hash-verified provider artifact with its generated binding, then run `jet fetch` again", None)
+}
+// Rust: Source/Fetch.rs:192
+fn foreign_dependency_diagnostic(dep_name: String, detail: String) -> Diagnostic {
+    Diagnostic.error("E1256", "foreign dependency `{dep_name}` has no valid provider projection", detail,
+        "run `jet fetch` with the pinned provider artifact available; Jet will not invent or bypass a binding", None)
+}
+// Rust: Source/Fetch.rs:206
+struct Resolver {
+    project_root: OSPath
+    existing_lock: LockFile?
+    opts: FetchOptions
+    policy: Package.PackagePolicy
+    advisory_policy: Result[Publish.AdvisoryPolicy?, Diagnostic]?
+    resolved: [String:ResolvedPkg]
+    version_seen: [String:(String, [String])]
+    registry_plan: [String:Publish.IndexEntry]
+    update_scope: BTreeSet[String]
+    foreign: [String:jetpack.Foreign.Realization]
+}
+// Rust: Source/Fetch.rs:224
+struct ResolvedPkg {
+    version: String
+    source: Lock.LockSource
+    locked: LockedRevision?
+    fingerprint: String
+    content_hash: String?
+    deps: [String]
+    source_dir: OSPath
+    provenance: Lock.DependencyProvenance?
+    envelope: Lock.LockEnvelope?
+    receipt: String?
+}
+impl Resolver {
+    // Rust: Source/Fetch.rs:238
+    fn new(project_root: OSPath, existing_lock: LockFile?, opts: FetchOptions, policy: Package.PackagePolicy) -> Resolver {
+        Resolver{project_root: project_root, existing_lock: existing_lock, opts: opts, policy: policy,
+            advisory_policy: None, resolved: [:], version_seen: [:], registry_plan: [:],
+            update_scope: compute_update_scope(existing_lock, opts), foreign: [:]}
+    }
+    // Rust: Source/Fetch.rs:258
+    fn resolve_manifest(&self, manifest: Manifest.Manifest) -> (LockFile, [String:OSPath]) [Diagnostic]! {
+        &self.realize_foreign_dependencies(manifest)?
+        self.registry_plan = self.prepare_registry_plan(manifest)?
+        root_deps :: manifest.dependencies.keys().sorted()
+        loop dep_name in root_deps {
+            chain :: ["{manifest.package.name} (root)", dep_name.clone()]
+            &self.resolve_dep(dep_name, manifest.dependencies[dep_name], self.project_root, chain)?
+        }
+        packages := [LockedPackage]{}
+        &packages.push(LockedPackage{
+            name: manifest.package.name.clone(), version: manifest.package.version.clone(), source: .Root,
+            nix_closure: None, locked: None, fingerprint: "", content_hash: None,
+            dependencies: root_deps.clone(), layer: Lock.layer_from_manifest(manifest), inferred_layer: None,
+            effects: [], effect_grants: [], required_effects: [], granted_effects: [], denied_effects: [],
+            effect_authority: None, envelope: None, receipt: None, provenance: None
+        })
+        loop name in self.resolved.keys().sorted() {
+            pkg :: self.resolved[name]
+            &packages.push(LockedPackage{
+                name: name.clone(), version: pkg.version.clone(), nix_closure: None,
+                source: pkg.source.clone(), locked: pkg.locked.clone(), fingerprint: pkg.fingerprint.clone(),
+                content_hash: pkg.content_hash.clone(), dependencies: pkg.deps.clone(), layer: None,
+                inferred_layer: None, effects: [], effect_grants: [], required_effects: [],
+                granted_effects: [], denied_effects: [], effect_authority: None,
+                provenance: pkg.provenance.clone(), envelope: pkg.envelope.clone(), receipt: pkg.receipt.clone()
+            })
+        }
+        new_lock := LockFile{
+            version: Lock.LOCK_VERSION, packages: ^packages, root_dependencies: ^root_deps,
+            authority: if manifest.authority != Default.default() { Val(manifest.authority.clone()) } else { None },
+            workspace_members: self.existing_lock.map(lock -> lock.workspace_members.clone()).unwrap_or_default(),
+            workspace_source_digest: self.existing_lock.and_then(lock -> lock.workspace_source_digest.clone()),
+            workspace_overlay_policy: self.existing_lock.map(lock -> lock.workspace_overlay_policy.clone()).unwrap_or_default(),
+            comptime_inputs: self.existing_lock.map(lock -> lock.comptime_inputs.clone()).unwrap_or_default(),
+            toolchains: self.existing_lock.map(lock -> lock.toolchains.clone()).unwrap_or_default(),
+            browsers: self.existing_lock.map(lock -> lock.browsers.clone()).unwrap_or_default(),
+            source_channels: self.existing_lock.map(lock -> lock.source_channels.clone()).unwrap_or_default(),
+            build_stamp: self.existing_lock.and_then(lock -> lock.build_stamp.clone()),
+            build_contributions: self.existing_lock.map(lock -> lock.build_contributions.clone()).unwrap_or_default()
+        }
+        self.preserve_unrelated_records(&new_lock)
+        dep_dirs := [String:OSPath]{}
+        loop name in self.resolved.keys().sorted() -> &dep_dirs.insert(name.clone(), self.resolved[name].source_dir.clone())
+        Ok((new_lock, dep_dirs))
+    }
+    // Rust: Source/Fetch.rs:379
+    fn realize_foreign_dependencies(&self, manifest: Manifest.Manifest) -> Unit [Diagnostic]! {
+        if !manifest.dependencies.values().any(spec -> if spec == { .Foreign{..} -> true, else -> false }) -> return Ok(())
+        roots :: jetpack.Store.resolve()
+        store_dir :: roots.hangar_dir()
+        fixtures :: jetpack.Provider.fixtures_from_env(None)
+        context :: jetpack.Provider.Ctx{
+            fixtures: fixtures, store_dir: store_dir, offline: false, project_dir: Val(self.project_root),
+            nix_index: None, nix_roots: None, allow_local_nix_catalog: false
+        }
+        realized :: jetpack.Foreign.realize_manifest_dependencies(roots, self.project_root, manifest, context)
+            .map_err(error -> [foreign_provider_diagnostic(error)])?
+        self.foreign = realized.into_iter().map(item -> (item.name.clone(), item)).collect()
+        Ok(())
+    }
+    // Rust: Source/Fetch.rs:414
+    fn prepare_registry_plan(self: Resolver, manifest: Manifest.Manifest) -> [String:Publish.IndexEntry] [Diagnostic]! {
+        roots := [VersionConstraint]{}
+        direct := BTreeSet[String].new()
+        pending := BTreeSet[String].new()
+        owners := [String:BTreeSet[String]]{}
+        loop name in manifest.dependencies.keys().sorted() {
+            if manifest.dependencies[name] == .Registry(requirement) {
+                req :: VersionReq.parse(requirement).ok_or_else(() -> [registry_diagnostic(name,
+                    "invalid version requirement `{requirement}`", "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`")])?
+                &roots.push(VersionConstraint{package: name.clone(), req: req, from: "{manifest.package.name} (root)"})
+                &direct.insert(name.clone())
+                &pending.insert(name.clone())
+                &owners.entry(name.clone()).or_default().insert(manifest.package.name.clone())
+            }
+        }
+        if roots.is_empty() -> return Ok([:])
+        visited := BTreeSet[String].new()
+        candidate_map := [String:[SolverCandidate]]{}
+        // GATE #4499: composite tuple keys retain exact equality and hashing.
+        entry_map := [(String, String):Publish.IndexEntry]{}
+        loop {
+            name :: &pending.pop_first() ?? break
+            if !&visited.insert(name.clone()) -> continue
+            update_requested :: self.registry_update_requested(name)
+            registry :: if update_requested { Publish.resolve_publish_registry() }
+                else { self.locked_registry_config(name).unwrap_or_else(() -> Publish.resolve_publish_registry()) }
+            (all, _warnings) :: Publish.resolve_and_verify_all(registry, name)
+                .map_err(diagnostic -> [registry_diagnostic(name, diagnostic.what, diagnostic.fix)])?
+            locked_version :: if !update_requested { self.find_locked_registry_version(name) } else { None }
+            solver_candidates := [SolverCandidate]{}
+            loop entry in all {
+                if entry.yanked && locked_version != Val(entry.version) -> continue
+                version :: SemVer.parse(entry.version).ok_or_else(() -> [registry_diagnostic(name,
+                    "registry entry has invalid SemVer `{entry.version}`", "publish a new immutable version with a valid SemVer identity")])?
+                repo :: Publish.index_repo_path(registry)
+                artifact_snapshot :: Publish.snapshot_verified_artifact(repo, entry).map_err(error -> [
+                    registry_diagnostic(name, "published artifact is unavailable or corrupt: {error}",
+                        "refresh the registry mirror or publish the immutable source artifact")])?
+                artifact :: artifact_snapshot.path()
+                dep_manifest :: self.load_dep_manifest(artifact, name)?
+                if dep_manifest.package.name != name || dep_manifest.package.version != entry.version {
+                    return Err([registry_diagnostic(name, "published source metadata disagrees with its registry index entry",
+                        "republish a new immutable version with matching payload identity")])
+                }
+                registry_metadata :: self.load_registry_metadata(artifact, name, entry.version)?
+                registry_dependencies :: registry_dependency_edges(dep_manifest, registry_metadata, name)?
+                Publish.authorize_package_candidate(self.policy, name, entry.version, dep_manifest.package.license, registry.name)
+                    .map_err(error -> {
+                        owner :: owners.get(name).map(values -> values.iter().collect().join(" | ")).unwrap_or_else(() -> manifest.package.name.clone())
+                        edge :: "{owner} -> {name}#{entry.version}"
+                        [Publish.package_policy_edge_diagnostic(owner, edge, registry.name, error)]
+                    })?
+                dependencies := [VersionConstraint]{}
+                rejected := [String:BTreeSet[SemVer]]{}
+                preferred := [String:[VersionReq]]{}
+                strict := BTreeSet[String].new()
+                loop dependency in registry_dependencies {
+                    loop requirement in dependency.requirements {
+                        req :: VersionReq.parse(requirement).ok_or_else(() -> [registry_diagnostic(dependency.name,
+                            "invalid version requirement `{requirement}` in {name} {entry.version}",
+                            "publish a package with a valid SemVer dependency requirement")])?
+                        roles :: dependency.roles.iter().collect().join(",")
+                        &dependencies.push(VersionConstraint{package: dependency.name.clone(), req: req, from: "{name} {entry.version} ({roles})"})
+                    }
+                    loop requirement in dependency.prefer {
+                        req :: VersionReq.parse(requirement).ok_or_else(() -> [registry_diagnostic(dependency.name,
+                            "registry dependency has an invalid prefer constraint", "publish a valid SemVer requirement in registry.json")])?
+                        &preferred.entry(dependency.name.clone()).or_insert_with(() -> []).push(req)
+                    }
+                    rejected_versions := BTreeSet[SemVer].new()
+                    loop version_text in dependency.reject {
+                        version :: SemVer.parse(version_text).ok_or_else(() -> [registry_diagnostic(dependency.name,
+                            "registry dependency has an invalid reject version", "publish exact SemVer reject values in registry.json")])?
+                        &rejected_versions.insert(version)
+                    }
+                    if !rejected_versions.is_empty() -> &rejected.entry(dependency.name.clone()).or_insert_with(() -> BTreeSet[SemVer].new()).extend(^rejected_versions)
+                    if dependency.strict -> &strict.insert(dependency.name.clone())
+                    &owners.entry(dependency.name.clone()).or_default().insert("{name}#{entry.version}")
+                    &pending.insert(dependency.name)
+                }
+                &entry_map.insert((name.clone(), entry.version.clone()), entry)
+                &solver_candidates.push(SolverCandidate{version: version, dependencies: ^dependencies,
+                    rejected: ^rejected, preferred: ^preferred, strict: ^strict})
+            }
+            &candidate_map.insert(name, solver_candidates)
+        }
+        locked := [String:String]{}
+        if self.existing_lock == .Val(lock) {
+            loop package in lock.packages {
+                if package.source == .Registry{..} -> &locked.insert(package.name.clone(), package.version.clone())
+            }
+        }
+        selected :: Publish.solve_registry(roots, candidate_map, locked, self.update_scope, self.opts.resolution, direct).map_err(d -> [d])?
+        plan := [String:Publish.IndexEntry]{}
+        loop name in selected.keys().sorted() {
+            version :: selected[name]
+            entry :: entry_map.iter().find(pair -> pair.0.0 == name
+                && SemVer.parse(pair.1.version).is_some_and(candidate_version -> candidate_version == version))
+                .map(pair -> pair.1.clone()).ok_or_else(() -> [registry_diagnostic(name,
+                    "resolver selected a registry candidate with no immutable index entry", "refresh the registry checkpoint and retry resolution")])?
+            &plan.insert(name, entry)
+        }
+        Ok(plan)
+    }
+    // Rust: Source/Fetch.rs:649
+    fn preserve_unrelated_records(self: Resolver, lock: &LockFile) -> {
+        target :: self.opts.update_dep ?? return
+        previous :: self.existing_lock ?? return
+        related := lock_closure(previous, target)
+        &related.extend(lock_closure(lock, target))
+        loop package in &lock.packages {
+            if related.contains(package.name) -> continue
+            if previous.packages.iter().find(candidate -> candidate.name == package.name) == .Val(previous_package) {
+                package = previous_package.clone()
+            }
+        }
+    }
+    // Rust: Source/Fetch.rs:672
+    fn resolve_dep(&self, dep_name: String, spec: DepSpec, parent_dir: OSPath, chain: [String]) -> Unit [Diagnostic]! {
+        if self.resolved.contains_key(dep_name) {
+            existing_version :: self.resolved[dep_name].version
+            if self.version_seen.get(dep_name) == .Val((prev_version, prev_chain)) {
+                if prev_version != existing_version -> return Err([Lock.e1201(dep_name, prev_version, prev_chain, existing_version, chain)])
+            }
+            return Ok(())
+        }
+        if spec == {
+            .Path{path} -> {
+                abs_path :: if OSPath.from(path).is_absolute() { OSPath.from(path) } else { normalize_path(parent_dir.join(path)) }
+                if parent_dir != self.project_root {
+                    lexical_escape :: OSPath.from(path).is_absolute() || !abs_path.starts_with(parent_dir)
+                    canonical_escape :: fs.canonicalize(parent_dir).and_then(parent_root ->
+                        fs.canonicalize(abs_path).map(resolved -> !resolved.starts_with(parent_root))).unwrap_or(true)
+                    if lexical_escape || canonical_escape -> return Err([path_dependency_escape_diagnostic(dep_name, path, parent_dir)])
+                }
+                snapshot :: Store.snapshot_tree(abs_path).map_err(d -> [d])?
+                source :: snapshot.path()
+                dep_manifest :: self.load_dep_manifest(source, dep_name)?
+                dep_version :: dep_manifest.package.version.clone()
+                dep_name_in_manifest :: dep_manifest.package.name.clone()
+                if self.version_seen.get(dep_name_in_manifest) == {
+                    .Val((prev_ver, prev_chain)) -> {
+                        if prev_ver != dep_version -> return Err([Lock.e1201(dep_name_in_manifest, prev_ver, prev_chain, dep_version, chain)])
+                    }
+                    None -> &self.version_seen.insert(dep_name_in_manifest.clone(), (dep_version.clone(), chain.clone()))
+                }
+                th :: snapshot.content_hash().to_string()
+                trans_deps := [String]{}
+                loop trans_name in dep_manifest.dependencies.keys().sorted() {
+                    child_chain := chain.clone()
+                    &child_chain.push(trans_name.clone())
+                    &self.resolve_dep(trans_name, dep_manifest.dependencies[trans_name], source, child_chain)?
+                    &trans_deps.push(trans_name.clone())
+                }
+                dep_fps :: trans_deps.iter().filter_map(d -> self.resolved.get(d).map(r -> r.fingerprint)).collect()
+                cap_digest :: Publish.ApiFreeze.project_capability_digest(source)
+                fp :: Lock.compute_fingerprint(th, dep_fps, cap_digest)
+                (store_path, content_hash) :: Store.ensure_path_dep(dep_name, dep_version, fp, source).map_err(d -> [d])?
+                Store.verify_entry(dep_name, store_path, th).map_err(d -> [d])?
+                link_dir :: self.project_root.join(".jet").join("build").join("deps").join(dep_name)
+                Store.link_into_project(store_path, link_dir).map_err(d -> [d])?
+                provenance :: self.existing_provenance(dep_name, dep_version, content_hash)
+                &self.resolved.insert(dep_name, ResolvedPkg{
+                    version: dep_version, source: .Path(path.clone()), locked: None, fingerprint: fp,
+                    content_hash: Val(content_hash), deps: ^trans_deps, source_dir: store_path,
+                    provenance: provenance, envelope: None, receipt: None
+                })
+            }
+            .Git{url, selector} -> {
+                transport :: validate_git_transport_url(url, self.project_root).map_err(reason -> [git_transport_diagnostic(url, reason)])?
+                if !git_available() -> return Err([Lock.e1203()])
+                rev_to_fetch :: self.resolve_git_rev(dep_name, url, selector, transport)?
+                clone_dir :: git_cache_dir(url, rev_to_fetch).map_err(d -> [d])?
+                // GATE #4494/#4409: retained no-follow authority, exact NotFound classification.
+                snapshot :: if Store.open_directory_authority(clone_dir) == {
+                    .Ok(cache) -> Store.snapshot_directory_authority(cache).map_err(d -> [d])?
+                    .Err(error) -> {
+                        if error.kind() == IOErrorKind.NotFound { git_clone(url, rev_to_fetch, clone_dir, transport)? }
+                        else {
+                            return Err([Diagnostic.error("E1206", "couldn't open git cache `{clone_dir.display()}`: {error}",
+                                "the git cache must be held through a no-follow directory authority",
+                                "remove the cache entry or run `jet fetch` again", None)])
+                        }
+                    }
+                }
+                source :: snapshot.path()
+                dep_manifest :: self.load_dep_manifest(source, dep_name)?
+                dep_version :: dep_manifest.package.version.clone()
+                // Use the source/store tree hash, not Git's HEAD^{tree} hash space.
+                git_tree_hash :: snapshot.content_hash().to_string()
+                dep_name_in_manifest :: dep_manifest.package.name.clone()
+                if self.version_seen.get(dep_name_in_manifest) == {
+                    .Val((prev_ver, prev_chain)) -> {
+                        if prev_ver != dep_version -> return Err([Lock.e1201(dep_name_in_manifest, prev_ver, prev_chain, dep_version, chain)])
+                    }
+                    None -> &self.version_seen.insert(dep_name_in_manifest.clone(), (dep_version.clone(), chain.clone()))
+                }
+                trans_deps := [String]{}
+                loop trans_name in dep_manifest.dependencies.keys().sorted() {
+                    child_chain := chain.clone()
+                    &child_chain.push(trans_name.clone())
+                    &self.resolve_dep(trans_name, dep_manifest.dependencies[trans_name], source, child_chain)?
+                    &trans_deps.push(trans_name.clone())
+                }
+                dep_fps :: trans_deps.iter().filter_map(d -> self.resolved.get(d).map(r -> r.fingerprint)).collect()
+                cap_digest :: Publish.ApiFreeze.project_capability_digest(source)
+                fp :: Lock.compute_fingerprint(git_tree_hash, dep_fps, cap_digest)
+                (store_path, _content_hash) :: Store.ensure_git_dep(dep_name, dep_version, fp, source).map_err(d -> [d])?
+                Store.verify_entry(dep_name, store_path, git_tree_hash).map_err(d -> [d])?
+                link_dir :: self.project_root.join(".jet").join("build").join("deps").join(dep_name)
+                Store.link_into_project(store_path, link_dir).map_err(d -> [d])?
+                locked :: LockedRevision{rev: rev_to_fetch.clone(), tree_hash: git_tree_hash.clone(), last_modified: unix_now()}
+                provenance :: self.existing_provenance(dep_name, dep_version, git_tree_hash)
+                &self.resolved.insert(dep_name, ResolvedPkg{
+                    version: dep_version, source: .Git{url: url.clone(), selector: Lock.git_selector_str(selector)},
+                    locked: Val(locked), fingerprint: fp, content_hash: Val(git_tree_hash.clone()),
+                    deps: ^trans_deps, source_dir: store_path, provenance: provenance, envelope: None, receipt: None
+                })
+            }
+            .Registry(version_req) -> {
+                update_requested :: self.registry_update_requested(dep_name)
+                registry :: if update_requested { Publish.resolve_publish_registry() }
+                    else { self.locked_registry_config(dep_name).unwrap_or_else(() -> Publish.resolve_publish_registry()) }
+                (available, _warnings) :: Publish.resolve_and_verify_all(registry, dep_name)
+                    .map_err(diagnostic -> [registry_diagnostic(dep_name, diagnostic.what, diagnostic.fix)])?
+                requirement :: VersionReq.parse(version_req).ok_or_else(() -> [registry_diagnostic(dep_name,
+                    "invalid version requirement `{version_req}`", "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`")])?
+                locked_version :: if !update_requested && self.opts.resolution == .Conservative {
+                    self.find_locked_registry_version(dep_name)
+                } else { None }
+                locked_candidate :: locked_version.filter(version ->
+                    SemVer.parse(version).is_some_and(parsed -> requirement.matches(parsed)))
+                    .and_then(version -> available.iter().find(entry -> entry.version == version)).cloned()
+                planned :: self.registry_plan.get(dep_name).filter(entry ->
+                    SemVer.parse(entry.version).is_some_and(version -> requirement.matches(version))).cloned()
+                selected :: planned.or(locked_candidate).or_else(() -> {
+                    candidates := available.into_iter().filter(entry -> !entry.yanked).filter_map(entry -> {
+                        version :: SemVer.parse(entry.version) ?? return None
+                        if requirement.matches(version) { Val((version, entry)) } else { None }
+                    }).collect()
+                    versions :: candidates.iter().map(pair -> pair.0.clone()).collect()
+                    constraint :: VersionConstraint{package: dep_name, req: requirement.clone(), from: chain.first().cloned().unwrap_or_default()}
+                    mode :: if self.opts.resolution == {
+                        .LowestDirect -> if chain.len() > 2 { ResolveMode.Latest } else { ResolveMode.LowestDirect }
+                        .Conservative -> ResolveMode.Latest
+                        else -> self.opts.resolution
+                    }
+                    selected_version :: Publish.select_compatible(dep_name, [constraint], versions, mode).ok().cloned() ?? return None
+                    candidates.into_iter().find(pair -> pair.0 == selected_version).map(pair -> pair.1)
+                }).ok_or_else(() -> [registry_diagnostic(dep_name, "no published version satisfies `{version_req}`",
+                    "the configured registry has no compatible non-yanked artifact")])?
+                reused_exact_lock :: !update_requested && locked_version == Val(selected.version)
+                source_exception :: Publish.active_source_exception(self.policy.exceptions, dep_name, selected.version).cloned()
+                if !reused_exact_lock {
+                    if &self.load_advisory_policy()? == .Val(policy) {
+                        Publish.authorize_registry_candidate_with_source_exception(policy, dep_name, selected.version, source_exception)
+                            .map_err(d -> [contextualize_dependency_diagnostic(d, chain, dep_name, selected.version)])?
+                    }
+                }
+                registry_repo :: Publish.index_repo_path(registry)
+                artifact_snapshot :: Publish.snapshot_verified_artifact(registry_repo, selected).map_err(error -> [
+                    registry_diagnostic(dep_name, "published artifact is unavailable or corrupt: {error}",
+                        "refresh the registry mirror or publish the immutable source artifact")])?
+                artifact :: artifact_snapshot.path()
+                dep_manifest :: self.load_dep_manifest(artifact, dep_name)?
+                if dep_manifest.package.name != dep_name || dep_manifest.package.version != selected.version {
+                    return Err([registry_diagnostic(dep_name, "published source metadata disagrees with its registry index entry",
+                        "republish a new immutable version with matching payload identity")])
+                }
+                registry_metadata :: self.load_registry_metadata(artifact, dep_name, selected.version)?
+                registry_dependencies :: registry_dependency_edges(dep_manifest, registry_metadata, dep_name)?
+                policy_receipt :: Publish.authorize_package_candidate(self.policy, dep_name, selected.version, dep_manifest.package.license, registry.name)
+                    .map_err(error -> [Publish.package_policy_edge_diagnostic(dependency_owner(chain),
+                        dependency_edge(chain, dep_name, selected.version), registry.name, error)])?
+                if selected.content_hash.is_empty() || selected.fingerprint.is_empty() {
+                    return Err([registry_diagnostic(dep_name, "published registry metadata has no complete source identity",
+                        "republish the package with its source hash and plan fingerprint")])
+                }
+                dep_version :: selected.version.clone()
+                content_hash :: selected.content_hash.clone()
+                publisher :: if !selected.public_key.is_empty() && !selected.signature.is_empty() { Val("ed25519:{selected.public_key}") } else { None }
+                if self.version_seen.get(dep_name) == {
+                    .Val((prev_ver, prev_chain)) -> {
+                        if prev_ver != dep_version -> return Err([Lock.e1201(dep_name, prev_ver, prev_chain, dep_version, chain)])
+                    }
+                    None -> &self.version_seen.insert(dep_name, (dep_version.clone(), chain.clone()))
+                }
+                trans_specs := [(String, DepSpec)]{}
+                loop trans_name in dep_manifest.dependencies.keys().sorted() {
+                    trans_spec :: dep_manifest.dependencies[trans_name]
+                    if trans_spec == {
+                        .Registry(req) -> {
+                            if registry_metadata == {
+                                .Val(metadata) -> {
+                                    if registry_dependencies.iter().find(dependency -> dependency.name == trans_name) == {
+                                        .Val(dependency) -> &trans_specs.push((trans_name.clone(),
+                                            DepSpec.Registry(dependency.requirements.first().cloned().unwrap_or_else(() -> "*"))))
+                                        None -> {
+                                            // Dev/test-only metadata edges are outside production installs.
+                                            if !metadata.contains_dependency(trans_name) -> &trans_specs.push((trans_name.clone(), DepSpec.Registry(req.clone())))
+                                        }
+                                    }
+                                }
+                                None -> &trans_specs.push((trans_name.clone(), DepSpec.Registry(req.clone())))
+                            }
+                        }
+                        else -> &trans_specs.push((trans_name.clone(), trans_spec.clone()))
+                    }
+                }
+                loop dependency in registry_dependencies {
+                    if !dep_manifest.dependencies.contains_key(dependency.name) {
+                        &trans_specs.push((dependency.name.clone(), DepSpec.Registry(dependency.requirements.first().cloned().unwrap_or_else(() -> "*"))))
+                    }
+                }
+                trans_deps := [String]{}
+                loop (trans_name, trans_spec) in trans_specs {
+                    child_chain := chain.clone()
+                    &child_chain.push(trans_name.clone())
+                    &self.resolve_dep(trans_name, trans_spec, artifact, child_chain)?
+                    if !trans_deps.contains(trans_name) -> &trans_deps.push(trans_name)
+                }
+                dep_fps :: trans_deps.iter().filter_map(dep -> self.resolved.get(dep).map(pkg -> pkg.fingerprint)).collect()
+                hangar_references :: trans_deps.iter().filter_map(dep -> {
+                    pkg :: self.resolved.get(dep) ?? return None
+                    if pkg.source == .Registry{..} { jetpack.Envelope.try_output_hash_of(pkg.source_dir.to_string_lossy()).ok() }
+                    else { None }
+                }).collect()
+                cap_digest :: Publish.ApiFreeze.project_capability_digest(artifact)
+                fp :: Lock.compute_fingerprint(content_hash, dep_fps, cap_digest)
+                advisory_receipt :: if reused_exact_lock { None } else {
+                    self.advisory_policy.and_then(result -> result.ok()).flatten().map(policy -> policy.receipt)
+                }
+                store_path :: ingest_registry_artifact(registry, selected, artifact, hangar_references, advisory_receipt, Val(policy_receipt), source_exception)
+                    .map_err(error -> [registry_diagnostic(dep_name, error, "repair the canonical Jetpack Hangar or retry the verified registry ingest")])?
+                verify_registry_hangar_entry(dep_name, store_path, content_hash)?
+                link_dir :: self.project_root.join(".jet").join("build").join("deps").join(dep_name)
+                Store.copy_into_project(store_path, link_dir).map_err(d -> [d])?
+                provenance := self.existing_provenance(dep_name, dep_version, content_hash).unwrap_or_default()
+                if publisher == .Val(value) -> provenance.publisher = Val(value)
+                retained_provenance :: if provenance.transparency.is_some() || provenance.publisher.is_some() || provenance.build.is_some() { Val(provenance) } else { None }
+                &self.resolved.insert(dep_name, ResolvedPkg{
+                    version: dep_version,
+                    source: .Registry{registry: registry.name, reference: "{selected.name}#{selected.version}",
+                        output: store_path.to_string_lossy().into_owned(), source_hash: content_hash.clone(),
+                        repository: registry.url, authority: "jet-registry-index", tier: selected.tier.label().to_string(),
+                        gate_status: selected.gate_status.summary()},
+                    locked: None, fingerprint: fp, content_hash: Val(content_hash), deps: ^trans_deps,
+                    source_dir: store_path, provenance: retained_provenance, envelope: None, receipt: None
+                })
+            }
+            .Foreign{language, reference} -> {
+                realization :: self.foreign.get(dep_name).cloned().ok_or_else(() -> [foreign_dependency_diagnostic(dep_name,
+                    "the provider projection was not produced for this dependency")])?
+                if realization.language != language || realization.reference != reference {
+                    return Err([foreign_dependency_diagnostic(dep_name, "the provider projection identity disagrees with package.jet")])
+                }
+                dep_version :: realization.entry.version.clone()
+                if self.version_seen.get(dep_name) == {
+                    .Val((previous, previous_chain)) -> {
+                        if previous != dep_version -> return Err([Lock.e1201(dep_name, previous, previous_chain, dep_version, chain)])
+                    }
+                    None -> &self.version_seen.insert(dep_name, (dep_version.clone(), chain.clone()))
+                }
+                &self.resolved.insert(dep_name, ResolvedPkg{
+                    version: dep_version, source: .Foreign{language: language, reference: reference.clone(), output: realization.entry.out.clone()},
+                    locked: None, fingerprint: realization.entry.envelope.output_hash.clone(),
+                    content_hash: Val(realization.entry.envelope.output_hash.clone()), deps: [],
+                    source_dir: OSPath.from(realization.entry.out), provenance: None,
+                    envelope: Val(Lock.LockEnvelope{output_hash: realization.entry.envelope.output_hash.clone(),
+                        platform: realization.entry.envelope.platform.clone(), signature: realization.entry.envelope.signature.clone(),
+                        provenance: realization.entry.envelope.provenance.clone(), catalog_tier: "", catalog_trust: ""}),
+                    receipt: if !realization.entry.receipt.is_empty() { Val(realization.entry.receipt.clone()) } else { None }
+                })
+            }
+        }
+        Ok(())
+    }
+    // Rust: Source/Fetch.rs:1336
+    fn load_dep_manifest(self: Resolver, dir: OSPath, dep_name: String) -> Manifest.Manifest [Diagnostic]! {
+        load_dep_manifest(dir, dep_name)
+    }
+    // Rust: Source/Fetch.rs:1340
+    fn load_registry_metadata(self: Resolver, artifact: OSPath, dep_name: String, version: String) -> Publish.RegistryPackageMetadata? [Diagnostic]! {
+        Publish.read_registry_package_metadata(artifact, dep_name, version).map_err(error -> [
+            registry_diagnostic(dep_name, "registry dependency metadata is invalid: {error}",
+                "republish the immutable artifact with a valid registry.json record")])
+    }
+}
+
+// Rust: Source/Fetch.rs:1356
+fn registry_dependency_edges(manifest: Manifest.Manifest, metadata: Publish.RegistryPackageMetadata?, package: String) -> [Publish.RegistryDependency] [Diagnostic]! {
+    if metadata == .Val(value) {
+        loop name in manifest.dependencies.keys().sorted() {
+            if manifest.dependencies[name] == .Registry(_) {
+                if !value.contains_dependency(name) -> return Err([registry_diagnostic(package,
+                    "registry.json omits declared dependency `{name}`", "publish registry.json with every registry dependency in package.jet")])
+            }
+        }
+        return Ok(value.active_dependencies())
+    }
+    dependencies := [Publish.RegistryDependency]{}
+    loop name in manifest.dependencies.keys().sorted() {
+        if manifest.dependencies[name] == .Registry(requirement) {
+            &dependencies.push(Publish.RegistryDependency{name: name.clone(), requirements: [requirement.clone()],
+                roles: BTreeSet[String].from(["normal"]), prefer: [], reject: BTreeSet[String].new(),
+                strict: false, enabled_by_default: true})
+        }
+    }
+    Ok(dependencies)
+}
+// Rust: Source/Fetch.rs:1392
+fn load_dep_manifest(dir: OSPath, dep_name: String) -> Manifest.Manifest [Diagnostic]! {
+    if Manifest.load(dir) == {
+        None -> Err([Diagnostic.error("E1206", "dependency `{dep_name}` has no `{Syntax.PACKAGE_FILE}`",
+            "every Jet package must have a `{Syntax.PACKAGE_FILE}` manifest",
+            "add a `{Syntax.PACKAGE_FILE}` to `{dir.display()}`", None)])
+        .Val(.Err(d)) -> Err([d])
+        .Val(.Ok(m)) -> Ok(m)
+    }
+}
+impl Resolver {
+    // Rust: Source/Fetch.rs:1418
+    fn resolve_git_rev(self: Resolver, dep_name: String, url: String, selector: GitSelector, transport: ValidatedGitTransport) -> String [Diagnostic]! {
+        if selector == {
+            .Rev(r) -> validate_cached_revision(r).map(_ -> r.clone()).map_err(reason -> [git_revision_diagnostic(r, reason)])
+            .Tag(t) -> {
+                if t != "@latest" {
+                    if !self.dependency_update_requested(dep_name) {
+                        if self.find_locked_rev(dep_name) == .Val(locked_rev) {
+                            return validate_cached_revision(locked_rev).map(_ -> locked_rev).map_err(reason -> [git_revision_diagnostic("locked revision", reason)])
+                        }
+                    }
+                    return git_resolve_ref(url, t, transport).map_err(d -> [d])
+                }
+                if !self.dependency_update_requested(dep_name) {
+                    if self.find_locked_rev(dep_name) == .Val(locked_rev) {
+                        return validate_cached_revision(locked_rev).map(_ -> locked_rev).map_err(reason -> [git_revision_diagnostic("locked revision", reason)])
+                    }
+                }
+                git_resolve_ref(url, t, transport).map_err(d -> [d])
+            }
+            .Branch(b) -> {
+                if !self.dependency_update_requested(dep_name) {
+                    if self.find_locked_rev(dep_name) == .Val(locked_rev) {
+                        return validate_cached_revision(locked_rev).map(_ -> locked_rev).map_err(reason -> [git_revision_diagnostic("locked revision", reason)])
+                    }
+                }
+                git_resolve_ref(url, b, transport).map_err(d -> [d])
+            }
+        }
+    }
+    // Rust: Source/Fetch.rs:1459
+    fn dependency_update_requested(self: Resolver, dep_name: String) -> Bool {
+        self.opts.update && (self.opts.update_dep.is_none() || self.update_scope.contains(dep_name))
+    }
+    // Rust: Source/Fetch.rs:1463
+    fn registry_update_requested(self: Resolver, dep_name: String) -> Bool {
+        self.dependency_update_requested(dep_name)
+    }
+    // Rust: Source/Fetch.rs:1467
+    fn load_advisory_policy(&self) -> Publish.AdvisoryPolicy? [Diagnostic]! {
+        if self.advisory_policy.is_none() -> self.advisory_policy = Val(Publish.load_advisory_policy(self.project_root))
+        if self.advisory_policy.expect("advisory policy is loaded") == {
+            .Ok(policy) -> Ok(policy)
+            .Err(diagnostic) -> Err([diagnostic.clone()])
+        }
+    }
+    // Rust: Source/Fetch.rs:1483
+    fn locked_registry_config(self: Resolver, dep_name: String) -> Publish.RegistryConfig? {
+        lock :: self.existing_lock ?? return None
+        package :: lock.packages.iter().find(package -> package.name == dep_name
+            && if package.source == { .Registry{..} -> true, else -> false }) ?? return None
+        if package.source == {
+            .Registry{registry, repository, tier, ..} -> {
+                parsed :: Publish.RegistryTier.parse(tier).unwrap_or(Publish.RegistryTier.Core)
+                Val(Publish.RegistryConfig{name: registry.clone(), url: repository.clone(), mirror: false,
+                    require_signed: parsed == .Community, tier: parsed})
+            }
+            else -> None
+        }
+    }
+    // Rust: Source/Fetch.rs:1506
+    fn find_locked_registry_version(self: Resolver, dep_name: String) -> String? {
+        lock :: self.existing_lock ?? return None
+        lock.packages.iter().find(package -> package.name == dep_name
+            && if package.source == { .Registry{..} -> true, else -> false }).map(package -> package.version.clone())
+    }
+    // Rust: Source/Fetch.rs:1516
+    fn existing_provenance(self: Resolver, dep_name: String, version: String, content_hash: String) -> Lock.DependencyProvenance? {
+        lock :: self.existing_lock ?? return None
+        lock.packages.iter().find(package -> package.name == dep_name && package.version == version
+            && package.provenance_report().integrity.value == content_hash).and_then(package -> package.provenance.clone())
+    }
+    // Rust: Source/Fetch.rs:1533
+    fn find_locked_rev(self: Resolver, dep_name: String) -> String? {
+        lock :: self.existing_lock ?? return None
+        lock.packages.iter().find(p -> p.name == dep_name).and_then(p -> p.locked).map(l -> l.rev.clone())
+    }
+}
+// Rust: Source/Fetch.rs:1543
+fn compute_update_scope(existing_lock: LockFile?, opts: FetchOptions) -> BTreeSet[String] {
+    if !opts.update -> return BTreeSet[String].new()
+    if opts.update_dep == {
+        None -> existing_lock.into_iter().flat_map(lock -> lock.packages.iter().map(package -> package.name.clone())).collect()
+        .Val(target) -> {
+            scope := existing_lock.map(lock -> lock_closure(lock, target)).unwrap_or_default()
+            &scope.insert(target)
+            scope
+        }
+    }
+}
+// Rust: Source/Fetch.rs:1562
+fn lock_closure(lock: LockFile, target: String) -> BTreeSet[String] {
+    scope := BTreeSet[String].new()
+    pending := [target]
+    loop {
+        name :: &pending.pop() ?? break
+        if !&scope.insert(name.clone()) -> continue
+        if lock.packages.iter().find(package -> package.name == name) == .Val(package) {
+            &pending.extend(package.dependencies.iter().cloned())
+        }
+    }
+    scope
+}
+// Rust: Source/Fetch.rs:1576
+fn registry_update_rationales(project_root: OSPath, lock: LockFile, manifest: Manifest.Manifest, opts: FetchOptions) -> jetpack.SemanticLock.SemanticLockFile Diagnostic! {
+    packages := lock.packages.iter().filter(package -> if package.source == { .Registry{..} -> true, else -> false }).collect()
+    semantic := jetpack.SemanticLock.load(project_root).unwrap_or_default()
+    semantic.source_maps = manifest.policy.source_maps.keys().sorted().map(pattern ->
+        jetpack.SemanticLock.SourceMapEntry{pattern: pattern.clone(), sources: manifest.policy.source_maps[pattern].clone()}).collect()
+    if packages.is_empty() -> return Ok(semantic)
+    if opts.update_dep == .Val(target) {
+        scope :: lock_closure(lock, target)
+        &packages.retain(package -> scope.contains(package.name))
+    }
+    if packages.is_empty() -> return Ok(semantic)
+    loop package in packages {
+        if package.source == .Registry{registry, reference, output, source_hash, repository, ..} {
+            dep_manifest :: load_dep_manifest(OSPath.from(output), package.name).map_err(diagnostics -> {
+                values := diagnostics
+                &values.pop().unwrap_or_else(() -> Diagnostic.error("E1207",
+                    "registry dependency `{package.name}` has no readable installed manifest",
+                    "registry package policy evidence must remain explainable after ingest",
+                    "repair the canonical Hangar object or rerun `jet fetch` from the trusted registry", None))
+            })?
+            policy_receipt :: Publish.authorize_package_candidate(manifest.policy, package.name, package.version,
+                dep_manifest.package.license, registry).map_err(error -> {
+                    edge :: "{manifest.package.name} -> {package.name}#{package.version}"
+                    Publish.package_policy_edge_diagnostic(manifest.package.name, edge, registry, error)
+                })?
+            registry_metadata :: Publish.read_registry_package_metadata(OSPath.from(output), package.name, package.version)
+                .map_err(error -> registry_diagnostic(package.name, "registry dependency metadata is invalid: {error}",
+                    "repair the canonical Hangar object or republish registry.json"))?
+            key :: "registry:{registry}:{package.name}"
+            exception_suffix :: Publish.active_source_exception(manifest.policy.exceptions, package.name, package.version)
+                .map(exception -> "; source-policy-exception={exception.summary()}").unwrap_or_default()
+            record := jetpack.SemanticLock.SemanticRecord.new(
+                jetpack.SemanticLock.LockIdentity{kind: .Package, key: key, exact: reference.clone(), hash: source_hash.clone(),
+                    platform: jetpack.Envelope.host_platform()},
+                jetpack.SemanticLock.LockRationale{
+                    owner_package: manifest.package.name.clone(),
+                    reason: "selected `{package.version}` with {opts.resolution.label()} resolution; registry policy record; package-policy={policy_receipt.summary()}{exception_suffix}",
+                    source_ref: "registry:{registry};repository={Publish.redact_registry_url(repository)}",
+                    provider: "jet-registry", channel_input: opts.resolution.label().to_string(), exact_output: output.clone(),
+                    policy_fingerprint: Publish.policy_fingerprint(manifest.policy), recipe_id: "", adapter_id: "registry.pubgrub",
+                    signature: "", cache_provenance: "verified-registry",
+                    update_command: opts.update_dep.map(name -> "jet update {name}").unwrap_or_else(() -> "jet update")
+                })
+            if registry_metadata == .Val(metadata) -> &record.future_fields.insert("dependency-metadata", metadata.canonical().to_string())
+            jetpack.SemanticLock.selective_update(&semantic, record)
+        }
+    }
+    jetpack.SemanticLock.revalidate(semantic).map_err(issues -> Diagnostic.error("E1206",
+        "couldn't record the registry resolution rationale",
+        "the package lock was resolved, but its update explanation failed semantic lock validation",
+        issues.iter().map(issue -> issue.message()).collect().join("; "), None))?
+    Ok(semantic)
+}
+// Rust: Source/Fetch.rs:1732
+fn semantic_policy_needs_update(project_root: OSPath, manifest: Manifest.Manifest) -> Bool {
+    expected_maps := manifest.policy.source_maps.iter().map(pair ->
+        jetpack.SemanticLock.SourceMapEntry{pattern: pair.0.clone(), sources: pair.1.clone()}).collect()
+    &expected_maps.sort_by((left, right) -> left.pattern <=> right.pattern)
+    semantic :: jetpack.SemanticLock.load(project_root).unwrap_or_default()
+    if semantic.source_maps != expected_maps -> return true
+    fingerprint :: Publish.policy_fingerprint(manifest.policy)
+    semantic.records.iter().any(record -> record.identity.kind == .Package && record.identity.key.starts_with("registry:")
+        && record.rationales.first().map(rationale -> rationale.policy_fingerprint) != Val(fingerprint))
+}
+// Rust: Source/Fetch.rs:1759
+fn dependency_owner(chain: [String]) -> String {
+    if chain.len() > 1 { chain[0..chain.len() - 1].join(" -> ") } else { "package root" }
+}
+// Rust: Source/Fetch.rs:1767
+fn dependency_edge(chain: [String], package: String, version: String) -> String {
+    "{dependency_owner(chain)} -> {package}#{version}"
+}
+// Rust: Source/Fetch.rs:1771
+fn contextualize_dependency_diagnostic(diagnostic: Diagnostic, chain: [String], package: String, version: String) -> Diagnostic {
+    result := diagnostic
+    edge :: dependency_edge(chain, package, version)
+    result.what = "dependency edge `{edge}` was rejected: {result.what}"
+    result.why = "package `{dependency_owner(chain)}` owns this source decision; {result.why}"
+    result
+}
+// Rust: Source/Fetch.rs:1787
+fn registry_diagnostic(name: String, what: String, fix: String) -> Diagnostic {
+    Diagnostic.error("E1207", "registry dependency `{name}` cannot be resolved: {what}",
+        "registry package identity is source-backed and must be verified before it enters the lock", fix, None)
+}

@@ -1,0 +1,74 @@
+use Cli.Evidence.History.*
+use std.[sync, fs, env, process]
+use std.ffi.OsString
+
+// Rust: Source/Store.rs:20
+StoreWalkHook :: sync.Arc<fn(OSPath, OsString) -> ()>
+// Rust: Source/Store.rs:24
+static STORE_WALK_HOOK :: sync.Mutex<StoreWalkHook?>.new(None)
+// Rust: Source/Store.rs:26
+fn before_store_child_open(path: OSPath, name: OsString) -> {
+    // GATE #4494: test-only synchronized hook; release lock before invoking it.
+    held := STORE_WALK_HOOK.lock() ?? err.into_inner()
+    hook :: ~held.value
+    drop(^held)
+    if hook == Val(callback) -> callback(path, name)
+}
+// Rust: Source/Store.rs:37
+fn install_store_walk_hook(hook: StoreWalkHook) -> StoreWalkHookGuard {
+    held := STORE_WALK_HOOK.lock() ?? err.into_inner()
+    held.value = Val(hook)
+    StoreWalkHookGuard{}
+}
+// Rust: Source/Store.rs:46
+struct StoreWalkHookGuard {
+    // Rust: Source/Store.rs:49
+    fn drop(&self) -> {
+        held := STORE_WALK_HOOK.lock() ?? err.into_inner()
+        held.value = None
+    }
+}
+
+// Behavioral controls for this test-free Rust production window. Native only.
+#Test("authority_snapshot_append_and_replace_preserve_bytes") {
+    // GATE #4483: the Rust authority contract is unsupported on all other OSes.
+    if descriptor_supported() {
+        stamp :: std.time.SystemTime.now().duration_since(std.time.UNIX_EPOCH).unwrap().as_nanos()
+        root :: env.temp_dir().join("jet-authority-port-{process.id()}-{stamp}")
+        fs.create_dir_all(root).unwrap()
+        file :: root.join("authority.jet")
+        append_authority_file(file, "first".bytes()).unwrap()
+        append_authority_file(file, "+second".bytes()).unwrap()
+        snapshot :: read_authority_file(file).unwrap()
+        assert(snapshot.bytes() == "first+second".bytes())
+        replace_authority_file(&snapshot, "replacement".bytes()).unwrap()
+        assert(fs.read(file).unwrap() == "replacement".bytes())
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+#Test("authority_replacement_refuses_stale_snapshot_without_publication") {
+    if descriptor_supported() {
+        stamp :: std.time.SystemTime.now().duration_since(std.time.UNIX_EPOCH).unwrap().as_nanos()
+        root :: env.temp_dir().join("jet-authority-stale-{process.id()}-{stamp}")
+        fs.create_dir_all(root).unwrap()
+        file :: root.join("authority.jet")
+        append_authority_file(file, "approved".bytes()).unwrap()
+        snapshot :: read_authority_file(file).unwrap()
+        fs.write(file, "changed".bytes()).unwrap()
+        error :: replace_authority_file(&snapshot, "replacement".bytes()).expect_err("stale approval must fail")
+        assert(!error.is_published())
+        assert(error.status() == AuthorityReplaceStatus.NotPublished)
+        assert(fs.read(file).unwrap() == "changed".bytes())
+        fresh :: read_authority_file(file).unwrap()
+        replace_authority_file(&fresh, "replacement".bytes()).unwrap()
+        assert(fs.read(file).unwrap() == "replacement".bytes())
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+#Test("authority_paths_and_child_names_reject_escape_components") {
+    assert(authority_path_components(OSPath.from("../escape")).is_err())
+    assert(authority_path_components(OSPath.from("/absolute")).is_err())
+    assert(dp_name(OsString.from("..")).is_err())
+    assert(dp_name(OsString.from("a/b")).is_err())
+    assert(dp_name(OsString.from("")).is_err())
+}

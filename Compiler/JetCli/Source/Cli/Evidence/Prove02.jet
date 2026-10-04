@@ -1,1802 +1,891 @@
-// PORT-PENDING 0704 source-cmdprove-slice-1821: Source/CmdProve.rs:1821-3618
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn prepare_replay_or_exit(
-//RS     identity: &crate::ProveReplay::ReplayIdentity,
-//RS     path: &str,
-//RS     json: bool,
-//RS ) -> crate::ProveReplay::ReplayAuthority {
-//RS     let is_saved = path.starts_with(".jet/records/saved/")
-//RS         || jet::build_project_root(&identity.entry)
-//RS             .ok()
-//RS             .is_some_and(|root| Path::new(path).starts_with(root.join(".jet/records/saved")));
-//RS     let prepared = if is_saved {
-//RS         crate::ProveReplay::prepare_saved_replay(identity, Path::new(path))
-//RS     } else {
-//RS         crate::ProveReplay::prepare_replay(identity, path)
-//RS     };
-//RS     match prepared {
-//RS         Ok(authority) => authority,
-//RS         Err((code, why)) => {
-//RS             let what = match code {
-//RS                 "E3620" => "replay schema version is incompatible",
-//RS                 "E3621" => "replay semantic identity does not match",
-//RS                 "E3628" => "replay capture exceeded its artifact limit",
-//RS                 _ => "replay artifact is corrupt",
-//RS             };
-//RS             let fix = match code {
-//RS                 "E3620" => "use a reader for the artifact schema, or recapture with this Jet",
-//RS                 "E3621" => "replay the exact target identity that produced the artifact",
-//RS                 "E3628" => "recapture a bounded artifact with a recorded Time authority",
-//RS                 _ => "recapture the target and keep the complete `.jetproof-replay` artifact",
-//RS             };
-//RS             crate::ProveReplay::emit_prove_diag(code, what, &why, fix, json);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn time_site_id_for_target(target: &Target) -> String {
-//RS     let (path, offset) = target
-//RS         .members
-//RS         .first()
-//RS         .map(|member| {
-//RS             let source = String::from_utf8_lossy(&member.bytes);
-//RS             (
-//RS                 member.path.as_str(),
-//RS                 source.find("time.now").unwrap_or(usize::MAX),
-//RS             )
-//RS         })
-//RS         .unwrap_or((target.root.as_str(), usize::MAX));
-//RS     jet::SHA256::sha256_hex(format!("{path}:{offset}:core.time.now").as_bytes())
-//RS }
-//RS 
-//RS fn lens_shows(lenses: &[String], facet: &str) -> bool {
-//RS     if lenses.is_empty() {
-//RS         return true;
-//RS     }
-//RS     if lenses.iter().any(|lens| lens == "all") {
-//RS         return facet != "solver";
-//RS     }
-//RS     lenses.iter().any(|lens| lens == facet)
-//RS }
-//RS 
-//RS fn canonical_lens_names(lenses: &[String]) -> Vec<&'static str> {
-//RS     if lenses.iter().any(|lens| lens == "all") {
-//RS         return if lenses.iter().any(|lens| lens == "solver") {
-//RS             vec!["all", "solver"]
-//RS         } else {
-//RS             vec!["all"]
-//RS         };
-//RS     }
-//RS     PROOF_LENSES
-//RS         .iter()
-//RS         .copied()
-//RS         .filter(|candidate| lenses.iter().any(|lens| lens == candidate))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn outside_selected_lenses(
-//RS     lenses: &[String],
-//RS     items: &[FrontEndItem],
-//RS     tests: &[TestItem],
-//RS     budgets: &jet::BudgetView::BudgetProjection,
-//RS     declarations: &[ContractDeclaration],
-//RS ) -> Vec<String> {
-//RS     if lenses.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut rows = Vec::new();
-//RS     for item in items.iter().filter(|item| item.diagnostic.is_some()) {
-//RS         rows.push(format!("  front end failed at {}:{}", item.path, item.line));
-//RS     }
-//RS     for item in tests.iter().filter(|item| item.state >= 1) {
-//RS         let kind = match item.kind {
-//RS             1 => "contract",
-//RS             2 => "runtime",
-//RS             3 => "property",
-//RS             4 => "doctest",
-//RS             _ => "unit",
-//RS         };
-//RS         if !lens_shows(lenses, if item.kind == 1 { "contracts" } else { "tests" }) {
-//RS             rows.push(format!(
-//RS                 "  {kind} {}: {}",
-//RS                 item.name,
-//RS                 item.message.replace('\n', " ").replace('\r', " ")
-//RS             ));
-//RS         }
-//RS     }
-//RS     for declaration in declarations {
-//RS         let observed = tests.iter().any(|item| {
-//RS             item.kind == 1
-//RS                 && item.name == declaration.marker
-//RS                 && item.line as usize == declaration.line
-//RS                 && source_paths_match(&item.path, &declaration.path)
-//RS                 && item.state <= 1
-//RS         });
-//RS         if !observed && !lens_shows(lenses, "contracts") {
-//RS             rows.push(format!(
-//RS                 "  contract {} at {}:{}: not observed",
-//RS                 declaration.marker, declaration.path, declaration.line
-//RS             ));
-//RS         }
-//RS     }
-//RS     for fact in &budgets.facts {
-//RS         let unavailable = fact.evidence == "unavailable";
-//RS         let failed = fact.outcome != "pass";
-//RS         if (unavailable || failed) && !lens_shows(lenses, "budgets") {
-//RS             rows.push(format!(
-//RS                 "  budget {}: {} ({})",
-//RS                 fact.budget_id, fact.outcome, fact.evidence
-//RS             ));
-//RS         }
-//RS     }
-//RS     for reason in &budgets.rejected {
-//RS         if !lens_shows(lenses, "budgets") {
-//RS             rows.push(format!("  budget unavailable: {reason}"));
-//RS         }
-//RS     }
-//RS     if rows.is_empty() {
-//RS         return vec!["OUTSIDE SELECTED LENSES", "  none failed or unavailable"]
-//RS             .into_iter()
-//RS             .map(str::to_string)
-//RS             .collect();
-//RS     }
-//RS     let mut output = vec!["OUTSIDE SELECTED LENSES".to_string()];
-//RS     output.extend(rows);
-//RS     output
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct CaptureSite {
-//RS     operation: String,
-//RS     effect: Option<jet::Sema::Effect>,
-//RS }
-//RS 
-//RS /// Capture authority is checked against the parsed program before the child
-//RS /// producer starts. Safe capture can record only Time; sensitive capture may
-//RS /// authorize Rand/IO/Net later, but it still cannot model native, task, or
-//RS /// provider boundaries. This is deliberately conservative: an unknown call
-//RS /// shape fails closed instead of discovering an ambient effect after it ran.
-//RS fn preflight_capture_target(
-//RS     target: &Target,
-//RS     opts: &crate::ProveReplay::CaptureOpts,
-//RS     json_mode: bool,
-//RS ) -> Result<(), i32> {
-//RS     let sites = capture_sites_for_target(target);
-//RS     let time_sites = sites
-//RS         .iter()
-//RS         .filter(|site| supported_time_capture_site(site))
-//RS         .count();
-//RS     if time_sites > 1 {
-//RS         return capture_preflight_error(
-//RS             "E3625",
-//RS             "multiple core.time.now sites",
-//RS             "the current replay adapter has one bounded Time record and cannot prove request order for multiple sites",
-//RS             "capture one Time request per target, or route time through an injected deterministic input",
-//RS             json_mode,
-//RS         );
-//RS     }
-//RS     for site in sites {
-//RS         let Some(effect) = site.effect else {
-//RS             return capture_preflight_error(
-//RS                 "E3625",
-//RS                 &site.operation,
-//RS                 "the reachable call shape is opaque to the replay authority",
-//RS                 "route the operation through a supported deterministic input, or remove it from the captured target",
-//RS                 json_mode,
-//RS             );
-//RS         };
-//RS         if matches!(effect, jet::Sema::Effect::Time) && !supported_time_capture_site(&site) {
-//RS             return capture_preflight_error(
-//RS                 "E3625",
-//RS                 &site.operation,
-//RS                 "the current replay adapter records only `core.time.now`; this Time operation would sleep or read an unrecorded clock",
-//RS                 "capture a target that uses `core.time.now`, or route the operation through an injected deterministic input",
-//RS                 json_mode,
-//RS             );
-//RS         }
-//RS         match effect {
-//RS             jet::Sema::Effect::Time => {}
-//RS             jet::Sema::Effect::Rand | jet::Sema::Effect::IO | jet::Sema::Effect::Net
-//RS                 if !opts.sensitive =>
-//RS             {
-//RS                 return capture_preflight_error(
-//RS                     "E3627",
-//RS                     &site.operation,
-//RS                     &format!(
-//RS                         "safe capture reached raw {}; untainted values still require sensitive-data consent",
-//RS                         effect.name()
-//RS                     ),
-//RS                     "inject deterministic data, or explicitly use --capture-sensitive",
-//RS                     json_mode,
-//RS                 );
-//RS             }
-//RS             jet::Sema::Effect::Rand | jet::Sema::Effect::IO | jet::Sema::Effect::Net => {}
-//RS             other => {
-//RS                 return capture_preflight_error(
-//RS                     "E3625",
-//RS                     &site.operation,
-//RS                     &format!("replay capture has no authority adapter for the {} effect", other.name()),
-//RS                     "route the operation through a supported deterministic input, or change the capture target",
-//RS                     json_mode,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     // A target may have no Time request. Keep capture available so the
-//RS     // artifact envelope can still be used for schema/identity validation;
-//RS     // replay of that target remains refused after the artifact is parsed.
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn preflight_replay_target(target: &Target, json_mode: bool) -> Result<(), i32> {
-//RS     let sites = capture_sites_for_target(target);
-//RS     let time_sites = sites
-//RS         .iter()
-//RS         .filter(|site| supported_time_capture_site(site))
-//RS         .count();
-//RS     if time_sites > 1 {
-//RS         crate::ProveReplay::emit_prove_diag(
-//RS             "E3623",
-//RS             "replay diverged from captured authority",
-//RS             "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record",
-//RS             "recapture a target with one supported Time request, or route time through an injected deterministic input",
-//RS             json_mode,
-//RS         );
-//RS         return Err(ExitCodes::USER_ERROR);
-//RS     }
-//RS     for site in sites {
-//RS         if supported_time_capture_site(&site) {
-//RS             continue;
-//RS         }
-//RS         let operation = site.operation;
-//RS         let why = match site.effect {
-//RS             Some(jet::Sema::Effect::Time) => format!(
-//RS                 "replay reached unsupported Time operation at {operation}; the artifact records only `core.time.now`"
-//RS             ),
-//RS             Some(effect) => format!("replay reached unrecorded {} authority at {operation}", effect.name()),
-//RS             None => format!("replay reached an opaque authority boundary at {operation}"),
-//RS         };
-//RS         crate::ProveReplay::emit_prove_diag(
-//RS             "E3623",
-//RS             "replay diverged from captured authority",
-//RS             &why,
-//RS             "recapture with a supported Time-only target, or remove the unrecorded boundary",
-//RS             json_mode,
-//RS         );
-//RS         return Err(ExitCodes::USER_ERROR);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn supported_time_capture_site(site: &CaptureSite) -> bool {
-//RS     matches!(site.effect, Some(jet::Sema::Effect::Time))
-//RS         && site.operation.rsplit('.').next() == Some("now")
-//RS }
-//RS 
-//RS fn capture_sites_for_target(target: &Target) -> Vec<CaptureSite> {
-//RS     let mut local_functions = HashSet::new();
-//RS     for member in &target.members {
-//RS         let source = String::from_utf8_lossy(&member.bytes);
-//RS         let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
-//RS         if !lex_diagnostics.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let Ok(program) = jet::Parser::parse_with_source(&tokens, &source) else {
-//RS             continue;
-//RS         };
-//RS         collect_capture_function_names(&program.items, &mut local_functions);
-//RS     }
-//RS 
-//RS     let mut sites = Vec::new();
-//RS     for member in &target.members {
-//RS         let source = String::from_utf8_lossy(&member.bytes);
-//RS         let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
-//RS         if !lex_diagnostics.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let Ok(program) = jet::Parser::parse_with_source(&tokens, &source) else {
-//RS             continue;
-//RS         };
-//RS         let aliases = program
-//RS             .imports
-//RS             .iter()
-//RS             .fold(HashMap::new(), |mut aliases, import| {
-//RS                 if let Some(module) = import.core_module_path() {
-//RS                     let alias = import.import_alias();
-//RS                     aliases.insert(alias.clone(), module.clone());
-//RS                     if let Some(short) = alias.rsplit('.').next() {
-//RS                         aliases.entry(short.to_string()).or_insert(module);
-//RS                     }
-//RS                 }
-//RS                 if let Some(prefix) = match &import.kind {
-//RS                     jet::AST::ImportKind::Unqualified { module_alias, .. } => {
-//RS                         jet::AST::core_list_prefix(module_alias)
-//RS                     }
-//RS                     _ => None,
-//RS                 } {
-//RS                     for binding in import.walk_bindings() {
-//RS                         let Some(original) = binding.original else {
-//RS                             continue;
-//RS                         };
-//RS                         let module = format!("{prefix}.{original}");
-//RS                         if jet::Syntax::is_known_core_module(&module) {
-//RS                             aliases.insert(binding.local, module);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 aliases
-//RS             });
-//RS         collect_capture_items(&program.items, &aliases, &local_functions, &mut sites);
-//RS     }
-//RS     sites
-//RS }
-//RS 
-//RS fn collect_capture_function_names(items: &[Item], names: &mut HashSet<String>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(func) => {
-//RS                 names.insert(func.name.clone());
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 names.extend(implementation.methods.iter().map(|func| func.name.clone()));
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 names.extend(definition.methods.iter().map(|func| func.name.clone()));
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 names.extend(definition.methods.iter().map(|func| func.name.clone()));
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_capture_function_names(body, names);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn capture_preflight_error(
-//RS     code: &str,
-//RS     operation: &str,
-//RS     why: &str,
-//RS     fix: &str,
-//RS     json_mode: bool,
-//RS ) -> Result<(), i32> {
-//RS     let what = if code == "E3627" {
-//RS         "replay capture refused sensitive data".to_string()
-//RS     } else {
-//RS         format!("replay capture cannot model {operation}")
-//RS     };
-//RS     crate::ProveReplay::emit_prove_diag(code, &what, why, fix, json_mode);
-//RS     Err(jet::ExitCodes::USER_ERROR)
-//RS }
-//RS 
-//RS fn collect_capture_items(
-//RS     items: &[Item],
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(func) => collect_capture_func(func, aliases, local_functions, sites),
-//RS             Item::Impl(implementation) => {
-//RS                 for func in &implementation.methods {
-//RS                     collect_capture_func(func, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 for func in &definition.methods {
-//RS                     collect_capture_func(func, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for func in &definition.methods {
-//RS                     collect_capture_func(func, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS             Item::Test(test) => {
-//RS                 collect_capture_statements(&test.body, aliases, local_functions, sites);
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_capture_items(body, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_capture_func(
-//RS     func: &Func,
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     collect_capture_statements(&func.body, aliases, local_functions, sites);
-//RS }
-//RS 
-//RS fn collect_capture_statements(
-//RS     statements: &[Stmt],
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     for statement in statements {
-//RS         match statement {
-//RS             Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => {
-//RS                 collect_capture_expr(expr, aliases, local_functions, sites)
-//RS             }
-//RS             Stmt::Val(binding) => {
-//RS                 collect_capture_expr(&binding.init, aliases, local_functions, sites)
-//RS             }
-//RS             Stmt::Assign { target, value, .. } => {
-//RS                 collect_capture_lvalue(target, aliases, local_functions, sites);
-//RS                 collect_capture_expr(value, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Return(Some(expr), _)
-//RS             | Stmt::BreakValue(expr, _)
-//RS             | Stmt::BreakLabelValue(_, _, expr, _) => {
-//RS                 collect_capture_expr(expr, aliases, local_functions, sites)
-//RS             }
-//RS             Stmt::While { cond, body, .. } => {
-//RS                 collect_capture_expr(cond, aliases, local_functions, sites);
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::For { kind, body, .. } => {
-//RS                 match kind {
-//RS                     jet::AST::ForKind::Range {
-//RS                         start, end, step, ..
-//RS                     } => {
-//RS                         collect_capture_expr(start, aliases, local_functions, sites);
-//RS                         collect_capture_expr(end, aliases, local_functions, sites);
-//RS                         if let Some(step) = step {
-//RS                             collect_capture_expr(step, aliases, local_functions, sites);
-//RS                         }
-//RS                     }
-//RS                     jet::AST::ForKind::In { collection, step } => {
-//RS                         collect_capture_expr(collection, aliases, local_functions, sites);
-//RS                         if let Some(step) = step {
-//RS                             collect_capture_expr(step, aliases, local_functions, sites);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 ..
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 collect_capture_expr(subject, aliases, local_functions, sites);
-//RS                 for arm in arms {
-//RS                     collect_capture_expr(&arm.cond, aliases, local_functions, sites);
-//RS                     collect_capture_statements(&arm.body, aliases, local_functions, sites);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     collect_capture_statements(body, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS             Stmt::CountedLoop {
-//RS                 init,
-//RS                 cond,
-//RS                 step,
-//RS                 body,
-//RS                 ..
-//RS             } => {
-//RS                 collect_capture_expr(&init.init, aliases, local_functions, sites);
-//RS                 collect_capture_expr(cond, aliases, local_functions, sites);
-//RS                 if let Some(step) = step {
-//RS                     collect_capture_statements(
-//RS                         std::slice::from_ref(step),
-//RS                         aliases,
-//RS                         local_functions,
-//RS                         sites,
-//RS                     );
-//RS                 }
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Unsafe { body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "#Unsafe raw boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::TaskGroup { body, .. } | Stmt::Reactive { body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "task/concurrency boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Impure { body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "comptime impure boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Live { body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "live terminal boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::AssumeDet { body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "assume-deterministic boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Loop { body, .. }
-//RS             | Stmt::Shield { body, .. }
-//RS             | Stmt::Switched { body, .. }
-//RS             | Stmt::Region { body, .. }
-//RS             | Stmt::Policy { body, .. }
-//RS             | Stmt::Layout { body, .. }
-//RS             | Stmt::AuthorityScope { body, .. }
-//RS             | Stmt::ComptimeBlock { body, .. }
-//RS             | Stmt::Transact { body, .. } => {
-//RS                 collect_capture_statements(body, aliases, local_functions, sites)
-//RS             }
-//RS             Stmt::ContextBlock { fields, body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "context block boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 for (_, value, _) in fields {
-//RS                     collect_capture_expr(value, aliases, local_functions, sites);
-//RS                 }
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::ScopeMember { args, body, .. } => {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: "scope member boundary".to_string(),
-//RS                     effect: None,
-//RS                 });
-//RS                 for arg in args {
-//RS                     collect_capture_expr(arg, aliases, local_functions, sites);
-//RS                 }
-//RS                 collect_capture_statements(body, aliases, local_functions, sites);
-//RS             }
-//RS             Stmt::Return(None, _)
-//RS             | Stmt::Break(_)
-//RS             | Stmt::Continue(_)
-//RS             | Stmt::BreakLabel(..)
-//RS             | Stmt::ContinueLabel(..) => {}
-//RS             _ => sites.push(CaptureSite {
-//RS                 operation: "unsupported statement boundary".to_string(),
-//RS                 effect: None,
-//RS             }),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_capture_lvalue(
-//RS     target: &jet::AST::LValue,
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     match target {
-//RS         jet::AST::LValue::Local { .. } => {}
-//RS         jet::AST::LValue::Index { base, index, .. } => {
-//RS             collect_capture_expr(base, aliases, local_functions, sites);
-//RS             collect_capture_expr(index, aliases, local_functions, sites);
-//RS         }
-//RS         jet::AST::LValue::Field { base, .. } => {
-//RS             collect_capture_expr(base, aliases, local_functions, sites)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_capture_expr(
-//RS     expr: &Expr,
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     match expr {
-//RS         Expr::Call(call) => {
-//RS             if local_functions.contains(&call.name) {
-//RS                 // Local calls are covered by the same source walk. Their
-//RS                 // transitive unsupported boundary is reported at the callee.
-//RS             } else if let Some(effect) = jet::Sema::builtin_effect(&call.name) {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: call.name.clone(),
-//RS                     effect: Some(effect),
-//RS                 });
-//RS             } else if let Some((module, method)) = call.name.rsplit_once('.') {
-//RS                 let resolved_module = aliases.get(module).map(String::as_str).unwrap_or(module);
-//RS                 if let Some(effect) = jet::Sema::core_effect(resolved_module, method) {
-//RS                     sites.push(CaptureSite {
-//RS                         operation: call.name.clone(),
-//RS                         effect: Some(effect),
-//RS                     });
-//RS                 } else if aliases.contains_key(module) {
-//RS                     // The sema effect table is authoritative for imported
-//RS                     // Core calls. A known pure method contributes no site;
-//RS                     // an unknown method still fails at the normal front end
-//RS                     // before capture can finalize an artifact.
-//RS                 } else {
-//RS                     sites.push(CaptureSite {
-//RS                         operation: call.name.clone(),
-//RS                         effect: None,
-//RS                     });
-//RS                 }
-//RS             } else {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: call.name.clone(),
-//RS                     effect: None,
-//RS                 });
-//RS             }
-//RS             for arg in &call.args {
-//RS                 collect_capture_expr(&arg.expr, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } => {
-//RS             let mut recognized = false;
-//RS             if let Some(path) = capture_receiver_path(receiver) {
-//RS                 let mut parts = path.split('.');
-//RS                 if let Some(alias) = parts.next() {
-//RS                     if let Some(module) = aliases.get(alias) {
-//RS                         let suffix = parts.collect::<Vec<_>>().join(".");
-//RS                         let module = if suffix.is_empty() {
-//RS                             module.clone()
-//RS                         } else {
-//RS                             format!("{module}.{suffix}")
-//RS                         };
-//RS                         if let Some(effect) = jet::Sema::core_effect(&module, method) {
-//RS                             recognized = true;
-//RS                             sites.push(CaptureSite {
-//RS                                 operation: format!("{module}.{method}"),
-//RS                                 effect: Some(effect),
-//RS                             });
-//RS                         } else if aliases.contains_key(alias) {
-//RS                             recognized = true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if !recognized {
-//RS                 sites.push(CaptureSite {
-//RS                     operation: format!("method call {method}"),
-//RS                     effect: None,
-//RS                 });
-//RS             }
-//RS             collect_capture_expr(receiver, aliases, local_functions, sites);
-//RS             for arg in args {
-//RS                 collect_capture_expr(&arg.expr, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             sites.push(CaptureSite {
-//RS                 operation: "opaque callable".to_string(),
-//RS                 effect: None,
-//RS             });
-//RS             collect_capture_expr(callee, aliases, local_functions, sites);
-//RS             for arg in args {
-//RS                 collect_capture_expr(&arg.expr, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::Str(parts, _) => {
-//RS             for part in parts {
-//RS                 if let jet::AST::StrPart::Interp(value, _) = part {
-//RS                     collect_capture_expr(value, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::ListLit(items, _) => {
-//RS             for item in items {
-//RS                 collect_capture_expr(item, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::TupleLit(items, _, _) => {
-//RS             for (_, item) in items {
-//RS                 collect_capture_expr(item, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::MemberSpread { base, .. }
-//RS         | Expr::Spread(base, _)
-//RS         | Expr::Deref(base, _)
-//RS         | Expr::RawOf(base, _)
-//RS         | Expr::Copy(base, _)
-//RS         | Expr::Place(base, _, _)
-//RS         | Expr::Field(base, _, _)
-//RS         | Expr::Present(base, _)
-//RS         | Expr::Ok(base, _)
-//RS         | Expr::Err(base, _)
-//RS         | Expr::Paren(base, _) => collect_capture_expr(base, aliases, local_functions, sites),
-//RS         Expr::Try(base, _, _, note) => {
-//RS             collect_capture_expr(base, aliases, local_functions, sites);
-//RS             if let Some(note) = note {
-//RS                 collect_capture_expr(note, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::MapLit(entries, _) => {
-//RS             for (key, value) in entries {
-//RS                 collect_capture_expr(key, aliases, local_functions, sites);
-//RS                 collect_capture_expr(value, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::Index { base, index, .. } => {
-//RS             collect_capture_expr(base, aliases, local_functions, sites);
-//RS             collect_capture_expr(index, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             collect_capture_expr(base, aliases, local_functions, sites);
-//RS             if let Some(range) = range {
-//RS                 collect_capture_expr(range, aliases, local_functions, sites);
-//RS             } else {
-//RS                 collect_capture_expr(start, aliases, local_functions, sites);
-//RS                 collect_capture_expr(end, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::Range { start, end, .. } => {
-//RS             collect_capture_expr(start, aliases, local_functions, sites);
-//RS             collect_capture_expr(end, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::Unary(_, inner, _) => {
-//RS             collect_capture_expr(inner, aliases, local_functions, sites)
-//RS         }
-//RS         Expr::Binary(_, left, right, _) => {
-//RS             collect_capture_expr(left, aliases, local_functions, sites);
-//RS             collect_capture_expr(right, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::CompareChain { operands, .. } => {
-//RS             for operand in operands {
-//RS                 collect_capture_expr(operand, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::OptField { base, .. } => collect_capture_expr(base, aliases, local_functions, sites),
-//RS         Expr::StructLit { fields, .. } => {
-//RS             for (_, _, value) in fields {
-//RS                 collect_capture_expr(value, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         Expr::TypedLit { body, .. } => {
-//RS             body.for_each_expr(|value| collect_capture_expr(value, aliases, local_functions, sites))
-//RS         }
-//RS         Expr::EnumLit { args, .. } => {
-//RS             for arg in args {
-//RS                 match arg {
-//RS                     jet::AST::EnumLitArg::Positional(value)
-//RS                     | jet::AST::EnumLitArg::Named { expr: value, .. } => {
-//RS                         collect_capture_expr(value, aliases, local_functions, sites)
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::Tainted(inner, _, _) => collect_capture_expr(inner, aliases, local_functions, sites),
-//RS         Expr::PatternTest {
-//RS             subject, pattern, ..
-//RS         } => {
-//RS             collect_capture_expr(subject, aliases, local_functions, sites);
-//RS             collect_capture_pattern(pattern, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             collect_capture_expr(cond, aliases, local_functions, sites);
-//RS             collect_capture_statements(then_body, aliases, local_functions, sites);
-//RS             collect_capture_expr(then_value, aliases, local_functions, sites);
-//RS             collect_capture_statements(else_body, aliases, local_functions, sites);
-//RS             collect_capture_expr(else_value, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::Lambda(lambda) => match &lambda.body {
-//RS             jet::AST::LambdaBody::Expr(value) => {
-//RS                 collect_capture_expr(value, aliases, local_functions, sites)
-//RS             }
-//RS             jet::AST::LambdaBody::Block(body) => {
-//RS                 collect_capture_statements(body, aliases, local_functions, sites)
-//RS             }
-//RS         },
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => {
-//RS             collect_capture_expr(value, aliases, local_functions, sites);
-//RS             match fallback {
-//RS                 jet::AST::OrFallback::Value(value)
-//RS                 | jet::AST::OrFallback::Return(Some(value), _) => {
-//RS                     collect_capture_expr(value, aliases, local_functions, sites)
-//RS                 }
-//RS                 jet::AST::OrFallback::Panic { args, .. } => {
-//RS                     for arg in args {
-//RS                         collect_capture_expr(&arg.expr, aliases, local_functions, sites);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         Expr::PtrFromAddr { addr, .. } => {
-//RS             sites.push(CaptureSite {
-//RS                 operation: "native pointer boundary".to_string(),
-//RS                 effect: None,
-//RS             });
-//RS             collect_capture_expr(addr, aliases, local_functions, sites);
-//RS         }
-//RS         Expr::StrMatchLit(_, _)
-//RS         | Expr::BinMatchLit(_, _)
-//RS         | Expr::Int(..)
-//RS         | Expr::Float(..)
-//RS         | Expr::Bool(..)
-//RS         | Expr::Char(..)
-//RS         | Expr::Ident(..)
-//RS         | Expr::UnitLit { .. }
-//RS         | Expr::Absent(_)
-//RS         | Expr::Todo { .. }
-//RS         | Expr::ReduceMarker(..)
-//RS         | Expr::ComptimeName { .. } => {}
-//RS         _ => sites.push(CaptureSite {
-//RS             operation: "unsupported expression boundary".to_string(),
-//RS             effect: None,
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn collect_capture_pattern(
-//RS     pattern: &jet::AST::Pattern,
-//RS     aliases: &HashMap<String, String>,
-//RS     local_functions: &HashSet<String>,
-//RS     sites: &mut Vec<CaptureSite>,
-//RS ) {
-//RS     match pattern {
-//RS         jet::AST::Pattern::Or(patterns, _) => {
-//RS             for pattern in patterns {
-//RS                 collect_capture_pattern(pattern, aliases, local_functions, sites);
-//RS             }
-//RS         }
-//RS         jet::AST::Pattern::Struct { fields, .. } => {
-//RS             for field in fields {
-//RS                 if let jet::AST::StructPatField::Value { value, .. } = field {
-//RS                     collect_capture_expr(value, aliases, local_functions, sites);
-//RS                 }
-//RS             }
-//RS         }
-//RS         jet::AST::Pattern::Variant { .. }
-//RS         | jet::AST::Pattern::Present { .. }
-//RS         | jet::AST::Pattern::Absent(_)
-//RS         | jet::AST::Pattern::Ok { .. }
-//RS         | jet::AST::Pattern::Err { .. }
-//RS         | jet::AST::Pattern::Range { .. }
-//RS         | jet::AST::Pattern::StrMatch { .. }
-//RS         | jet::AST::Pattern::BinMatch { .. } => {}
-//RS     }
-//RS }
-//RS 
-//RS fn capture_receiver_path(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => Some(name.clone()),
-//RS         Expr::Field(base, field, _) => Some(format!("{}.{field}", capture_receiver_path(base)?)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn semantic_front_end_items(
-//RS     target: &Target,
-//RS     path: &str,
-//RS     source: &str,
-//RS ) -> (Vec<FrontEndItem>, Vec<ContractDeclaration>) {
-//RS     let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
-//RS     let program = if lex_diagnostics.is_empty() {
-//RS         jet::Parser::parse_with_source(&tokens, source).ok()
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let Some(program) = program else {
-//RS         return (
-//RS             vec![generic_front_end_item(target, path, source)],
-//RS             Vec::new(),
-//RS         );
-//RS     };
-//RS 
-//RS     let mut facts = Vec::new();
-//RS     let mut declarations = Vec::new();
-//RS     collect_semantic_items(
-//RS         target,
-//RS         path,
-//RS         source,
-//RS         &program.items,
-//RS         &mut facts,
-//RS         &mut declarations,
-//RS     );
-//RS     if facts.is_empty() {
-//RS         facts.push(generic_front_end_item(target, path, source));
-//RS     }
-//RS     (facts, declarations)
-//RS }
-//RS 
-//RS fn generic_front_end_item(target: &Target, path: &str, source: &str) -> FrontEndItem {
-//RS     FrontEndItem {
-//RS         id: evidence_id(target, "front_end", path, "1:1-1:1", "program checked"),
-//RS         path: path.to_string(),
-//RS         diagnostic: None,
-//RS         source: source.to_string(),
-//RS         facet: "all",
-//RS         line: 1,
-//RS         column: 1,
-//RS     }
-//RS }
-//RS 
-//RS fn collect_semantic_items(
-//RS     target: &Target,
-//RS     path: &str,
-//RS     source: &str,
-//RS     items: &[Item],
-//RS     facts: &mut Vec<FrontEndItem>,
-//RS     declarations: &mut Vec<ContractDeclaration>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(func) => {
-//RS                 collect_func_semantics(target, path, source, func, facts, declarations)
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for func in &implementation.methods {
-//RS                     collect_func_semantics(target, path, source, func, facts, declarations);
-//RS                 }
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 for func in &definition.methods {
-//RS                     collect_func_semantics(target, path, source, func, facts, declarations);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for func in &definition.methods {
-//RS                     collect_func_semantics(target, path, source, func, facts, declarations);
-//RS                 }
-//RS             }
-//RS             Item::Distinct(definition) => {
-//RS                 if let Some((lower, upper, span)) = definition.range {
-//RS                     push_front_end_fact(
-//RS                         target,
-//RS                         path,
-//RS                         source,
-//RS                         facts,
-//RS                         "refinements",
-//RS                         "refinement",
-//RS                         span,
-//RS                         format!("{} range [{lower}, {upper}]", definition.name),
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_semantic_items(target, path, source, body, facts, declarations);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_func_semantics(
-//RS     target: &Target,
-//RS     path: &str,
-//RS     source: &str,
-//RS     func: &Func,
-//RS     facts: &mut Vec<FrontEndItem>,
-//RS     declarations: &mut Vec<ContractDeclaration>,
-//RS ) {
-//RS     for (marker, clauses) in [("Pre", &func.pre), ("Post", &func.post)] {
-//RS         for clause in clauses {
-//RS             let span = clause.cond.span();
-//RS             let (line, column) = span_line_col(source, span.start);
-//RS             let span_text = span_text(source, span);
-//RS             let claim = normalized_claim(source, span);
-//RS             let message = match &clause.message_expr {
-//RS                 Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-//RS                     jet::AST::StrPart::Lit(value) => Some(value.clone()),
-//RS                     _ => None,
-//RS                 },
-//RS                 _ => None,
-//RS             };
-//RS             declarations.push(ContractDeclaration {
-//RS                 id: evidence_id(target, "contract", path, &span_text, &claim),
-//RS                 path: path.to_string(),
-//RS                 line,
-//RS                 column,
-//RS                 marker,
-//RS                 message,
-//RS             });
-//RS         }
-//RS     }
-//RS     if let Some(effects) = &func.declared_effects {
-//RS         let span = effects.first().map(|(_, span)| *span).unwrap_or(func.span);
-//RS         let names = effects
-//RS             .iter()
-//RS             .map(|(name, _)| name.as_str())
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         push_front_end_fact(
-//RS             target,
-//RS             path,
-//RS             source,
-//RS             facts,
-//RS             "effects",
-//RS             "effect",
-//RS             span,
-//RS             format!("{} effect bound [{names}]", func.name),
-//RS         );
-//RS     }
-//RS     if let Some((callback, span)) = &func.effect_via {
-//RS         push_front_end_fact(
-//RS             target,
-//RS             path,
-//RS             source,
-//RS             facts,
-//RS             "effects",
-//RS             "effect",
-//RS             *span,
-//RS             format!("{} effects via {callback}", func.name),
-//RS         );
-//RS     }
-//RS     if let Some(tag) = &func.scrub_tag {
-//RS         push_front_end_fact(
-//RS             target,
-//RS             path,
-//RS             source,
-//RS             facts,
-//RS             "taint",
-//RS             "taint",
-//RS             func.span,
-//RS             format!("{} scrubs {tag}", func.name),
-//RS         );
-//RS     }
-//RS     if func.is_replayable {
-//RS         push_front_end_fact(
-//RS             target,
-//RS             path,
-//RS             source,
-//RS             facts,
-//RS             "replay",
-//RS             "replayability",
-//RS             func.replayable_span.unwrap_or(func.span),
-//RS             format!("{} is replayable", func.name),
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn push_front_end_fact(
-//RS     target: &Target,
-//RS     path: &str,
-//RS     source: &str,
-//RS     facts: &mut Vec<FrontEndItem>,
-//RS     facet: &'static str,
-//RS     id_kind: &str,
-//RS     span: jet::Diagnostics::Span,
-//RS     claim: String,
-//RS ) {
-//RS     let span_text = span_text(source, span);
-//RS     let (line, column) = span_line_col(source, span.start);
-//RS     facts.push(FrontEndItem {
-//RS         id: evidence_id(target, id_kind, path, &span_text, &claim),
-//RS         path: path.to_string(),
-//RS         diagnostic: None,
-//RS         source: source.to_string(),
-//RS         facet,
-//RS         line,
-//RS         column,
-//RS     });
-//RS }
-//RS 
-//RS fn span_text(source: &str, span: jet::Diagnostics::Span) -> String {
-//RS     let (start_line, start_column) = span_line_col(source, span.start);
-//RS     let (end_line, end_column) = span_line_col(source, span.end);
-//RS     format!("{start_line}:{start_column}-{end_line}:{end_column}")
-//RS }
-//RS 
-//RS fn normalized_claim(source: &str, span: jet::Diagnostics::Span) -> String {
-//RS     source
-//RS         .get(span.start..span.end)
-//RS         .unwrap_or("")
-//RS         .split_whitespace()
-//RS         .collect::<Vec<_>>()
-//RS         .join(" ")
-//RS }
-//RS 
-//RS fn host_target_triple() -> String {
-//RS     format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
-//RS }
-//RS 
-//RS const PROOF_LENSES: &[&str] = &[
-//RS     "all",
-//RS     "refinements",
-//RS     "effects",
-//RS     "taint",
-//RS     "contracts",
-//RS     "tests",
-//RS     "budgets",
-//RS     "replay",
-//RS     "solver",
-//RS ];
-//RS 
-//RS fn validate_lens(value: &str, target: &str, json_mode: bool) {
-//RS     if PROOF_LENSES.contains(&value) {
-//RS         return;
-//RS     }
-//RS     let what = format!("unknown proof lens `{value}`");
-//RS     let why = "`jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver";
-//RS     let fix = format!("try `jet prove {target} --lens tests`");
-//RS     crate::emit_cli_report_for_action("prove", "E2941", what, why.to_string(), fix, json_mode);
-//RS     exit(ExitCodes::USAGE);
-//RS }
-//RS 
-//RS fn run_test_producers(target: &Target) -> Result<(Vec<TestItem>, i32, Vec<RecordLink>), String> {
-//RS     let mut items = Vec::new();
-//RS     let mut highest_exit = ExitCodes::OK;
-//RS     let mut evidence_links = Vec::new();
-//RS     for member in &target.members {
-//RS         if !jet::has_test_blocks(&member.path)
-//RS             && !jet::has_test_contracts(&member.path)
-//RS             && jet::Doctest::discover(&String::from_utf8_lossy(&member.bytes)).is_empty()
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let report_path = std::env::temp_dir().join(format!(
-//RS             "jet_prove_test_{}_{}.bin",
-//RS             std::process::id(),
-//RS             &member.sha256[..16]
-//RS         ));
-//RS         let _ = fs::remove_file(&report_path);
-//RS         let mut command =
-//RS             Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jet")));
-//RS         command
-//RS             .args(["test", &member.path, "--serial", "--show-default"])
-//RS             .env(jet_foundation::Evidence::EVIDENCE_REPORT_ENV, &report_path)
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_REPORT_ID_ENV,
-//RS                 format!("prove:{}", &member.sha256[..16]),
-//RS             )
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_TOOLCHAIN_ENV,
-//RS                 env!("CARGO_PKG_VERSION"),
-//RS             )
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_TARGET_ENV,
-//RS                 host_target_triple(),
-//RS             )
-//RS             .env(jet_foundation::Evidence::EVIDENCE_PROFILE_ENV, "dev")
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_SOURCE_REVISION_ENV,
-//RS                 &target.source_digest,
-//RS             )
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_BUILD_REVISION_ENV,
-//RS                 &target.build_digest,
-//RS             )
-//RS             .env(
-//RS                 jet_foundation::Evidence::EVIDENCE_REVISION_ENV,
-//RS                 &target.mir.optimized_hash,
-//RS             )
-//RS             .env("JET_PROVE_FRESH_TEST", "1")
-//RS             .env_remove("JET_PROP_REPLAY_SEED")
-//RS             .env_remove("JET_PROP_REPLAY_CASE");
-//RS         let replay_failure = read_generated_failure(target, member);
-//RS         if let Some(failure) = replay_failure.as_ref() {
-//RS             command
-//RS                 .env("JET_PROP_SEED", failure.seed.to_string())
-//RS                 .env("JET_PROP_REPLAY_SEED", failure.seed.to_string())
-//RS                 .env("JET_PROP_REPLAY_CASE", failure.case_index.to_string());
-//RS         }
-//RS         let property_seed = replay_failure
-//RS             .as_ref()
-//RS             .map(|failure| failure.seed)
-//RS             .or_else(|| {
-//RS                 std::env::var("JET_PROP_SEED")
-//RS                     .ok()
-//RS                     .and_then(|seed| seed.parse::<u64>().ok())
-//RS             })
-//RS             .unwrap_or(DEFAULT_PROPERTY_SEED);
-//RS         match supervise_child(&mut command, Duration::from_secs(120)) {
-//RS             ChildOutcome::Exited(Some(code)) => {
-//RS                 if code == ExitCodes::ICE {
-//RS                     highest_exit = ExitCodes::ICE;
-//RS                 } else if code == ExitCodes::RUNTIME_PANIC && highest_exit != ExitCodes::ICE {
-//RS                     highest_exit = ExitCodes::RUNTIME_PANIC;
-//RS                 } else if code == ExitCodes::USER_ERROR && highest_exit == ExitCodes::OK {
-//RS                     highest_exit = ExitCodes::USER_ERROR;
-//RS                 }
-//RS                 match read_test_report(&report_path) {
-//RS                     Ok(report) => {
-//RS                         persist_generated_failure(target, member, &report)?;
-//RS                         let report_link = match persist_evidence_report(target, &report) {
-//RS                             Ok(link) => link,
-//RS                             Err(error) => {
-//RS                                 let _ = fs::remove_file(&report_path);
-//RS                                 return Err(error);
-//RS                             }
-//RS                         };
-//RS                         evidence_links.push(report_link);
-//RS                         let invalid_records = report.records.is_empty()
-//RS                             || report.records.iter().any(|record| {
-//RS                                 !matches!(record.kind, EvidenceKind::Property)
-//RS                                     && !record.source.path.is_empty()
-//RS                                     && !producer_path_is_member(target, &record.source.path)
-//RS                             });
-//RS                         if invalid_records {
-//RS                             highest_exit = ExitCodes::ICE;
-//RS                         } else {
-//RS                             if report.records.iter().any(|record| {
-//RS                                 matches!(record.kind, EvidenceKind::Runtime)
-//RS                                     || (matches!(record.kind, EvidenceKind::Contract)
-//RS                                         && record.outcome == EvidenceOutcome::Failed)
-//RS                             }) && highest_exit != ExitCodes::ICE
-//RS                             {
-//RS                                 highest_exit = ExitCodes::RUNTIME_PANIC;
-//RS                             }
-//RS                             for record in report.records {
-//RS                                 let kind = record.kind;
-//RS                                 let kind_code = kind.code();
-//RS                                 let outcome = record.outcome;
-//RS                                 let name = record.identity.claim_id;
-//RS                                 let message = record.detail;
-//RS                                 let property_failure = if matches!(kind, EvidenceKind::Property) {
-//RS                                     parse_generated_failure_detail(&message)
-//RS                                 } else {
-//RS                                     None
-//RS                                 };
-//RS                                 let generation_unavailable = matches!(kind, EvidenceKind::Property)
-//RS                                     && property_generation_unavailable(&message);
-//RS                                 let generated = matches!(kind, EvidenceKind::Property)
-//RS                                     && !outcome.is_incomplete()
-//RS                                     && !generation_unavailable;
-//RS                                 let generated_count = if generated { record.count } else { 0 };
-//RS                                 let source_path = record.source.path;
-//RS                                 if matches!(kind, EvidenceKind::Runtime)
-//RS                                     && (name == "E3005" || message.starts_with("Stop ["))
-//RS                                     || matches!(kind, EvidenceKind::Unit)
-//RS                                         && message.starts_with("Stop [")
-//RS                                 {
-//RS                                     continue;
-//RS                                 }
-//RS                                 let claim = format!("{kind_code}:{name}:{message}");
-//RS                                 let line = if matches!(kind, EvidenceKind::Property) {
-//RS                                     record.count as u32
-//RS                                 } else {
-//RS                                     record.source.line
-//RS                                 };
-//RS                                 let state = if generation_unavailable {
-//RS                                     3
-//RS                                 } else {
-//RS                                     outcome.test_state().unwrap_or_else(|| {
-//RS                                         if outcome == EvidenceOutcome::Failed {
-//RS                                             1
-//RS                                         } else if outcome.is_incomplete() {
-//RS                                             3
-//RS                                         } else {
-//RS                                             0
-//RS                                         }
-//RS                                     })
-//RS                                 };
-//RS                                 let seed = property_failure
-//RS                                     .as_ref()
-//RS                                     .map(|failure| failure.seed)
-//RS                                     .unwrap_or(property_seed);
-//RS                                 let case_index = property_failure
-//RS                                     .as_ref()
-//RS                                     .map_or(0, |failure| failure.case_index);
-//RS                                 items.push(TestItem {
-//RS                                     id: evidence_id(
-//RS                                         target,
-//RS                                         if matches!(kind, EvidenceKind::Contract) {
-//RS                                             "contract"
-//RS                                         } else {
-//RS                                             "unit"
-//RS                                         },
-//RS                                         &member.path,
-//RS                                         "0:0-0:0",
-//RS                                         &claim,
-//RS                                     ),
-//RS                                     path: if matches!(kind, EvidenceKind::Property)
-//RS                                         || source_path.is_empty()
-//RS                                     {
-//RS                                         member.path.clone()
-//RS                                     } else {
-//RS                                         source_path.clone()
-//RS                                     },
-//RS                                     state,
-//RS                                     kind: kind_code,
-//RS                                     message,
-//RS                                     line,
-//RS                                     name,
-//RS                                     seed: if matches!(kind, EvidenceKind::Property) {
-//RS                                         seed.to_string()
-//RS                                     } else {
-//RS                                         String::new()
-//RS                                     },
-//RS                                     case_index,
-//RS                                     generated,
-//RS                                     generated_count,
-//RS                                     reason: if generation_unavailable {
-//RS                                         "generation_unavailable".to_string()
-//RS                                     } else {
-//RS                                         String::new()
-//RS                                     },
-//RS                                 });
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     Err(_) if code == ExitCodes::USER_ERROR => {
-//RS                         if highest_exit == ExitCodes::OK {
-//RS                             highest_exit = ExitCodes::USER_ERROR;
-//RS                         }
-//RS                     }
-//RS                     Err(_) => highest_exit = ExitCodes::ICE,
-//RS                 }
-//RS             }
-//RS             ChildOutcome::Exited(None) => {
-//RS                 highest_exit = ExitCodes::ICE;
-//RS             }
-//RS             ChildOutcome::TimedOut | ChildOutcome::LaunchFailed => {
-//RS                 items.push(TestItem {
-//RS                     id: evidence_id(
-//RS                         target,
-//RS                         "unit",
-//RS                         &member.path,
-//RS                         "0:0-0:0",
-//RS                         "producer unavailable",
-//RS                     ),
-//RS                     path: member.path.clone(),
-//RS                     state: 3,
-//RS                     kind: 0,
-//RS                     message: String::new(),
-//RS                     line: 0,
-//RS                     generated: false,
-//RS                     generated_count: 0,
-//RS                     name: String::new(),
-//RS                     seed: String::new(),
-//RS                     case_index: 0,
-//RS                     reason: "producer_start_failed".to_string(),
-//RS                 });
-//RS             }
-//RS         }
-//RS         let _ = fs::remove_file(report_path);
-//RS     }
-//RS     Ok((items, highest_exit, evidence_links))
-//RS }
-//RS 
-//RS fn producer_path_is_member(target: &Target, path: &str) -> bool {
-//RS     let normalized = path.trim_start_matches("./").replace('\\', "/");
-//RS     target
-//RS         .members
-//RS         .iter()
-//RS         .any(|member| member.path.trim_start_matches("./").replace('\\', "/") == normalized)
-//RS }
-//RS 
-//RS fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
-//RS     // Keep the producer's stdout/stderr out of the user's proof stdout, but
-//RS     // drain both pipes concurrently so a noisy child cannot deadlock on a full
-//RS     // OS pipe. The privacy policy intentionally does not persist these
-//RS     // transcripts in ProofReport; they are bounded diagnostic material for the
-//RS     // supervising process only.
-//RS     configure_child_process_group(command);
-//RS     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-//RS     let mut child = match command.spawn() {
-//RS         Ok(child) => child,
-//RS         Err(_) => return ChildOutcome::LaunchFailed,
-//RS     };
-//RS     let stdout = child
-//RS         .stdout
-//RS         .take()
-//RS         .map(|mut stream| std::thread::spawn(move || capture_child_stream(&mut stream)));
-//RS     let stderr = child
-//RS         .stderr
-//RS         .take()
-//RS         .map(|mut stream| std::thread::spawn(move || capture_child_stream(&mut stream)));
-//RS     let finish = |outcome| {
-//RS         if let Some(thread) = stdout {
-//RS             let _ = thread.join();
-//RS         }
-//RS         if let Some(thread) = stderr {
-//RS             let _ = thread.join();
-//RS         }
-//RS         outcome
-//RS     };
-//RS     let started = Instant::now();
-//RS     loop {
-//RS         match child.try_wait() {
-//RS             Ok(Some(status)) => return finish(ChildOutcome::Exited(status.code())),
-//RS             Ok(None) if started.elapsed() < deadline => {
-//RS                 std::thread::sleep(Duration::from_millis(5));
-//RS             }
-//RS             Ok(None) => {
-//RS                 terminate_child_process_group(child.id());
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 return finish(ChildOutcome::TimedOut);
-//RS             }
-//RS             Err(_) => {
-//RS                 terminate_child_process_group(child.id());
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 return finish(ChildOutcome::Exited(None));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn configure_child_process_group(command: &mut Command) {
-//RS     use std::os::unix::process::CommandExt;
-//RS     unsafe {
-//RS         command.pre_exec(|| {
-//RS             extern "C" {
-//RS                 fn setpgid(pid: i32, pgid: i32) -> i32;
-//RS             }
-//RS             if setpgid(0, 0) == 0 {
-//RS                 Ok(())
-//RS             } else {
-//RS                 Err(std::io::Error::last_os_error())
-//RS             }
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn configure_child_process_group(_command: &mut Command) {}
-//RS 
-//RS #[cfg(unix)]
-//RS fn terminate_child_process_group(pid: u32) {
-//RS     extern "C" {
-//RS         fn kill(pid: i32, signal: i32) -> i32;
-//RS     }
-//RS     unsafe {
-//RS         let _ = kill(-(pid as i32), 9);
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn terminate_child_process_group(_pid: u32) {}
-//RS 
-//RS fn capture_child_stream(stream: &mut impl std::io::Read) -> Vec<u8> {
-//RS     const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
-//RS     let mut captured = Vec::new();
-//RS     let mut buffer = [0u8; 8192];
-//RS     loop {
-//RS         match stream.read(&mut buffer) {
-//RS             Ok(0) => break,
-//RS             Ok(count) => {
-//RS                 let remaining = MAX_TRANSCRIPT_BYTES.saturating_sub(captured.len());
-//RS                 captured.extend_from_slice(&buffer[..count.min(remaining)]);
-//RS             }
-//RS             Err(_) => break,
-//RS         }
-//RS     }
-//RS     captured
-//RS }
-//RS 
-//RS fn read_test_report(path: &Path) -> Result<EvidenceReport, String> {
-//RS     EvidenceReport::read(path)
-//RS }
-//RS 
-//RS fn read_test_report_bytes(bytes: &[u8]) -> Result<EvidenceReport, String> {
-//RS     let (records, derivations) = decode_report_bytes(bytes)?;
-//RS     let report_id = records
-//RS         .first()
-//RS         .map(|record| record.identity.report_id.clone())
-//RS         .unwrap_or_else(|| "test-run".into());
-//RS     EvidenceReport::try_from_records_with_derivations(report_id, records, derivations)
-//RS         .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod protocol_tests {
-//RS     use super::read_test_report_bytes;
-//RS 
-//RS     #[test]
-//RS     fn hostile_protocol_shapes_fail_closed() {
-//RS         use jet_foundation::Evidence::{EVIDENCE_REPORT_MAGIC, EVIDENCE_REPORT_VERSION};
-//RS 
-//RS         assert!(read_test_report_bytes(b"BADMAGIC").is_err());
-//RS 
-//RS         let mut header = EVIDENCE_REPORT_MAGIC.to_vec();
-//RS         header.extend_from_slice(&EVIDENCE_REPORT_VERSION.to_be_bytes());
-//RS         assert!(read_test_report_bytes(&header).is_ok());
-//RS 
-//RS         let mut trailing = header.clone();
-//RS         trailing.push(0);
-//RS         assert!(read_test_report_bytes(&trailing).is_err());
-//RS 
-//RS         let mut unknown_kind = header.clone();
-//RS         unknown_kind.extend_from_slice(&[9, 0, 0, 0]);
-//RS         assert!(read_test_report_bytes(&unknown_kind).is_err());
-//RS 
-//RS         let mut unknown_outcome = header.clone();
-//RS         unknown_outcome.extend_from_slice(&[0, 0, 9, 0]);
-//RS         assert!(read_test_report_bytes(&unknown_outcome).is_err());
-//RS 
-//RS         let oversized = vec![0; 16 * 1024 * 1024 + 1];
-//RS         assert!(read_test_report_bytes(&oversized).is_err());
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod supervision_tests {
-//RS     use super::{supervise_child, ChildOutcome};
-//RS     use std::fs;
-//RS     use std::path::PathBuf;
-//RS     use std::process::Command;
-//RS     use std::time::Duration;
-//RS 
-//RS     #[test]
-//RS     #[ignore]
-//RS     fn child_helper() {
-//RS         match std::env::var("JET_PROVE_CHILD_MODE").as_deref() {
-//RS             Ok("exit70") => std::process::exit(jet_foundation::ExitCodes::RUNTIME_PANIC),
-//RS             Ok("crash") => std::process::abort(),
-//RS             Ok("timeout") => {
-//RS                 std::thread::sleep(Duration::from_millis(300));
-//RS                 if let Some(path) = std::env::var_os("JET_PROVE_CHILD_MARKER") {
-//RS                     fs::write(path, b"orphan survived").unwrap();
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn helper(mode: &str) -> Command {
-//RS         let mut command = Command::new(std::env::current_exe().unwrap());
-//RS         command
-//RS             .args([
-//RS                 "--exact",
-//RS                 "CmdProve::supervision_tests::child_helper",
-//RS                 "--ignored",
-//RS             ])
-//RS             .env("JET_PROVE_CHILD_MODE", mode);
-//RS         command
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_exit_crash_timeout_and_unavailable_without_orphan() {
-//RS         assert!(matches!(
-//RS             supervise_child(&mut helper("exit70"), Duration::from_secs(2)),
-//RS             ChildOutcome::Exited(Some(70))
-//RS         ));
-//RS 
-//RS         assert!(matches!(
-//RS             supervise_child(&mut helper("crash"), Duration::from_secs(2)),
-//RS             ChildOutcome::Exited(None) | ChildOutcome::Exited(Some(_))
-//RS         ));
-//RS 
-//RS         let marker = PathBuf::from(format!(
-//RS             "/tmp/jet-prove-supervision-{}-marker",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = fs::remove_file(&marker);
-//RS         let mut timeout = helper("timeout");
-//RS         timeout.env("JET_PROVE_CHILD_MARKER", &marker);
-//RS         assert!(matches!(
-//RS             supervise_child(&mut timeout, Duration::from_millis(20)),
-//RS             ChildOutcome::TimedOut
-//RS         ));
-//RS         std::thread::sleep(Duration::from_millis(350));
-//RS         assert!(!marker.exists(), "timed-out child survived kill+wait");
-//RS 
-//RS         let mut missing = Command::new(format!(
-//RS             "/tmp/jet-prove-missing-executable-{}",
-//RS             std::process::id()
-//RS         ));
-//RS         assert!(matches!(
-//RS             supervise_child(&mut missing, Duration::from_millis(20)),
-//RS             ChildOutcome::LaunchFailed
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn target_input_sha256_for_file(file: &str) -> Result<String, String> {
-//RS     resolve_target(file).map(|target| target.input_sha256)
-//RS }
-//RS fn resolve_target(raw: &str) -> Result<Target, String> {
-//RS     let path = Path::new(raw);
-//RS     let metadata = fs::symlink_metadata(path).map_err(|error| {
-//RS         if error.kind() == std::io::ErrorKind::NotFound {
-//RS             format!("can't find proof target `{raw}`")
-//RS         } else {
-//RS             format!("can't inspect proof target `{raw}`: {error}")
-//RS         }
-//RS     })?;
-//RS     if metadata.file_type().is_symlink() {
-//RS         return Err(format!("proof target `{raw}` must not be a symlink"));
-//RS     }
-//RS     reject_symlink_ancestors(path)?;
-//RS     let (kind, mut paths) = if metadata.is_file() {
-//RS         if path.extension().and_then(|ext| ext.to_str()) != Some(jet::Syntax::FILE_EXT) {
-//RS             return Err(format!("proof target `{raw}` is not a .jet file"));
-//RS         }
-//RS         ("file", vec![path.to_path_buf()])
-//RS     } else {
-//RS         if !metadata.is_dir() {
-//RS             return Err(format!("proof target `{raw}` is not a file or directory"));
-//RS         }
-//RS         let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)? {
-//RS             "package"
-//RS         } else {
-//RS             "workspace"
-//RS         };
-//RS         let mut found = Vec::new();
-//RS         collect_jet_files(path, &mut found)?;
-//RS         if found.is_empty() {
-//RS             return Err(format!("proof target `{raw}` contains no .jet files"));
-//RS         }
-//RS         (kind, found)
-//RS     };
-//RS     paths.sort_by(|a, b| normalized(a).as_bytes().cmp(normalized(b).as_bytes()));
-//RS     let mut members = Vec::with_capacity(paths.len());
-//RS     for path in paths {
-//RS         let bytes =
-//RS             fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
-//RS         members.push(Member {
-//RS             path: normalized(&path),
-//RS             sha256: jet::SHA256::sha256_hex(&bytes),
-//RS             bytes,
-//RS         });
-//RS     }
-//RS     let mut identity_members = members
-//RS         .iter()
-//RS         .map(|member| (member.path.clone(), member.sha256.clone()))
-//RS         .collect::<Vec<_>>();
-//RS     if metadata.is_dir() {
-//RS         let mut closure_paths = Vec::new();
-//RS         collect_identity_files(path, &mut closure_paths)?;
-//RS         for closure_path in closure_paths {
-//RS             let bytes = fs::read(&closure_path)
-//RS                 .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
-//RS             let closure_path = normalized(&closure_path);
-//RS             if !identity_members
-//RS                 .iter()
-//RS                 .any(|(member_path, _)| member_path == &closure_path)
-//RS             {
-//RS                 identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
-//RS             }
-//RS         }
-//RS     } else {
-//RS         let manifest_root = path
-//RS             .parent()
-//RS             .and_then(jet::Loader::find_manifest_root)
-//RS             .map(|root| {
-//RS                 if root.as_os_str().is_empty() {
-//RS                     PathBuf::from(".")
-//RS                 } else {
-//RS                     root
-//RS                 }
-//RS             });
-//RS         if let Some(root) = manifest_root {
-//RS             let mut closure_paths = Vec::new();
-//RS             collect_identity_files(&root, &mut closure_paths)?;
-//RS             for closure_path in closure_paths {
-//RS                 let bytes = fs::read(&closure_path)
-//RS                     .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
-//RS                 let closure_path = normalized(&closure_path);
-//RS                 if !identity_members
-//RS                     .iter()
-//RS                     .any(|(member_path, _)| member_path == &closure_path)
-//RS                 {
-//RS                     identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
-//RS                 }
-//RS             }
-//RS         }
-//RS         // A file target can still import source outside the entry file. Ask
-//RS         // the production loader for its resolved dependency closure so replay
-//RS         // identity cannot be reused after an imported module changes.
-//RS         let (_, dependencies) =
-//RS             jet::Loader::load_entry_with_overlays_and_dependencies(raw, &[], true);
-//RS         for dependency in dependencies {
-//RS             let dependency_metadata = match fs::symlink_metadata(&dependency) {
-//RS                 Ok(metadata) => metadata,
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-//RS                 Err(error) => {
-//RS                     return Err(format!(
-//RS                         "couldn't inspect proof dependency `{}`: {error}",
-//RS                         dependency.display()
-//RS                     ))
-//RS                 }
-//RS             };
-//RS             if dependency_metadata.file_type().is_symlink() {
-//RS                 return Err(format!(
-//RS                     "proof target contains symlink `{}`",
-//RS                     dependency.display()
-//RS                 ));
-//RS             }
-//RS             if !dependency_metadata.is_file() {
-//RS                 continue;
-//RS             }
-//RS             let bytes = fs::read(&dependency).map_err(|e| {
-//RS                 format!(
-//RS                     "couldn't read proof dependency `{}`: {e}",
-//RS                     dependency.display()
-//RS                 )
-//RS             })?;
-//RS             let dependency_path = normalized(&dependency);
-//RS             if !identity_members
-//RS                 .iter()
-//RS                 .any(|(member_path, _)| member_path == &dependency_path)
-//RS             {
-//RS                 identity_members.push((dependency_path, jet::SHA256::sha256_hex(&bytes)));
-//RS             }
-//RS         }
-//RS     }
-//RS     let canonical = jet::ReceiptStore::canonical_target_identity(path, &identity_members)?;
-//RS     let identity_members = canonical.members;
-//RS     let input_sha256 = canonical.input_sha256;
-//RS     let authority_root = canonical.authority_root;
-//RS     let source_records = identity_members
-//RS         .iter()
-//RS         .filter(|(member_path, _)| member_path.ends_with(".jet"))
-//RS         .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
-//RS         .collect::<Vec<_>>();
-//RS     let source_digest = proof_digest("jet-proof-source-v2", &source_records);
-//RS     let lock_records = identity_members
-//RS         .iter()
-//RS         .filter(|(member_path, _)| is_lock_identity_path(member_path))
-//RS         .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
-//RS         .collect::<Vec<_>>();
-//RS     let lock_digest = proof_digest_or_none("jet-proof-lock-v2", &lock_records);
-//RS     let build_records = identity_members
-//RS         .iter()
-//RS         .filter(|(member_path, _)| is_build_identity_path(member_path))
-//RS         .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
-//RS         .collect::<Vec<_>>();
-//RS     let build_inputs = proof_digest_or_none("jet-proof-build-inputs-v2", &build_records);
-//RS     let build_digest = proof_build_digest(&build_inputs, &lock_digest)?;
-//RS     let semantic_bundle = if members.len() == 1 {
-//RS         load_checked_proof_bundle(&members[0].path, "dev", &BTreeMap::new())
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let core_abi = proof_core_abi(
-//RS         semantic_bundle.as_ref().map(|(bundle, _)| bundle),
-//RS         &source_digest,
-//RS     );
-//RS     let mir = proof_mir_identity(
-//RS         semantic_bundle.as_ref(),
-//RS         &source_digest,
-//RS         &core_abi,
-//RS         &members,
-//RS     );
-//RS     Ok(Target {
-//RS         kind,
-//RS         root: normalized(path),
-//RS         authority_root,
-//RS         identity_members,
-//RS         input_sha256,
-//RS         source_digest,
-//RS         build_digest,
-//RS         core_abi,
-//RS         lock_digest,
-//RS         mir,
-//RS         members,
-//RS     })
-//RS }
-//RS 
-// END-PORT-PENDING 0704 Source/CmdProve.rs:1821-3618
+use jet.ProveReplay.[ReplayIdentity, ReplayAuthority, CaptureOpts, prepare_saved_replay, prepare_replay, emit_prove_diag]
+use jet.Sema.Effect
+use jet.AST.[Item, Expr, LValue, Pattern, ImportKind, core_list_prefix]
+use jet.SHA256.sha256_hex
+use jet.ExitCodes
+use core.process.exit
+
+// Rust: Source/CmdProve.rs:1821
+fn prepare_replay_or_exit(identity: ReplayIdentity, path: String, json: Bool) -> ReplayAuthority {
+    is_saved :: path.starts_with(".jet/records/saved/") || jet.build_project_root(identity.entry).ok()
+        .is_some_and((root) -> OSPath.new(path).starts_with(root.join(".jet/records/saved")))
+    prepared :: if is_saved -> prepare_saved_replay(identity, OSPath.new(path)) else -> prepare_replay(identity, path)
+    if prepared == {
+        .Ok(authority) -> authority
+        .Err((code, why)) -> {
+            what :: if code == {
+                "E3620" -> "replay schema version is incompatible"
+                "E3621" -> "replay semantic identity does not match"
+                "E3628" -> "replay capture exceeded its artifact limit"
+                _ -> "replay artifact is corrupt"
+            }
+            fix :: if code == {
+                "E3620" -> "use a reader for the artifact schema, or recapture with this Jet"
+                "E3621" -> "replay the exact target identity that produced the artifact"
+                "E3628" -> "recapture a bounded artifact with a recorded Time authority"
+                _ -> "recapture the target and keep the complete `.jetproof-replay` artifact"
+            }
+            emit_prove_diag(code, what, why, fix, json)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:1856
+fn time_site_id_for_target(target: Target) -> String {
+    (path, offset) :: target.members.first().map((member) -> {
+        source :: String.from_utf8_lossy(member.bytes)
+        (member.path, source.find("time.now").unwrap_or(USize.MAX))
+    }).unwrap_or((target.root, USize.MAX))
+    sha256_hex("{path}:{offset}:core.time.now".as_bytes())
+}
+
+// Rust: Source/CmdProve.rs:1871
+fn lens_shows(lenses: [String], facet: String) -> Bool {
+    if lenses.is_empty() -> return true
+    if lenses.iter().any((lens) -> lens == "all") -> return facet != "solver"
+    lenses.iter().any((lens) -> lens == facet)
+}
+
+// Rust: Source/CmdProve.rs:1881
+fn canonical_lens_names(lenses: [String]) -> [String] {
+    if lenses.iter().any((lens) -> lens == "all") {
+        return if lenses.iter().any((lens) -> lens == "solver") -> ["all", "solver"] else -> ["all"]
+    }
+    PROOF_LENSES.iter().filter((candidate) -> lenses.iter().any((lens) -> lens == candidate)).collect()
+}
+
+// Rust: Source/CmdProve.rs:1896
+fn outside_selected_lenses(lenses: [String], items: [FrontEndItem], tests: [TestItem],
+    budgets: jet.BudgetView.BudgetProjection, declarations: [ContractDeclaration]) -> [String] {
+    if lenses.is_empty() -> return []
+    rows := [String]{}
+    loop item in items.iter().filter((item) -> item.diagnostic != None) -> rows.push("  front end failed at {item.path}:{item.line}")
+    loop item in tests.iter().filter((item) -> item.state >= 1) {
+        kind :: if item.kind == { 1 -> "contract"; 2 -> "runtime"; 3 -> "property"; 4 -> "doctest"; _ -> "unit" }
+        if !lens_shows(lenses, if item.kind == 1 -> "contracts" else -> "tests") {
+            message :: item.message.replace("\n", " ").replace("\r", " ")
+            rows.push("  {kind} {item.name}: {message}")
+        }
+    }
+    loop declaration in declarations {
+        observed :: tests.iter().any((item) -> item.kind == 1 && item.name == declaration.marker
+            && USize.from(item.line) == declaration.line && source_paths_match(item.path, declaration.path) && item.state <= 1)
+        if !observed && !lens_shows(lenses, "contracts") -> rows.push("  contract {declaration.marker} at {declaration.path}:{declaration.line}: not observed")
+    }
+    loop fact in budgets.facts {
+        unavailable :: fact.evidence == "unavailable"
+        failed :: fact.outcome != "pass"
+        if (unavailable || failed) && !lens_shows(lenses, "budgets") -> rows.push("  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})")
+    }
+    loop reason in budgets.rejected {
+        if !lens_shows(lenses, "budgets") -> rows.push("  budget unavailable: {reason}")
+    }
+    if rows.is_empty() -> return ["OUTSIDE SELECTED LENSES", "  none failed or unavailable"]
+    output := ["OUTSIDE SELECTED LENSES"]
+    output.extend(rows)
+    output
+}
+
+// Rust: Source/CmdProve.rs:1967
+struct CaptureSite { operation: String, effect: Effect? }
+
+// Rust: Source/CmdProve.rs:1978
+// Check parsed authority before starting the producer; unknown call shapes fail closed.
+fn preflight_capture_target(target: Target, opts: CaptureOpts, json_mode: Bool) -> () Int32! {
+    sites :: capture_sites_for_target(target)
+    time_sites :: sites.iter().filter(supported_time_capture_site).count()
+    if time_sites > 1 -> return capture_preflight_error("E3625", "multiple core.time.now sites",
+        "the current replay adapter has one bounded Time record and cannot prove request order for multiple sites",
+        "capture one Time request per target, or route time through an injected deterministic input", json_mode)
+    loop site in sites {
+        if site.effect == None -> return capture_preflight_error("E3625", site.operation,
+            "the reachable call shape is opaque to the replay authority",
+            "route the operation through a supported deterministic input, or remove it from the captured target", json_mode)
+        effect :: site.effect.unwrap()
+        if effect == .Time && !supported_time_capture_site(site) -> return capture_preflight_error("E3625", site.operation,
+            "the current replay adapter records only `core.time.now`; this Time operation would sleep or read an unrecorded clock",
+            "capture a target that uses `core.time.now`, or route the operation through an injected deterministic input", json_mode)
+        if effect == {
+            .Time -> {}
+            .Rand -> {
+                if !opts.sensitive -> return capture_preflight_error("E3627", site.operation,
+                    "safe capture reached raw {effect.name()}; untainted values still require sensitive-data consent",
+                    "inject deterministic data, or explicitly use --capture-sensitive", json_mode)
+            }
+            .IO -> {
+                if !opts.sensitive -> return capture_preflight_error("E3627", site.operation,
+                    "safe capture reached raw {effect.name()}; untainted values still require sensitive-data consent",
+                    "inject deterministic data, or explicitly use --capture-sensitive", json_mode)
+            }
+            .Net -> {
+                if !opts.sensitive -> return capture_preflight_error("E3627", site.operation,
+                    "safe capture reached raw {effect.name()}; untainted values still require sensitive-data consent",
+                    "inject deterministic data, or explicitly use --capture-sensitive", json_mode)
+            }
+            other -> return capture_preflight_error("E3625", site.operation,
+                "replay capture has no authority adapter for the {other.name()} effect",
+                "route the operation through a supported deterministic input, or change the capture target", json_mode)
+        }
+    }
+    // A no-Time target may still capture an envelope for schema/identity checks.
+    Ok(())
+}
+
+// Rust: Source/CmdProve.rs:2050
+fn preflight_replay_target(target: Target, json_mode: Bool) -> () Int32! {
+    sites :: capture_sites_for_target(target)
+    time_sites :: sites.iter().filter(supported_time_capture_site).count()
+    if time_sites > 1 {
+        emit_prove_diag("E3623", "replay diverged from captured authority",
+            "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record",
+            "recapture a target with one supported Time request, or route time through an injected deterministic input", json_mode)
+        return Err(ExitCodes.USER_ERROR)
+    }
+    loop site in sites {
+        if supported_time_capture_site(site) -> continue
+        operation :: site.operation
+        why :: if site.effect == {
+            .Some(.Time) -> "replay reached unsupported Time operation at {operation}; the artifact records only `core.time.now`"
+            .Some(effect) -> "replay reached unrecorded {effect.name()} authority at {operation}"
+            .None -> "replay reached an opaque authority boundary at {operation}"
+        }
+        emit_prove_diag("E3623", "replay diverged from captured authority", why,
+            "recapture with a supported Time-only target, or remove the unrecorded boundary", json_mode)
+        return Err(ExitCodes.USER_ERROR)
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdProve.rs:2090
+fn supported_time_capture_site(site: CaptureSite) -> Bool {
+    site.effect == Some(Effect.Time) && site.operation.rsplit(".").next() == Some("now")
+}
+
+// Rust: Source/CmdProve.rs:2095
+fn capture_sites_for_target(target: Target) -> [CaptureSite] {
+    local_functions := Set[String].new()
+    loop member in target.members {
+        source :: String.from_utf8_lossy(member.bytes)
+        (tokens, lex_diagnostics) :: jet.Lexer.lex(source)
+        if !lex_diagnostics.is_empty() -> continue
+        program :: if jet.Parser.parse_with_source(tokens, source) == { .Ok(program) -> program; .Err(_) -> continue }
+        collect_capture_function_names(program.items, &local_functions)
+    }
+    sites := [CaptureSite]{}
+    loop member in target.members {
+        source :: String.from_utf8_lossy(member.bytes)
+        (tokens, lex_diagnostics) :: jet.Lexer.lex(source)
+        if !lex_diagnostics.is_empty() -> continue
+        program :: if jet.Parser.parse_with_source(tokens, source) == { .Ok(program) -> program; .Err(_) -> continue }
+        aliases := [String:String]{}
+        loop import in program.imports {
+            if import.core_module_path() == .Some(module) {
+                alias :: import.import_alias()
+                aliases.insert(alias, module)
+                if alias.rsplit(".").next() == .Some(short) -> aliases.entry(short).or_insert(module)
+            }
+            prefix :: if import.kind == { .Unqualified(module_alias, _) -> core_list_prefix(module_alias); _ -> None }
+            if prefix == .Some(value) {
+                loop binding in import.walk_bindings() {
+                    if binding.original == None -> continue
+                    module :: "{value}.{binding.original.unwrap()}"
+                    if jet.Syntax.is_known_core_module(module) -> aliases.insert(binding.local, module)
+                }
+            }
+        }
+        collect_capture_items(program.items, aliases, local_functions, &sites)
+    }
+    sites
+}
+
+// Rust: Source/CmdProve.rs:2153
+fn collect_capture_function_names(items: [Item], names: &Set[String]) -> {
+    loop item in items {
+        if item == {
+            .Func(func) -> names.insert(func.name)
+            .Impl(implementation) -> names.extend(implementation.methods.iter().map((func) -> func.name))
+            .Struct(definition) -> names.extend(definition.methods.iter().map((func) -> func.name))
+            .Enum(definition) -> names.extend(definition.methods.iter().map((func) -> func.name))
+            .CodeModule(module) -> { if module.body == .Some(body) -> collect_capture_function_names(body, names) }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:2178
+fn capture_preflight_error(code: String, operation: String, why: String, fix: String, json_mode: Bool) -> () Int32! {
+    what :: if code == "E3627" -> "replay capture refused sensitive data" else -> "replay capture cannot model {operation}"
+    emit_prove_diag(code, what, why, fix, json_mode)
+    Err(ExitCodes.USER_ERROR)
+}
+
+use jet.AST.[Func, Stmt, ForKind, StrPart, EnumLitArg, LambdaBody, OrFallback]
+
+// Rust: Source/CmdProve.rs:2194
+fn collect_capture_items(items: [Item], aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    loop item in items {
+        if item == {
+            .Func(func) -> collect_capture_func(func, aliases, local_functions, sites)
+            .Impl(implementation) -> { loop func in implementation.methods -> collect_capture_func(func, aliases, local_functions, sites) }
+            .Struct(definition) -> { loop func in definition.methods -> collect_capture_func(func, aliases, local_functions, sites) }
+            .Enum(definition) -> { loop func in definition.methods -> collect_capture_func(func, aliases, local_functions, sites) }
+            .Test(test) -> collect_capture_statements(test.body, aliases, local_functions, sites)
+            .CodeModule(module) -> { if module.body == .Some(body) -> collect_capture_items(body, aliases, local_functions, sites) }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:2231
+fn collect_capture_func(func: Func, aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    collect_capture_statements(func.body, aliases, local_functions, sites)
+}
+
+// Rust: Source/CmdProve.rs:2240
+fn collect_capture_statements(statements: [Stmt], aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    loop statement in statements {
+        if statement == {
+            .Expr(expr) | .Yield(expr, _) | .DeferClose{close: expr, ..} -> collect_capture_expr(expr, aliases, local_functions, sites)
+            .Val(binding) -> collect_capture_expr(binding.init, aliases, local_functions, sites)
+            .Assign{target, value, ..} -> {
+                collect_capture_lvalue(target, aliases, local_functions, sites)
+                collect_capture_expr(value, aliases, local_functions, sites)
+            }
+            .Return(.Some(expr), _) | .BreakValue(expr, _) | .BreakLabelValue(_, _, expr, _) -> collect_capture_expr(expr, aliases, local_functions, sites)
+            .While{cond, body, ..} -> {
+                collect_capture_expr(cond, aliases, local_functions, sites)
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .For{kind, body, ..} -> {
+                if kind == {
+                    .Range{start, end, step, ..} -> {
+                        collect_capture_expr(start, aliases, local_functions, sites)
+                        collect_capture_expr(end, aliases, local_functions, sites)
+                        if step == .Some(value) -> collect_capture_expr(value, aliases, local_functions, sites)
+                    }
+                    .In{collection, step} -> {
+                        collect_capture_expr(collection, aliases, local_functions, sites)
+                        if step == .Some(value) -> collect_capture_expr(value, aliases, local_functions, sites)
+                    }
+                }
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Switch{subject, arms, else_body, ..} | .ComptimeSwitch{subject, arms, else_body, ..} -> {
+                collect_capture_expr(subject, aliases, local_functions, sites)
+                loop arm in arms {
+                    collect_capture_expr(arm.cond, aliases, local_functions, sites)
+                    collect_capture_statements(arm.body, aliases, local_functions, sites)
+                }
+                if else_body == .Some(body) -> collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .CountedLoop{init, cond, step, body, ..} -> {
+                collect_capture_expr(init.init, aliases, local_functions, sites)
+                collect_capture_expr(cond, aliases, local_functions, sites)
+                if step == .Some(value) -> collect_capture_statements([value], aliases, local_functions, sites)
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Unsafe{body, ..} -> {
+                sites.push(CaptureSite{operation: "#Unsafe raw boundary", effect: None})
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .TaskGroup{body, ..} | .Reactive{body, ..} -> {
+                sites.push(CaptureSite{operation: "task/concurrency boundary", effect: None})
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Impure{body, ..} -> {
+                sites.push(CaptureSite{operation: "comptime impure boundary", effect: None})
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Live{body, ..} -> {
+                sites.push(CaptureSite{operation: "live terminal boundary", effect: None})
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .AssumeDet{body, ..} -> {
+                sites.push(CaptureSite{operation: "assume-deterministic boundary", effect: None})
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Loop{body, ..} | .Shield{body, ..} | .Switched{body, ..} | .Region{body, ..}
+                | .Policy{body, ..} | .Layout{body, ..} | .AuthorityScope{body, ..}
+                | .ComptimeBlock{body, ..} | .Transact{body, ..} -> collect_capture_statements(body, aliases, local_functions, sites)
+            .ContextBlock{fields, body, ..} -> {
+                sites.push(CaptureSite{operation: "context block boundary", effect: None})
+                loop (_, value, _) in fields -> collect_capture_expr(value, aliases, local_functions, sites)
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .ScopeMember{args, body, ..} -> {
+                sites.push(CaptureSite{operation: "scope member boundary", effect: None})
+                loop arg in args -> collect_capture_expr(arg, aliases, local_functions, sites)
+                collect_capture_statements(body, aliases, local_functions, sites)
+            }
+            .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> {}
+            _ -> sites.push(CaptureSite{operation: "unsupported statement boundary", effect: None})
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:2406
+fn collect_capture_lvalue(target: LValue, aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    if target == {
+        .Local{..} -> {}
+        .Index{base, index, ..} -> {
+            collect_capture_expr(base, aliases, local_functions, sites)
+            collect_capture_expr(index, aliases, local_functions, sites)
+        }
+        .Field{base, ..} -> collect_capture_expr(base, aliases, local_functions, sites)
+    }
+}
+
+// Rust: Source/CmdProve.rs:2424
+fn collect_capture_expr(expr: Expr, aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    if expr == {
+        .Call(call) -> {
+            if local_functions.contains(call.name) {
+                // Local transitive boundaries are covered by the same callee walk.
+            } else if jet.Sema.builtin_effect(call.name) == .Some(effect) -> sites.push(CaptureSite{operation: call.name, effect: Some(effect)})
+            else if call.name.rsplit_once(".") == .Some((module, method)) {
+                resolved_module :: aliases.get(module).unwrap_or(module)
+                if jet.Sema.core_effect(resolved_module, method) == .Some(effect) -> sites.push(CaptureSite{operation: call.name, effect: Some(effect)})
+                else if !aliases.contains_key(module) -> sites.push(CaptureSite{operation: call.name, effect: None})
+                // Imported Core pure calls add no site; sema rejects unknown methods.
+            } else -> sites.push(CaptureSite{operation: call.name, effect: None})
+            loop arg in call.args -> collect_capture_expr(arg.expr, aliases, local_functions, sites)
+        }
+        .MethodCall{receiver, method, args, ..} -> {
+            recognized := false
+            if capture_receiver_path(receiver) == .Some(path) {
+                parts := path.split(".")
+                if parts.next() == .Some(alias) {
+                    if aliases.get(alias) == .Some(module) {
+                        suffix :: parts.collect().join(".")
+                        resolved :: if suffix.is_empty() -> module else -> "{module}.{suffix}"
+                        if jet.Sema.core_effect(resolved, method) == .Some(effect) {
+                            recognized = true
+                            sites.push(CaptureSite{operation: "{resolved}.{method}", effect: Some(effect)})
+                        } else if aliases.contains_key(alias) -> recognized = true
+                    }
+                }
+            }
+            if !recognized -> sites.push(CaptureSite{operation: "method call {method}", effect: None})
+            collect_capture_expr(receiver, aliases, local_functions, sites)
+            loop arg in args -> collect_capture_expr(arg.expr, aliases, local_functions, sites)
+        }
+        .CallValue{callee, args, ..} -> {
+            sites.push(CaptureSite{operation: "opaque callable", effect: None})
+            collect_capture_expr(callee, aliases, local_functions, sites)
+            loop arg in args -> collect_capture_expr(arg.expr, aliases, local_functions, sites)
+        }
+        .Str(parts, _) -> {
+            loop part in parts { if part == .Interp(value, _) -> collect_capture_expr(value, aliases, local_functions, sites) }
+        }
+        .ListLit(items, _) -> { loop item in items -> collect_capture_expr(item, aliases, local_functions, sites) }
+        .TupleLit(items, _, _) -> { loop (_, item) in items -> collect_capture_expr(item, aliases, local_functions, sites) }
+        .MemberSpread{base, ..} | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _)
+            | .Copy(base, _) | .Place(base, _, _) | .Field(base, _, _) | .Present(base, _)
+            | .Ok(base, _) | .Err(base, _) | .Paren(base, _) -> collect_capture_expr(base, aliases, local_functions, sites)
+        .Try(base, _, _, note) -> {
+            collect_capture_expr(base, aliases, local_functions, sites)
+            if note == .Some(value) -> collect_capture_expr(value, aliases, local_functions, sites)
+        }
+        .MapLit(entries, _) -> {
+            loop (key, value) in entries {
+                collect_capture_expr(key, aliases, local_functions, sites)
+                collect_capture_expr(value, aliases, local_functions, sites)
+            }
+        }
+        .Index{base, index, ..} -> {
+            collect_capture_expr(base, aliases, local_functions, sites)
+            collect_capture_expr(index, aliases, local_functions, sites)
+        }
+        .Slice{base, start, end, range, ..} -> {
+            collect_capture_expr(base, aliases, local_functions, sites)
+            if range == .Some(value) -> collect_capture_expr(value, aliases, local_functions, sites)
+            else {
+                collect_capture_expr(start, aliases, local_functions, sites)
+                collect_capture_expr(end, aliases, local_functions, sites)
+            }
+        }
+        .Range{start, end, ..} -> {
+            collect_capture_expr(start, aliases, local_functions, sites)
+            collect_capture_expr(end, aliases, local_functions, sites)
+        }
+        .Unary(_, inner, _) -> collect_capture_expr(inner, aliases, local_functions, sites)
+        .Binary(_, left, right, _) -> {
+            collect_capture_expr(left, aliases, local_functions, sites)
+            collect_capture_expr(right, aliases, local_functions, sites)
+        }
+        .CompareChain{operands, ..} -> { loop operand in operands -> collect_capture_expr(operand, aliases, local_functions, sites) }
+        .OptField{base, ..} -> collect_capture_expr(base, aliases, local_functions, sites)
+        .StructLit{fields, ..} -> { loop (_, _, value) in fields -> collect_capture_expr(value, aliases, local_functions, sites) }
+        .TypedLit{body, ..} -> body.for_each_expr((value) -> collect_capture_expr(value, aliases, local_functions, sites))
+        .EnumLit{args, ..} -> {
+            loop arg in args {
+                if arg == {
+                    .Positional(value) | .Named{expr: value, ..} -> collect_capture_expr(value, aliases, local_functions, sites)
+                }
+            }
+        }
+        .Tainted(inner, _, _) -> collect_capture_expr(inner, aliases, local_functions, sites)
+        .PatternTest{subject, pattern, ..} -> {
+            collect_capture_expr(subject, aliases, local_functions, sites)
+            collect_capture_pattern(pattern, aliases, local_functions, sites)
+        }
+        .If{cond, then_body, then_value, else_body, else_value, ..} -> {
+            collect_capture_expr(cond, aliases, local_functions, sites)
+            collect_capture_statements(then_body, aliases, local_functions, sites)
+            collect_capture_expr(then_value, aliases, local_functions, sites)
+            collect_capture_statements(else_body, aliases, local_functions, sites)
+            collect_capture_expr(else_value, aliases, local_functions, sites)
+        }
+        .Lambda(lambda) -> {
+            if lambda.body == {
+                .Expr(value) -> collect_capture_expr(value, aliases, local_functions, sites)
+                .Block(body) -> collect_capture_statements(body, aliases, local_functions, sites)
+            }
+        }
+        .OrFallback{value, fallback, ..} -> {
+            collect_capture_expr(value, aliases, local_functions, sites)
+            if fallback == {
+                .Value(value) | .Return(.Some(value), _) -> collect_capture_expr(value, aliases, local_functions, sites)
+                .Panic{args, ..} -> { loop arg in args -> collect_capture_expr(arg.expr, aliases, local_functions, sites) }
+                _ -> {}
+            }
+        }
+        .PtrFromAddr{addr, ..} -> {
+            sites.push(CaptureSite{operation: "native pointer boundary", effect: None})
+            collect_capture_expr(addr, aliases, local_functions, sites)
+        }
+        .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(..) | .Float(..) | .Bool(..) | .Char(..)
+            | .Ident(..) | .UnitLit{..} | .Absent(_) | .Todo{..} | .ReduceMarker(..) | .ComptimeName{..} -> {}
+        _ -> sites.push(CaptureSite{operation: "unsupported expression boundary", effect: None})
+    }
+}
+
+use jet_foundation.Span
+
+// Rust: Source/CmdProve.rs:2684
+fn collect_capture_pattern(pattern: Pattern, aliases: [String:String], local_functions: Set[String], sites: &[CaptureSite]) -> {
+    if pattern == {
+        .Or(patterns, _) -> { loop child in patterns -> collect_capture_pattern(child, aliases, local_functions, sites) }
+        .Struct{fields, ..} -> {
+            loop field in fields { if field == .Value{value, ..} -> collect_capture_expr(value, aliases, local_functions, sites) }
+        }
+        .Variant{..} | .Present{..} | .Absent(_) | .Ok{..} | .Err{..}
+            | .Range{..} | .StrMatch{..} | .BinMatch{..} -> {}
+    }
+}
+
+// Rust: Source/CmdProve.rs:2714
+fn capture_receiver_path(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> Some(name)
+        .Field(base, field, _) -> Some("{capture_receiver_path(base)?}.{field}")
+        _ -> None
+    }
+}
+
+// Rust: Source/CmdProve.rs:2722
+fn semantic_front_end_items(target: Target, path: String, source: String) -> ([FrontEndItem], [ContractDeclaration]) {
+    (tokens, lex_diagnostics) :: jet.Lexer.lex(source)
+    program :: if lex_diagnostics.is_empty() -> jet.Parser.parse_with_source(tokens, source).ok() else -> None
+    if program == None -> return ([generic_front_end_item(target, path, source)], [])
+    facts := [FrontEndItem]{}
+    declarations := [ContractDeclaration]{}
+    collect_semantic_items(target, path, source, program.unwrap().items, &facts, &declarations)
+    if facts.is_empty() -> facts.push(generic_front_end_item(target, path, source))
+    (facts, declarations)
+}
+
+// Rust: Source/CmdProve.rs:2756
+fn generic_front_end_item(target: Target, path: String, source: String) -> FrontEndItem {
+    FrontEndItem{id: evidence_id(target, "front_end", path, "1:1-1:1", "program checked"),
+        path: path, diagnostic: None, source: source, facet: "all", line: 1, column: 1}
+}
+
+// Rust: Source/CmdProve.rs:2768
+fn collect_semantic_items(target: Target, path: String, source: String, items: [Item],
+    facts: &[FrontEndItem], declarations: &[ContractDeclaration]) -> {
+    loop item in items {
+        if item == {
+            .Func(func) -> collect_func_semantics(target, path, source, func, facts, declarations)
+            .Impl(implementation) -> { loop func in implementation.methods -> collect_func_semantics(target, path, source, func, facts, declarations) }
+            .Struct(definition) -> { loop func in definition.methods -> collect_func_semantics(target, path, source, func, facts, declarations) }
+            .Enum(definition) -> { loop func in definition.methods -> collect_func_semantics(target, path, source, func, facts, declarations) }
+            .Distinct(definition) -> {
+                if definition.range == .Some((lower, upper, span)) -> push_front_end_fact(target, path, source, facts,
+                    "refinements", "refinement", span, "{definition.name} range [{lower}, {upper}]")
+            }
+            .CodeModule(module) -> { if module.body == .Some(body) -> collect_semantic_items(target, path, source, body, facts, declarations) }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:2820
+fn collect_func_semantics(target: Target, path: String, source: String, func: Func,
+    facts: &[FrontEndItem], declarations: &[ContractDeclaration]) -> {
+    loop (marker, clauses) in [("Pre", func.pre), ("Post", func.post)] {
+        loop clause in clauses {
+            span :: clause.cond.span()
+            (line, column) :: span_line_col(source, span.start)
+            span_label :: span_text(source, span)
+            claim :: normalized_claim(source, span)
+            message :: if clause.message_expr == {
+                .Str(parts, _) -> {
+                    if parts.len() == 1 -> if parts[0] == { .Lit(value) -> Some(value); _ -> None } else -> None
+                }
+                _ -> None
+            }
+            declarations.push(ContractDeclaration{id: evidence_id(target, "contract", path, span_label, claim),
+                path: path, line: line, column: column, marker: marker, message: message})
+        }
+    }
+    if func.declared_effects == .Some(effects) {
+        span :: effects.first().map((pair) -> pair.1).unwrap_or(func.span)
+        names :: effects.iter().map((pair) -> pair.0).collect().join(",")
+        push_front_end_fact(target, path, source, facts, "effects", "effect", span, "{func.name} effect bound [{names}]")
+    }
+    if func.effect_via == .Some((callback, span)) -> push_front_end_fact(target, path, source, facts, "effects", "effect", span, "{func.name} effects via {callback}")
+    if func.scrub_tag == .Some(tag) -> push_front_end_fact(target, path, source, facts, "taint", "taint", func.span, "{func.name} scrubs {tag}")
+    if func.is_replayable -> push_front_end_fact(target, path, source, facts, "replay", "replayability", func.replayable_span.unwrap_or(func.span), "{func.name} is replayable")
+}
+
+// Rust: Source/CmdProve.rs:2907
+fn push_front_end_fact(target: Target, path: String, source: String, facts: &[FrontEndItem],
+    facet: String, id_kind: String, span: Span, claim: String) -> {
+    span_label :: span_text(source, span)
+    (line, column) :: span_line_col(source, span.start)
+    facts.push(FrontEndItem{id: evidence_id(target, id_kind, path, span_label, claim),
+        path: path, diagnostic: None, source: source, facet: facet, line: line, column: column})
+}
+
+// Rust: Source/CmdProve.rs:2930
+fn span_text(source: String, span: Span) -> String {
+    (start_line, start_column) :: span_line_col(source, span.start)
+    (end_line, end_column) :: span_line_col(source, span.end)
+    "{start_line}:{start_column}-{end_line}:{end_column}"
+}
+
+// Rust: Source/CmdProve.rs:2936
+fn normalized_claim(source: String, span: Span) -> String {
+    source.get(span.start..<span.end).unwrap_or("").split_whitespace().collect().join(" ")
+}
+
+// Rust: Source/CmdProve.rs:2945
+fn host_target_triple() -> String {
+    "{core.sys.target.selected_arch()}-{core.sys.target.selected_os()}" // GATE #4483
+}
+
+// Rust: Source/CmdProve.rs:2949
+const PROOF_LENSES: [String] = ["all", "refinements", "effects", "taint", "contracts", "tests", "budgets", "replay", "solver"]
+
+// Rust: Source/CmdProve.rs:2961
+fn validate_lens(value: String, target: String, json_mode: Bool) -> {
+    if PROOF_LENSES.contains(value) -> return
+    what :: "unknown proof lens `{value}`"
+    why :: "`jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver"
+    fix :: "try `jet prove {target} --lens tests`"
+    emit_cli_report_for_action("prove", "E2941", what, why, fix, json_mode)
+    exit(ExitCodes.USAGE)
+}
+
+use jet_foundation.Evidence.[EvidenceReport, EvidenceKind, EvidenceOutcome, decode_report_bytes,
+    EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_TOOLCHAIN_ENV, EVIDENCE_TARGET_ENV,
+    EVIDENCE_PROFILE_ENV, EVIDENCE_SOURCE_REVISION_ENV, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_REVISION_ENV]
+use core.files as fs
+use core.process.[Command, Stdio]
+use core.time.[Duration, Instant]
+use core.thread
+// GATE #4494: native process supervision, concurrent pipe drains, OS errors and FFI.
+
+// Rust: Source/CmdProve.rs:2972
+fn run_test_producers(target: Target) -> ([TestItem], Int32, [RecordLink]) Err! {
+    items := [TestItem]{}
+    highest_exit := ExitCodes.OK
+    evidence_links := [RecordLink]{}
+    loop member in target.members {
+        if !jet.has_test_blocks(member.path) && !jet.has_test_contracts(member.path)
+            && jet.Doctest.discover(String.from_utf8_lossy(member.bytes)).is_empty() -> continue
+        prefix :: member.sha256[0..<16]
+        report_path :: core.env.temp_dir().join("jet_prove_test_{core.process.id()}_{prefix}.bin")
+        _ :: fs.remove_file(report_path)
+        command := Command.new(core.env.current_exe().unwrap_or_else((_) -> OSPath.new("jet")))
+        command.args(["test", member.path, "--serial", "--show-default"])
+            .env(EVIDENCE_REPORT_ENV, report_path).env(EVIDENCE_REPORT_ID_ENV, "prove:{prefix}")
+            .env(EVIDENCE_TOOLCHAIN_ENV, jet.VERSION).env(EVIDENCE_TARGET_ENV, host_target_triple())
+            .env(EVIDENCE_PROFILE_ENV, "dev").env(EVIDENCE_SOURCE_REVISION_ENV, target.source_digest)
+            .env(EVIDENCE_BUILD_REVISION_ENV, target.build_digest).env(EVIDENCE_REVISION_ENV, target.mir.optimized_hash)
+            .env("JET_PROVE_FRESH_TEST", "1").env_remove("JET_PROP_REPLAY_SEED").env_remove("JET_PROP_REPLAY_CASE")
+        replay_failure :: read_generated_failure(target, member)
+        if replay_failure == .Some(failure) {
+            command.env("JET_PROP_SEED", failure.seed.to_string()).env("JET_PROP_REPLAY_SEED", failure.seed.to_string())
+                .env("JET_PROP_REPLAY_CASE", failure.case_index.to_string())
+        }
+        property_seed :: replay_failure.map((failure) -> failure.seed)
+            .or_else(() -> core.env.var("JET_PROP_SEED").ok().and_then((seed) -> seed.parse[UInt64]().ok())).unwrap_or(DEFAULT_PROPERTY_SEED)
+        if supervise_child(&command, Duration.from_secs(120)) == {
+            .Exited(.Some(code)) -> {
+                if code == ExitCodes.ICE -> highest_exit = ExitCodes.ICE
+                else if code == ExitCodes.RUNTIME_PANIC && highest_exit != ExitCodes.ICE -> highest_exit = ExitCodes.RUNTIME_PANIC
+                else if code == ExitCodes.USER_ERROR && highest_exit == ExitCodes.OK -> highest_exit = ExitCodes.USER_ERROR
+                if read_test_report(report_path) == {
+                    .Ok(report) -> {
+                        persist_generated_failure(target, member, report)?
+                        report_link :: if persist_evidence_report(target, report) == {
+                            .Ok(link) -> link
+                            .Err(error) -> { _ :: fs.remove_file(report_path); return Err(error) }
+                        }
+                        evidence_links.push(report_link)
+                        invalid_records :: report.records.is_empty() || report.records.iter().any((record) ->
+                            record.kind != .Property && !record.source.path.is_empty() && !producer_path_is_member(target, record.source.path))
+                        if invalid_records -> highest_exit = ExitCodes.ICE
+                        else {
+                            if report.records.iter().any((record) -> record.kind == .Runtime
+                                || (record.kind == .Contract && record.outcome == .Failed)) && highest_exit != ExitCodes.ICE -> highest_exit = ExitCodes.RUNTIME_PANIC
+                            loop record in report.records {
+                                kind :: record.kind
+                                kind_code :: kind.code()
+                                outcome :: record.outcome
+                                name :: record.identity.claim_id
+                                message :: record.detail
+                                property_failure :: if kind == .Property -> parse_generated_failure_detail(message) else -> None
+                                generation_unavailable :: kind == .Property && property_generation_unavailable(message)
+                                generated :: kind == .Property && !outcome.is_incomplete() && !generation_unavailable
+                                generated_count :: if generated -> record.count else -> 0
+                                source_path :: record.source.path
+                                if (kind == .Runtime && (name == "E3005" || message.starts_with("Stop [")))
+                                    || (kind == .Unit && message.starts_with("Stop [")) -> continue
+                                claim :: "{kind_code}:{name}:{message}"
+                                line :: if kind == .Property -> UInt32.from(record.count) else -> record.source.line
+                                state :: if generation_unavailable -> 3 else -> outcome.test_state().unwrap_or_else(() ->
+                                    if outcome == .Failed -> 1 else if outcome.is_incomplete() -> 3 else -> 0)
+                                seed :: property_failure.map((failure) -> failure.seed).unwrap_or(property_seed)
+                                case_index :: property_failure.map((failure) -> failure.case_index).unwrap_or(0)
+                                items.push(TestItem{
+                                    id: evidence_id(target, if kind == .Contract -> "contract" else -> "unit", member.path, "0:0-0:0", claim),
+                                    path: if kind == .Property || source_path.is_empty() -> member.path else -> source_path,
+                                    state: state, kind: kind_code, message: message, line: line, name: name,
+                                    seed: if kind == .Property -> seed.to_string() else -> "", case_index: case_index,
+                                    generated: generated, generated_count: generated_count,
+                                    reason: if generation_unavailable -> "generation_unavailable" else -> "",
+                                })
+                            }
+                        }
+                    }
+                    .Err(_) -> {
+                        if code == ExitCodes.USER_ERROR {
+                            if highest_exit == ExitCodes.OK -> highest_exit = ExitCodes.USER_ERROR
+                        } else -> highest_exit = ExitCodes.ICE
+                    }
+                }
+            }
+            .Exited(.None) -> highest_exit = ExitCodes.ICE
+            .TimedOut | .LaunchFailed -> items.push(TestItem{
+                id: evidence_id(target, "unit", member.path, "0:0-0:0", "producer unavailable"),
+                path: member.path, state: 3, kind: 0, message: "", line: 0, generated: false,
+                generated_count: 0, name: "", seed: "", case_index: 0, reason: "producer_start_failed",
+            })
+        }
+        _ :: fs.remove_file(report_path)
+    }
+    Ok((items, highest_exit, evidence_links))
+}
+
+// Rust: Source/CmdProve.rs:3206
+fn producer_path_is_member(target: Target, path: String) -> Bool {
+    normalized_path := path.trim_start_matches("./").replace("\\", "/") // #4303
+    target.members.iter().any((member) -> member.path.trim_start_matches("./").replace("\\", "/") == normalized_path)
+}
+
+// Rust: Source/CmdProve.rs:3214
+fn supervise_child(command: &Command, deadline: Duration) -> ChildOutcome {
+    // Concurrent drains prevent full-pipe deadlock; transcripts stay private and bounded.
+    configure_child_process_group(command)
+    command.stdout(Stdio.piped()).stderr(Stdio.piped())
+    child := if command.spawn() == { .Ok(child) -> child; .Err(_) -> return ChildOutcome.LaunchFailed }
+    stdout := child.stdout.take().map((stream) -> thread.spawn(() -> {
+        owned := ^stream
+        capture_child_stream(&owned)
+    }))
+    stderr := child.stderr.take().map((stream) -> thread.spawn(() -> {
+        owned := ^stream
+        capture_child_stream(&owned)
+    }))
+    finish :: (outcome) -> {
+        if stdout.take() == .Some(worker) -> _ :: worker.join()
+        if stderr.take() == .Some(worker) -> _ :: worker.join()
+        outcome
+    }
+    started :: Instant.now()
+    loop {
+        if child.try_wait() == {
+            .Ok(.Some(status)) -> return finish(ChildOutcome.Exited(status.code()))
+            .Ok(.None) -> {
+                if started.elapsed() < deadline -> thread.sleep(Duration.from_millis(5))
+                else {
+                    terminate_child_process_group(child.id())
+                    _ :: child.kill()
+                    _ :: child.wait()
+                    return finish(ChildOutcome.TimedOut)
+                }
+            }
+            .Err(_) -> {
+                terminate_child_process_group(child.id())
+                _ :: child.kill()
+                _ :: child.wait()
+                return finish(ChildOutcome.Exited(None))
+            }
+        }
+    }
+}
+
+// Rust: Source/CmdProve.rs:3267,3284
+fn configure_child_process_group(command: &Command) -> {
+    if core.sys.target.selected_family() == "unix" { // GATE #4483
+        #Unsafe("pre-exec callback invokes async-signal-safe setpgid only") {
+            command.pre_exec(() -> {
+                if setpgid(0, 0) == 0 -> Ok(()) else -> Err(core.io.Error.last_os_error())
+            })
+        }
+    }
+    // Rust's non-Unix arm intentionally has no process-group setup.
+}
+
+// Rust: Source/CmdProve.rs:3272
+#FFI(c)
+extern fn setpgid(pid: Int32, pgid: Int32) -> Int32
+
+// Rust: Source/CmdProve.rs:3287,3297
+fn terminate_child_process_group(pid: UInt32) -> {
+    if core.sys.target.selected_family() == "unix" {
+        #Unsafe("negative pid addresses the isolated child process group") { _ :: kill(-Int32.from(pid), 9) }
+    }
+    // Rust's non-Unix arm relies on the caller's child.kill().
+}
+
+// Rust: Source/CmdProve.rs:3289
+#FFI(c)
+extern fn kill(pid: Int32, signal: Int32) -> Int32
+
+// Rust: Source/CmdProve.rs:3299
+fn capture_child_stream[T: core.io.Read](stream: &T) -> [UInt8] {
+    const MAX_TRANSCRIPT_BYTES: USize = 64 * 1024
+    captured := [UInt8]{}
+    buffer := [UInt8; 8192].filled(0)
+    loop {
+        if stream.read(&buffer) == {
+            .Ok(0) -> break
+            .Ok(count) -> {
+                remaining :: MAX_TRANSCRIPT_BYTES.saturating_sub(captured.len())
+                captured.extend_from_slice(buffer[0..<count.min(remaining)])
+            }
+            .Err(_) -> break
+        }
+    }
+    captured
+}
+
+// Rust: Source/CmdProve.rs:3316
+fn read_test_report(path: OSPath) -> EvidenceReport Err! { EvidenceReport.read(path) }
+
+// Rust: Source/CmdProve.rs:3320
+fn read_test_report_bytes(bytes: [UInt8]) -> EvidenceReport Err! {
+    (records, derivations) :: decode_report_bytes(bytes)?
+    report_id :: records.first().map((record) -> record.identity.report_id).unwrap_or("test-run")
+    EvidenceReport.try_from_records_with_derivations(report_id, records, derivations).map_err((error) -> error.to_string())
+}
+
+// Rust: Source/CmdProve.rs:3335,3371,3385,3398
+// Protocol and real subprocess tests live in Tests/Cli/Evidence/Prove02.jet.
+
+// Rust: Source/CmdProve.rs:3434
+pub fn target_input_sha256_for_file(file: String) -> String Err! {
+    resolve_target(file).map((target) -> target.input_sha256)
+}
+
+// Rust: Source/CmdProve.rs:3437
+fn resolve_target(raw: String) -> Target Err! {
+    path :: OSPath.new(raw)
+    metadata :: fs.symlink_metadata(path).map_err((error) -> {
+        if error.kind() == .NotFound -> "can't find proof target `{raw}`" // GATE #4409
+        else -> "can't inspect proof target `{raw}`: {error}"
+    })?
+    if metadata.file_type().is_symlink() -> return Err("proof target `{raw}` must not be a symlink")
+    reject_symlink_ancestors(path)?
+    (kind, paths) := if metadata.is_file() -> {
+        if path.extension().and_then((ext) -> ext.to_str()) != Some(jet.Syntax.FILE_EXT) -> return Err("proof target `{raw}` is not a .jet file")
+        ("file", [path])
+    } else -> {
+        if !metadata.is_dir() -> return Err("proof target `{raw}` is not a file or directory")
+        kind :: if has_proof_manifest(path, jet.Syntax.PACKAGE_FILE)? -> "package" else -> "workspace"
+        found := [OSPath]{}
+        collect_jet_files(path, &found)?
+        if found.is_empty() -> return Err("proof target `{raw}` contains no .jet files")
+        (kind, found)
+    }
+    paths.sort_by((a, b) -> normalized(a).as_bytes().cmp(normalized(b).as_bytes()))
+    members := [Member].with_capacity(paths.len())
+    loop member_path in paths {
+        bytes :: fs.read(member_path).map_err((error) -> "couldn't read `{member_path.display()}`: {error}")?
+        members.push(Member{path: normalized(member_path), sha256: sha256_hex(bytes), bytes: bytes})
+    }
+    identity_members := members.iter().map((member) -> (member.path, member.sha256)).collect()
+    if metadata.is_dir() {
+        closure_paths := [OSPath]{}
+        collect_identity_files(path, &closure_paths)?
+        loop closure_path in closure_paths {
+            bytes :: fs.read(closure_path).map_err((error) -> "couldn't read `{closure_path.display()}`: {error}")?
+            normalized_path :: normalized(closure_path)
+            if !identity_members.iter().any((member) -> member.0 == normalized_path) -> identity_members.push((normalized_path, sha256_hex(bytes)))
+        }
+    } else {
+        manifest_root :: path.parent().and_then(jet.Loader.find_manifest_root)
+            .map((root) -> if root.as_os_str().is_empty() -> OSPath.new(".") else -> root)
+        if manifest_root == .Some(root) {
+            closure_paths := [OSPath]{}
+            collect_identity_files(root, &closure_paths)?
+            loop closure_path in closure_paths {
+                bytes :: fs.read(closure_path).map_err((error) -> "couldn't read `{closure_path.display()}`: {error}")?
+                normalized_path :: normalized(closure_path)
+                if !identity_members.iter().any((member) -> member.0 == normalized_path) -> identity_members.push((normalized_path, sha256_hex(bytes)))
+            }
+        }
+        // Production loader closure makes identity sensitive to imported sources.
+        (_, dependencies) :: jet.Loader.load_entry_with_overlays_and_dependencies(raw, [], true)
+        loop dependency in dependencies {
+            dependency_metadata :: if fs.symlink_metadata(dependency) == {
+                .Ok(metadata) -> metadata
+                .Err(error) -> {
+                    if error.kind() == .NotFound -> continue // GATE #4409
+                    return Err("couldn't inspect proof dependency `{dependency.display()}`: {error}")
+                }
+            }
+            if dependency_metadata.file_type().is_symlink() -> return Err("proof target contains symlink `{dependency.display()}`")
+            if !dependency_metadata.is_file() -> continue
+            bytes :: fs.read(dependency).map_err((error) -> "couldn't read proof dependency `{dependency.display()}`: {error}")?
+            dependency_path :: normalized(dependency)
+            if !identity_members.iter().any((member) -> member.0 == dependency_path) -> identity_members.push((dependency_path, sha256_hex(bytes)))
+        }
+    }
+    canonical :: jet.ReceiptStore.canonical_target_identity(path, identity_members)?
+    canonical_members :: canonical.members
+    input_sha256 :: canonical.input_sha256
+    authority_root :: canonical.authority_root
+    source_records :: canonical_members.iter().filter((member) -> member.0.ends_with(".jet"))
+        .map((member) -> (member.0, member.1.as_bytes().to_vec())).collect()
+    source_digest :: proof_digest("jet-proof-source-v2", source_records)
+    lock_records :: canonical_members.iter().filter((member) -> is_lock_identity_path(member.0))
+        .map((member) -> (member.0, member.1.as_bytes().to_vec())).collect()
+    lock_digest :: proof_digest_or_none("jet-proof-lock-v2", lock_records)
+    build_records :: canonical_members.iter().filter((member) -> is_build_identity_path(member.0))
+        .map((member) -> (member.0, member.1.as_bytes().to_vec())).collect()
+    build_inputs :: proof_digest_or_none("jet-proof-build-inputs-v2", build_records)
+    build_digest :: proof_build_digest(build_inputs, lock_digest)?
+    semantic_bundle :: if members.len() == 1 -> load_checked_proof_bundle(members[0].path, "dev", [String:String]{}) else -> None
+    core_abi :: proof_core_abi(semantic_bundle.map((pair) -> pair.0), source_digest)
+    mir :: proof_mir_identity(semantic_bundle, source_digest, core_abi, members)
+    Ok(Target{kind: kind, root: normalized(path), authority_root: authority_root, identity_members: canonical_members,
+        input_sha256: input_sha256, source_digest: source_digest, build_digest: build_digest,
+        core_abi: core_abi, lock_digest: lock_digest, mir: mir, members: members})
+}
 

@@ -1,0 +1,22 @@
+use Cli.Inspect.Fill.[split_target, candidate_checks, checked_candidates, GoalSite]
+use jet.Diagnostics.Span
+
+// Behavioral control for Source/CmdFill.rs:144; no inline Rust tests.
+#Test("fill_target_uses_only_a_numeric_final_line_suffix") {
+    assert(split_target("file.jet:12") == ("file.jet", Some(UInt{12})))
+    assert(split_target("file.jet:not-a-line") == ("file.jet:not-a-line", None))
+    assert(split_target("C:work/file.jet:7") == ("C:work/file.jet", Some(UInt{7})))
+}
+
+// Behavioral control for Source/CmdFill.rs:392,432.
+#Test("fill_candidate_checks_reject_invalid_source_ranges") {
+    goal :: GoalSite{file: "file.jet", source: "x", line: UInt{1}, function: "run",
+        span: Span.new(UInt{0}, UInt{2}), expected_type: "Int", required_effects: "none",
+        params: [], functions: []}
+    assert(!candidate_checks(&goal, "0"))
+    assert(checked_candidates(&goal, false).is_empty())
+    reversed :: GoalSite{file: "file.jet", source: "xy", line: UInt{1}, function: "run",
+        span: Span.new(UInt{2}, UInt{1}), expected_type: "Int", required_effects: "none",
+        params: [], functions: []}
+    assert(!candidate_checks(&reversed, "0"))
+}

@@ -1,0 +1,22 @@
+use Cli.Host.Executor.[parse_options]
+
+// Behavioral control for Source/CmdExec.rs:61; no inline Rust tests.
+#Test("executor_options_preserve_explicit_grants_and_command_separator") {
+    raw :: ["exec", "--workspace", "work", "--exec=/bin/tool", "--read=.", "--write", ".jet/build", "--", "tool", "--host=child-argument"]
+    (options, command) :: parse_options(&raw, false)
+    assert(options.workspace == Some("work"))
+    assert(options.executable_grant == Some("/bin/tool"))
+    assert(options.reads == ["."])
+    assert(options.writes == [".jet/build"])
+    assert(options.unsupported == None)
+    assert(command == ["tool", "--host=child-argument"])
+}
+
+// Behavioral control for Source/CmdExec.rs:78-86,119-126.
+#Test("executor_retains_unsupported_grant_for_native_boundary_refusal") {
+    raw :: ["exec", "--workspace=work", "--host", "example.org", "--secret=token", "--", "tool"]
+    (options, command) :: parse_options(&raw, false)
+    assert(options.unsupported == Some("--secret"))
+    assert(options.workspace == Some("work"))
+    assert(command == ["tool"])
+}

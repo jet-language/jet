@@ -1,1333 +1,526 @@
-// PORT-PENDING 0722 source-lib-slice-1803: Source/lib.rs:1803-3131
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn workspace_build_authority(
-//RS     file: &str,
-//RS ) -> Result<
-//RS     Option<(
-//RS         jet_driver::Authority::AuthorityResolver,
-//RS         jetpack::WorkspaceFile::WorkspaceSource,
-//RS     )>,
-//RS     Vec<Diagnostic>,
-//RS > {
-//RS     let path = absolute_source_path(file);
-//RS     let root = path.parent().unwrap_or(std::path::Path::new("."));
-//RS     let resolver = match jet_driver::Authority::AuthorityResolver::open(root) {
-//RS         Ok(resolver) => resolver,
-//RS         Err(error) if error.is_missing() => return Ok(None),
-//RS         Err(error) => return Err(vec![error.diagnostic()]),
-//RS     };
-//RS     let Some(source) = resolver.resolve_workspace_source().map_err(|error| {
-//RS         vec![workspace_build_root_diagnostic(
-//RS             &path,
-//RS             &error.workspace_diagnostic(),
-//RS         )]
-//RS     })?
-//RS     else {
-//RS         return Ok(None);
-//RS     };
-//RS     let Some(entry_name) = path.file_name() else {
-//RS         return Ok(None);
-//RS     };
-//RS     let checked_entry = resolver
-//RS         .checked_file(std::path::Path::new(entry_name))
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     if checked_entry.path != source.path {
-//RS         return Ok(None);
-//RS     }
-//RS     resolver
-//RS         .revalidate_source(&source)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     if source.role != jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
-//RS         return Err(vec![Diagnostic::error(
-//RS             "E1334",
-//RS             "workspace build entry is selected by an authority source".to_string(),
-//RS             "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry".to_string(),
-//RS             "declare the workspace index in `workspace.jet`, or build the member entry directly".to_string(),
-//RS             None,
-//RS         )]);
-//RS     }
-//RS     Ok(Some((resolver, source)))
-//RS }
-//RS 
-//RS fn absolute_source_path(file: &str) -> std::path::PathBuf {
-//RS     let path = std::path::Path::new(file);
-//RS     if path.is_absolute() {
-//RS         path.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .unwrap_or_else(|_| std::path::PathBuf::from("."))
-//RS             .join(path)
-//RS     }
-//RS }
-//RS 
-//RS struct CheckedBuildEntry {
-//RS     package: jet_driver::Authority::CheckedPackage,
-//RS     file: Option<jet_driver::Authority::CheckedFile>,
-//RS     entry_fn: Option<String>,
-//RS }
-//RS 
-//RS impl CheckedBuildEntry {
-//RS     fn source_file(&self) -> &jet_driver::Authority::CheckedFile {
-//RS         self.file
-//RS             .as_ref()
-//RS             .unwrap_or(&self.package.member.manifest.file)
-//RS     }
-//RS 
-//RS     fn revalidate(
-//RS         &self,
-//RS         workspace_resolver: &jet_driver::Authority::AuthorityResolver,
-//RS     ) -> Result<(), jet_driver::Authority::AuthorityError> {
-//RS         workspace_resolver.revalidate_member(&self.package.member)?;
-//RS         let member_resolver = jet_driver::Authority::AuthorityResolver::from_checked_directory(
-//RS             &self.package.member.directory,
-//RS         );
-//RS         match &self.file {
-//RS             Some(file) => member_resolver.revalidate_file(file),
-//RS             None => workspace_resolver.revalidate_file(&self.package.member.manifest.file),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn workspace_member_entry(
-//RS     resolver: &jet_driver::Authority::AuthorityResolver,
-//RS     member: &str,
-//RS     checked_package: jet_driver::Authority::CheckedPackage,
-//RS ) -> Result<Option<CheckedBuildEntry>, Diagnostic> {
-//RS     resolver
-//RS         .revalidate_member(&checked_package.member)
-//RS         .map_err(|error| error.diagnostic())?;
-//RS     let member_resolver = jet_driver::Authority::AuthorityResolver::from_checked_directory(
-//RS         &checked_package.member.directory,
-//RS     );
-//RS     if let Some(entry) = checked_package
-//RS         .facts
-//RS         .resolve_run_entry_checked(&member_resolver)
-//RS         .map_err(|error| {
-//RS             Diagnostic::error(
-//RS                 "E3501",
-//RS                 format!("workspace member `{member}` has an invalid typed output"),
-//RS                 error,
-//RS                 "repair the member's typed Package output before building the workspace"
-//RS                     .to_string(),
-//RS                 None,
-//RS             )
-//RS         })?
-//RS     {
-//RS         return Ok(Some(CheckedBuildEntry {
-//RS             package: checked_package,
-//RS             file: Some(entry.file),
-//RS             entry_fn: Some(entry.callable),
-//RS         }));
-//RS     }
-//RS     for candidate in [
-//RS         std::path::PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
-//RS         std::path::PathBuf::from("src").join(Syntax::DEFAULT_ENTRY_FILE),
-//RS     ] {
-//RS         match member_resolver.checked_file(&candidate) {
-//RS             Ok(file) => {
-//RS                 return Ok(Some(CheckedBuildEntry {
-//RS                     package: checked_package,
-//RS                     file: Some(file),
-//RS                     entry_fn: None,
-//RS                 }))
-//RS             }
-//RS             Err(error) if error.is_missing() => {}
-//RS             Err(error) => return Err(error.diagnostic()),
-//RS         }
-//RS     }
-//RS     let named = std::path::PathBuf::from(format!(
-//RS         "{}.{}",
-//RS         checked_package.facts.name,
-//RS         Syntax::FILE_EXT
-//RS     ));
-//RS     match member_resolver.checked_file(&named) {
-//RS         Ok(file) => {
-//RS             return Ok(Some(CheckedBuildEntry {
-//RS                 package: checked_package,
-//RS                 file: Some(file),
-//RS                 entry_fn: None,
-//RS             }))
-//RS         }
-//RS         Err(error) if error.is_missing() => {}
-//RS         Err(error) => return Err(error.diagnostic()),
-//RS     }
-//RS     if let Some(entry) = checked_package
-//RS         .facts
-//RS         .resolve_build_entry_checked(&member_resolver)
-//RS         .map_err(|error| {
-//RS             let code = if error.contains("two build entries for the package:") {
-//RS                 "E3520"
-//RS             } else {
-//RS                 "E3501"
-//RS             };
-//RS             Diagnostic::error(
-//RS                 code,
-//RS                 error,
-//RS                 "a package has one checked build authority".to_string(),
-//RS                 "keep one `fn build` in the member package".to_string(),
-//RS                 None,
-//RS             )
-//RS         })?
-//RS     {
-//RS         let file = (entry.path != checked_package.member.manifest.file.path).then_some(entry);
-//RS         return Ok(Some(CheckedBuildEntry {
-//RS             package: checked_package,
-//RS             file,
-//RS             entry_fn: None,
-//RS         }));
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS fn read_real_generated_file(
-//RS     project_root: &std::path::Path,
-//RS     path: &std::path::Path,
-//RS ) -> std::io::Result<Vec<u8>> {
-//RS     if path_has_symlinked_component(project_root, path)
-//RS         || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS     {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "generated source path contains a symlink",
-//RS         ));
-//RS     }
-//RS     std::fs::read(path)
-//RS }
-//RS 
-//RS fn write_exported_generated_file(
-//RS     project_root: &std::path::Path,
-//RS     path: &std::path::Path,
-//RS     bytes: &[u8],
-//RS ) -> std::io::Result<()> {
-//RS     if path_has_symlinked_component(project_root, path)
-//RS         || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS     {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "generated export path contains a symlink",
-//RS         ));
-//RS     }
-//RS     let Some(parent) = path.parent() else {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::InvalidInput,
-//RS             "generated export has no parent directory",
-//RS         ));
-//RS     };
-//RS     ensure_real_directory(parent)?;
-//RS     for attempt in 0..100u32 {
-//RS         let temporary = parent.join(format!(".jet-export-{}-{attempt}", std::process::id()));
-//RS         let mut file = match std::fs::OpenOptions::new()
-//RS             .create_new(true)
-//RS             .write(true)
-//RS             .open(&temporary)
-//RS         {
-//RS             Ok(file) => file,
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS             Err(error) => return Err(error),
-//RS         };
-//RS         use std::io::Write;
-//RS         if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
-//RS             let _ = std::fs::remove_file(&temporary);
-//RS             return Err(error);
-//RS         }
-//RS         std::fs::rename(&temporary, path)?;
-//RS         return Ok(());
-//RS     }
-//RS     Err(std::io::Error::new(
-//RS         std::io::ErrorKind::AlreadyExists,
-//RS         "could not allocate a unique generated export temporary file",
-//RS     ))
-//RS }
-//RS 
-//RS fn path_has_symlinked_component(root: &std::path::Path, path: &std::path::Path) -> bool {
-//RS     let Ok(relative) = path.strip_prefix(root) else {
-//RS         return true;
-//RS     };
-//RS     let mut current = root.to_path_buf();
-//RS     for component in relative.components() {
-//RS         let std::path::Component::Normal(part) = component else {
-//RS             return true;
-//RS         };
-//RS         current.push(part);
-//RS         if std::fs::symlink_metadata(&current)
-//RS             .is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS         {
-//RS             return true;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn ensure_real_directory(path: &std::path::Path) -> std::io::Result<()> {
-//RS     let mut current = std::path::PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             std::path::Component::RootDir => current.push(std::path::MAIN_SEPARATOR.to_string()),
-//RS             std::path::Component::CurDir => {}
-//RS             std::path::Component::ParentDir => {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidInput,
-//RS                     "generated export path contains a parent component",
-//RS                 ));
-//RS             }
-//RS             std::path::Component::Normal(part) => current.push(part),
-//RS         }
-//RS         match std::fs::symlink_metadata(&current) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     format!(
-//RS                         "generated export directory `{}` is not real",
-//RS                         current.display()
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Ok(_) => {}
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                 std::fs::create_dir(&current)?;
-//RS             }
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS /// Internal CLI bridge for commands that must share the library's checked
-//RS /// project-root authority; this is not a stable public Jet API.
-//RS #[doc(hidden)]
-//RS pub fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>> {
-//RS     let entry = std::path::Path::new(file);
-//RS     let absolute = if entry.is_absolute() {
-//RS         entry.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .unwrap_or_else(|_| std::path::PathBuf::from("."))
-//RS             .join(entry)
-//RS     };
-//RS     let directory = absolute
-//RS         .parent()
-//RS         .unwrap_or(std::path::Path::new("."))
-//RS         .to_path_buf();
-//RS     Loader::selected_project_root(&directory).map_err(|diagnostic| vec![diagnostic])
-//RS }
-//RS 
-//RS fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
-//RS     let mut allowed = cli
-//RS         .iter()
-//RS         .cloned()
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     let mut workspace_denies = std::collections::BTreeSet::new();
-//RS     let mut workspace_grants =
-//RS         std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-//RS     let mut package_name = None;
-//RS     // Build policy is rooted at the entry's real location.  A relative entry
-//RS     // such as `src/run.jet` must still discover the package/workspace files
-//RS     // above the current directory; walking the unresolved relative path
-//RS     // silently missed them for a bare `run.jet`.
-//RS     let entry = std::path::Path::new(file);
-//RS     let absolute = if entry.is_absolute() {
-//RS         entry.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .unwrap_or_else(|_| std::path::PathBuf::from("."))
-//RS             .join(entry)
-//RS     };
-//RS     let entry_dir = absolute.parent().unwrap_or(std::path::Path::new("."));
-//RS     let workspace_root = Loader::find_workspace_root_checked(entry_dir)
-//RS         .map_err(|diagnostic| vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)])?;
-//RS     let workspace_checked = workspace_root
-//RS         .as_deref()
-//RS         .map(|root| {
-//RS             let resolver =
-//RS                 jet_driver::Authority::AuthorityResolver::open(root).map_err(|error| {
-//RS                     vec![workspace_build_root_diagnostic(root, &error.diagnostic())]
-//RS                 })?;
-//RS             let source = resolver
-//RS                 .resolve_workspace_source()
-//RS                 .map_err(|error| {
-//RS                     vec![workspace_build_root_diagnostic(
-//RS                         root,
-//RS                         &error.workspace_diagnostic(),
-//RS                     )]
-//RS                 })?
-//RS                 .ok_or_else(|| {
-//RS                     vec![Diagnostic::error(
-//RS                         "E3503",
-//RS                         format!("build policy in `{}` is malformed", root.display()),
-//RS                         "the workspace root disappeared before build policy was selected"
-//RS                             .to_string(),
-//RS                         "restore the workspace declaration before running build code".to_string(),
-//RS                         None,
-//RS                     )]
-//RS                 })?;
-//RS             resolver
-//RS                 .revalidate_source(&source)
-//RS                 .map_err(|error| vec![error.diagnostic()])?;
-//RS             Ok::<_, Vec<Diagnostic>>((resolver, source))
-//RS         })
-//RS         .transpose()?;
-//RS     let workspace_policy = workspace_checked
-//RS         .as_ref()
-//RS         .map(|(resolver, source)| load_workspace_build_policy(resolver, source))
-//RS         .transpose()?;
-//RS     let workspace_path = workspace_checked
-//RS         .as_ref()
-//RS         .map(|(_, source)| source.path.clone());
-//RS     let package_root = Loader::find_manifest_root_checked(entry_dir)
-//RS         .map_err(|diagnostic| vec![diagnostic])?
-//RS         .filter(|root| {
-//RS             workspace_root
-//RS                 .as_ref()
-//RS                 .is_none_or(|workspace| Loader::is_physically_within(workspace, root))
-//RS         });
-//RS     if package_root.is_none() {
-//RS         if let Some((_, diagnostic)) = Loader::stale_manifest_name_diagnostic(entry_dir) {
-//RS             return Err(vec![diagnostic]);
-//RS         }
-//RS     }
-//RS     if let Some(dir) = package_root.as_deref() {
-//RS         let package = Loader::package_facts_for_root(dir)?
-//RS             .ok_or_else(|| {
-//RS                 vec![Diagnostic::error(
-//RS                     "E3503",
-//RS                     format!("package facts in `{}` are missing", dir.display()),
-//RS                     "the selected package root has no checked Package declaration".to_string(),
-//RS                     "restore the package declaration before running build code".to_string(),
-//RS                     None,
-//RS                 )]
-//RS             })?;
-//RS         package_name = Some(package.name.clone());
-//RS         for effect in package.build_allow {
-//RS             if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-//RS                 allowed.insert(capability.flag().to_string());
-//RS             }
-//RS         }
-//RS     }
-//RS     // A nested workspace owns one policy layer. Do not merge an enclosing
-//RS     // workspace's ceiling into this root; that would make an outer policy
-//RS     // silently decide the inner workspace's authority.
-//RS     if let (Some(policy), Some(workspace)) = (workspace_policy, workspace_path.as_deref()) {
-//RS         for effect in policy.build_deny {
-//RS             if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-//RS                 workspace_denies.insert(capability.flag().to_string());
-//RS             } else {
-//RS                 return Err(vec![Diagnostic::error(
-//RS                     "E3503",
-//RS                     format!("build policy in `{}` is malformed", workspace.display()),
-//RS                     format!("unknown build effect `{effect}`"),
-//RS                     "use one of the declared build effects in `policy.deny`".to_string(),
-//RS                     None,
-//RS                 )]);
-//RS             }
-//RS         }
-//RS         for (subject, effects) in policy.build_grants {
-//RS             let grants = workspace_grants.entry(subject).or_default();
-//RS             for effect in effects {
-//RS                 if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-//RS                     grants.insert(capability.flag().to_string());
-//RS                 } else {
-//RS                     return Err(vec![Diagnostic::error(
-//RS                         "E3503",
-//RS                         format!("build policy in `{}` is malformed", workspace.display()),
-//RS                         format!("unknown build effect `{effect}`"),
-//RS                         "use one of the declared build effects in `policy.grants`".to_string(),
-//RS                         None,
-//RS                     )]);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let package_name = match package_name {
-//RS         Some(name) => name,
-//RS         None if workspace_root.is_some() => {
-//RS             Loader::authority_name_for_entry(&absolute).map_err(|diagnostic| vec![diagnostic])?
-//RS         }
-//RS         None => absolute
-//RS             .file_stem()
-//RS             .and_then(|name| name.to_str())
-//RS             .filter(|name| !name.is_empty())
-//RS             .unwrap_or("app")
-//RS             .to_string(),
-//RS     };
-//RS     if let Some(grants) = workspace_grants.get(&package_name) {
-//RS         allowed.extend(grants.iter().cloned());
-//RS     }
-//RS     for denied in workspace_denies {
-//RS         allowed.remove(&denied);
-//RS     }
-//RS     Ok(allowed.into_iter().collect())
-//RS }
-//RS 
-//RS fn load_workspace_build_policy(
-//RS     resolver: &jet_driver::Authority::AuthorityResolver,
-//RS     source: &jetpack::WorkspaceFile::WorkspaceSource,
-//RS ) -> Result<jetpack::Overlay::OverlayPolicy, Vec<Diagnostic>> {
-//RS     match jetpack::WorkspaceFile::evaluate_checked_source(source, resolver) {
-//RS         Ok(plan) => Ok(plan.overlay_policy),
-//RS         Err(diagnostic) => Err(vec![workspace_build_root_diagnostic(
-//RS             &source.path,
-//RS             &diagnostic,
-//RS         )]),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn production_build_policy() -> Comptime::Build::BuildPolicy {
-//RS     let ci = std::env::var("CI").ok().is_some_and(|value| {
-//RS         matches!(
-//RS             value.trim().to_ascii_lowercase().as_str(),
-//RS             "1" | "true" | "yes"
-//RS         )
-//RS     });
-//RS     if ci {
-//RS         Comptime::Build::BuildPolicy::ci_default()
-//RS     } else {
-//RS         Comptime::Build::BuildPolicy::local_default()
-//RS     }
-//RS }
-//RS 
-//RS fn compile_bundle_path_opts(
-//RS     file: &str,
-//RS     mode: Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     cross_target: Option<&str>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_opts_with_settings(
-//RS         file,
-//RS         mode,
-//RS         no_os,
-//RS         gates,
-//RS         web_target,
-//RS         cross_target,
-//RS         &BTreeMap::new(),
-//RS     )
-//RS }
-//RS 
-//RS fn compile_bundle_path_opts_with_settings(
-//RS     file: &str,
-//RS     mode: Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     cross_target: Option<&str>,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_with_profile_and_settings(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             cross_target,
-//RS             "dev",
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS fn compile_bundle_path_opts_with_profile_and_settings(
-//RS     file: &str,
-//RS     mode: Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     cross_target: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_with_profile_and_settings(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             cross_target,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
-//RS pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_web_with_gates(file, Policy::GateSet::default())
-//RS }
-//RS 
-//RS pub fn compile_web_with_gates(
-//RS     file: &str,
-//RS     gates: Policy::GateSet,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_web_with_gates_and_settings(file, gates, &BTreeMap::new())
-//RS }
-//RS 
-//RS pub fn compile_web_with_gates_and_settings(
-//RS     file: &str,
-//RS     gates: Policy::GateSet,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_web_with_gates_and_profile_and_settings(file, gates, "dev", setting_overrides)
-//RS }
-//RS 
-//RS pub fn compile_web_with_gates_and_profile_and_settings(
-//RS     file: &str,
-//RS     gates: Policy::GateSet,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         if file_selects_programmable_build(file) {
-//RS             compile_programmable_build_opts_with_builder_and_profile_and_settings(
-//RS                 file,
-//RS                 &[],
-//RS                 false,
-//RS                 gates,
-//RS                 false,
-//RS                 true,
-//RS                 false,
-//RS                 None,
-//RS                 None,
-//RS                 profile,
-//RS                 setting_overrides,
-//RS                 None,
-//RS             )
-//RS         } else {
-//RS             compile_bundle_path_opts_with_profile_and_settings(
-//RS                 file,
-//RS                 Sema::CompileMode::Run,
-//RS                 false,
-//RS                 gates,
-//RS                 true,
-//RS                 None,
-//RS                 profile,
-//RS                 setting_overrides,
-//RS             )
-//RS         }
-//RS     })
-//RS }
-//RS /// Compile a browser WebAssembly artifact through the selected typed target
-//RS /// machine. The machine's provider facts are validated before web codegen and
-//RS /// are folded into the artifact dossier.
-//RS pub fn compile_web_with_target_machine(
-//RS     file: &str,
-//RS     machine: &TargetMachine::TargetMachine,
-//RS ) -> Result<
-//RS     CompileOutput,
-//RS     Driver::TargetMachineCompileError,
-//RS > {
-//RS     compile_web_with_target_machine_and_profile_and_settings(
-//RS         file,
-//RS         machine,
-//RS         Policy::GateSet::default(),
-//RS         "dev",
-//RS         false,
-//RS         &BTreeMap::new(),
-//RS     )
-//RS }
-//RS 
-//RS pub fn compile_web_with_target_machine_and_profile_and_settings(
-//RS     file: &str,
-//RS     machine: &TargetMachine::TargetMachine,
-//RS     gates: Policy::GateSet,
-//RS     profile: &str,
-//RS     locked: bool,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Driver::TargetMachineCompileError> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_with_target_machine_and_profile_and_settings(
-//RS             file,
-//RS             Sema::CompileMode::Run,
-//RS             machine,
-//RS             gates,
-//RS             profile,
-//RS             locked,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn compile_plugin_with_gates(
-//RS     file: &str,
-//RS     gates: Policy::GateSet,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_plugin_with_gates(
-//RS             file,
-//RS             Sema::CompileMode::Check,
-//RS             gates,
-//RS             Some(Syntax::TARGET_SANDBOX),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Like `compile_with_path` but for `jet build --target=sandbox` (D-PLUGIN1=B /
-//RS /// D-DEP-WASM1=A, c81). `CompileMode::Check` — a sandbox package has no single
-//RS /// `fn run` entry point (D-ILE1: it's a library-shaped export surface, not an
-//RS /// executable), so the "no `run`" requirement (E0101, `Run`/`Eval`-only) never
-//RS /// applies here; every other check still runs in full.
-//RS pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_plugin(
-//RS             file,
-//RS             Sema::CompileMode::Check,
-//RS             Some(Syntax::TARGET_SANDBOX),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Compile a package's selected `Library` output. Library-shaped sources do
-//RS /// not need an executable `fn run`; the native build adapter consumes the
-//RS /// checked projections on `CompileOutput`.
-//RS pub fn compile_library(file: &str, output: Option<&str>) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_library(file, Sema::CompileMode::Check, output)
-//RS     })
-//RS }
-//RS 
-//RS pub fn compile_library_with_gates(
-//RS     file: &str,
-//RS     output: Option<&str>,
-//RS     gates: Policy::GateSet,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_library_with_gates(
-//RS             file,
-//RS             Sema::CompileMode::Check,
-//RS             gates,
-//RS             output,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn compile_library_with_gates_and_settings(
-//RS     file: &str,
-//RS     output: Option<&str>,
-//RS     gates: Policy::GateSet,
-//RS     locked: bool,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_library_with_gates_and_profile_and_settings(
-//RS         file,
-//RS         output,
-//RS         gates,
-//RS         locked,
-//RS         "dev",
-//RS         setting_overrides,
-//RS     )
-//RS }
-//RS 
-//RS pub fn compile_library_with_gates_and_profile_and_settings(
-//RS     file: &str,
-//RS     output: Option<&str>,
-//RS     gates: Policy::GateSet,
-//RS     locked: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
-//RS             file,
-//RS             Sema::CompileMode::Check,
-//RS             gates,
-//RS             output,
-//RS             locked,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
-//RS /// normal build with `debug_linemap = true`, so the generated Rust carries the
-//RS /// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
-//RS pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_opts_dbg(
-//RS             file,
-//RS             Sema::CompileMode::Run,
-//RS             false,
-//RS             Policy::GateSet::default(),
-//RS             false,
-//RS             true,
-//RS             None,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
-//RS /// defines a top-level `fn dev()` — a normal native compile, but with `dev()`
-//RS /// swapped in as the program's real entry point instead of `run()` (see
-//RS /// `Driver::compile_bundle_path_with_entry`).
-//RS pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_with_entry_and_settings(file, entry_fn, "dev", &BTreeMap::new())
-//RS }
-//RS 
-//RS pub fn compile_with_entry_and_settings(
-//RS     file: &str,
-//RS     entry_fn: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_with_entry_and_settings(
-//RS             file,
-//RS             entry_fn,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn compile_output_with_options(
-//RS     file: &str,
-//RS     output: &str,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     cross_target: Option<&str>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_output_with_options_and_settings(
-//RS         file,
-//RS         output,
-//RS         no_os,
-//RS         gates,
-//RS         web_target,
-//RS         plugin_target,
-//RS         cross_target,
-//RS         &BTreeMap::new(),
-//RS     )
-//RS }
-//RS 
-//RS pub fn compile_output_with_options_and_settings(
-//RS     file: &str,
-//RS     output: &str,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     cross_target: Option<&str>,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     compile_output_with_options_and_profile_and_settings(
-//RS         file,
-//RS         output,
-//RS         no_os,
-//RS         gates,
-//RS         web_target,
-//RS         plugin_target,
-//RS         cross_target,
-//RS         "dev",
-//RS         setting_overrides,
-//RS     )
-//RS }
-//RS 
-//RS pub fn compile_output_with_options_and_profile_and_settings(
-//RS     file: &str,
-//RS     output: &str,
-//RS     no_os: bool,
-//RS     gates: Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     cross_target: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_bundle_path_output_opts_with_profile_and_settings(
-//RS             file,
-//RS             output,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             plugin_target,
-//RS             cross_target,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// In-memory web-target compile (used by integration tests).
-//RS pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_src_with_options(
-//RS             src,
-//RS             file,
-//RS             Sema::CompileMode::Run,
-//RS             Driver::CompileSrcOptions { web_target: true },
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Resolve native C-library link args for a built program (S59 / E2-M14),
-//RS /// surfacing E3201 when a library cannot be located via hangar or pkg-config.
-//RS /// Build/run paths call this AFTER a successful compile; codegen and front-end
-//RS /// checks do not, keeping link discovery out of semantic checking (I3).
-//RS pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
-//RS     resolve_c_links_for_target(file, None)
-//RS }
-//RS 
-//RS pub fn resolve_c_links_for_target(
-//RS     file: &str,
-//RS     target: Option<&str>,
-//RS ) -> Result<Vec<String>, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| {
-//RS         let bundle = Loader::load_entry_with_overlay(file, None, false)?;
-//RS         resolve_c_links_for_bundle(&bundle, target)
-//RS     })
-//RS }
-//RS 
-//RS pub fn resolve_c_links_for_target_with_source_closure(
-//RS     file: &str,
-//RS     target: Option<&str>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<Vec<String>, Vec<Diagnostic>> {
-//RS     let overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     with_compiler_stack(|| {
-//RS         let bundle = Loader::load_entry_with_overlays(file, &overlays, false)?;
-//RS         resolve_c_links_for_bundle(&bundle, target)
-//RS     })
-//RS }
-//RS 
-//RS /// The same C-link resolution over a program the caller already loaded.
-//RS ///
-//RS /// #2083: a build resolves its link flags from the one front end it ran
-//RS /// instead of reopening and re-parsing the whole program. Link-arg resolution
-//RS /// reads declared `cffi` facts and the project root — it does not descend the
-//RS /// AST, so it needs no compiler stack of its own.
-//RS pub fn resolve_c_links_for_bundle(
-//RS     bundle: &AST::ProgramBundle,
-//RS     target: Option<&str>,
-//RS ) -> Result<Vec<String>, Vec<Diagnostic>> {
-//RS     if !bundle.cffi.links_c() {
-//RS         return Ok(Vec::new());
-//RS     }
-//RS     let entry = bundle
-//RS         .modules
-//RS         .get(bundle.entry)
-//RS         .map(|module| module.path.as_path());
-//RS     match target {
-//RS         Some(target) => crate::CFFI::rustc_link_args_for_target_with_entry(
-//RS             &bundle.cffi,
-//RS             &bundle.project_root,
-//RS             target,
-//RS             entry,
-//RS         ),
-//RS         None => crate::CFFI::rustc_link_args_for_target_with_entry(
-//RS             &bundle.cffi,
-//RS             &bundle.project_root,
-//RS             &crate::FFI::host_target(),
-//RS             entry,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS /// Compile for `jet test`: optional `main`, at least one test block required.
-//RS pub fn compile_tests_with_path(
-//RS     src: &str,
-//RS     file: &str,
-//RS ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-//RS     compile_tests_with_path_cov_and_profile(src, file, false, "dev", &BTreeMap::new())
-//RS         .map(|(rust, ffi, _lints)| (rust, ffi))
-//RS }
-//RS 
-//RS /// Compile for `jet test`, with optional `jet test --coverage`
-//RS /// instrumentation. `coverage = false` produces the historical, uninstrumented
-//RS /// harness.
-//RS pub fn compile_tests_with_path_cov(
-//RS     src: &str,
-//RS     file: &str,
-//RS     coverage: bool,
-//RS ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-//RS     compile_tests_with_path_cov_and_profile(src, file, coverage, "dev", &BTreeMap::new())
-//RS         .map(|(rust, ffi, _lints)| (rust, ffi))
-//RS }
-//RS 
-//RS /// Compile a test harness with the selected named profile. Success carries
-//RS /// the checked advisory lints alongside the harness source.
-//RS pub fn compile_tests_with_path_cov_and_profile(
-//RS     src: &str,
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     let _ = src;
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_tests_with_profile(file, coverage, profile, setting_overrides)
-//RS     })
-//RS }
-//RS 
-//RS /// D-CMD-OVERRIDE1=C: compile the entry function override through the same
-//RS /// compiler stack as the stock test harness.
-//RS pub fn compile_test_override_with_path(
-//RS     src: &str,
-//RS     file: &str,
-//RS     coverage: bool,
-//RS ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-//RS     compile_test_override_with_path_and_profile(
-//RS         src,
-//RS         file,
-//RS         coverage,
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS     )
-//RS     .map(|(rust, ffi, _lints)| (rust, ffi))
-//RS }
-//RS 
-//RS /// Compile a test command override with the selected named profile. Success
-//RS /// carries the checked advisory lints alongside the harness source.
-//RS pub fn compile_test_override_with_path_and_profile(
-//RS     src: &str,
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     let _ = src;
-//RS     with_compiler_stack(|| {
-//RS         Driver::compile_test_override_with_profile(file, coverage, profile, setting_overrides)
-//RS     })
-//RS }
-//RS 
-//RS /// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.
-//RS pub use Driver::FuzzCompileError;
-//RS 
-//RS pub fn compile_fuzz_with_path(
-//RS     file: &str,
-//RS     test_name: Option<&str>,
-//RS ) -> Result<(String, Option<FFI::FfiLink>), FuzzCompileError> {
-//RS     with_compiler_stack(|| Driver::compile_fuzz(file, test_name))
-//RS }
-//RS 
-//RS /// Does the entry file define one command-named function? The loader owns
-//RS /// source discovery, so imported functions never accidentally become command
-//RS /// overrides.
-//RS pub fn has_entry_fn(file: &str, name: &str) -> bool {
-//RS     with_compiler_stack(
-//RS         || match Loader::load_entry_with_overlay(file, None, false) {
-//RS             Ok(bundle) => bundle.modules[bundle.entry]
-//RS                 .items
-//RS                 .iter()
-//RS                 .any(|item| matches!(item, AST::Item::Func(function) if function.name == name)),
-//RS             Err(_) => false,
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS /// Does the entry file declare any `#Test` block? `jet test` runs the test
-//RS /// harness when it does and skips it (running doctests only) when it doesn't, so
-//RS /// a file with only doctests is still testable. A load failure returns `true` so
-//RS /// the caller surfaces the real compile error on the normal harness path.
-//RS pub fn has_test_blocks(file: &str) -> bool {
-//RS     with_compiler_stack(
-//RS         || match Loader::load_entry_with_overlay(file, None, false) {
-//RS             Ok(bundle) => bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .flat_map(|module| module.items.iter())
-//RS                 .any(|i| matches!(i, AST::Item::Test(_))),
-//RS             Err(_) => true,
-//RS         },
-//RS     )
-//RS }
-//RS fn item_has_contracts(item: &AST::Item) -> bool {
-//RS     match item {
-//RS         AST::Item::Func(function) => !function.pre.is_empty() || !function.post.is_empty(),
-//RS         AST::Item::Impl(implementation) => implementation
-//RS             .methods
-//RS             .iter()
-//RS             .any(|method| !method.pre.is_empty() || !method.post.is_empty()),
-//RS         AST::Item::CodeModule(module) => module
-//RS             .body
-//RS             .as_ref()
-//RS             .is_some_and(|items| items.iter().any(item_has_contracts)),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Does the entry file define any contract-bearing callable? `jet test` uses
-//RS /// this discovery alongside `#Test` discovery so a file with only `#Pre` /
-//RS /// `#Post` contracts still reaches the ordinary checked producer path. A load
-//RS /// failure returns `true`, matching `has_test_blocks`, so the caller surfaces
-//RS /// the real compile error instead of silently skipping the target.
-//RS pub fn has_test_contracts(file: &str) -> bool {
-//RS     with_compiler_stack(
-//RS         || match Loader::load_entry_with_overlay(file, None, false) {
-//RS             Ok(bundle) => bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .flat_map(|module| module.items.iter())
-//RS                 .any(item_has_contracts),
-//RS             Err(_) => true,
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS /// D-COV1: every user function the `jet test --coverage` probes can record, as
-//RS /// `(name, 1-based line)`. Mirrors the probe set: free functions, inherent
-//RS /// methods, and trait-impl methods in the entry file (`run` is excluded — it is
-//RS /// never probed). The runner diffs the recorded hit lines against this set to
-//RS /// report function and branch coverage.
-//RS pub fn coverable_functions(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Vec<(String, usize)> {
-//RS     with_compiler_stack(|| coverable_functions_inner(file, profile, setting_overrides))
-//RS }
-//RS 
-//RS fn coverable_functions_inner(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Vec<(String, usize)> {
-//RS     let (diagnostics, bundle, _) = Driver::check_file_with_effect_facts_profile_and_settings(
-//RS         file,
-//RS         None,
-//RS         false,
-//RS         profile,
-//RS         setting_overrides,
-//RS     );
-//RS     let bundle = bundle.unwrap_or_else(|| {
-//RS         let detail = diagnostics
-//RS             .first()
-//RS             .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
-//RS             .unwrap_or_else(|| "the checked bundle was unavailable".to_string());
-//RS         panic!("coverage metadata unavailable for `{file}`: {detail}");
-//RS     });
-//RS     let entry = &bundle.modules[bundle.entry];
-//RS     let src = &entry.source;
-//RS     let line_of = |off: usize| {
-//RS         src[..off.min(src.len())]
-//RS             .bytes()
-//RS             .filter(|&b| b == b'\n')
-//RS             .count()
-//RS             + 1
-//RS     };
-//RS     let mut out = Vec::new();
-//RS     for item in &entry.items {
-//RS         match item {
-//RS             AST::Item::Func(f) if f.name != "run" => {
-//RS                 out.push((f.name.clone(), line_of(f.name_span.start)));
-//RS             }
-//RS             AST::Item::Struct(s) => {
-//RS                 for m in &s.methods {
-//RS                     out.push((format!("{}.{}", s.name, m.name), line_of(m.name_span.start)));
-//RS                 }
-//RS                 for b in &s.trait_impls {
-//RS                     for m in &b.methods {
-//RS                         out.push((format!("{}.{}", s.name, m.name), line_of(m.name_span.start)));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             AST::Item::Enum(e) => {
-//RS                 for m in &e.methods {
-//RS                     out.push((format!("{}.{}", e.name, m.name), line_of(m.name_span.start)));
-//RS                 }
-//RS                 for b in &e.trait_impls {
-//RS                     for m in &b.methods {
-//RS                         out.push((format!("{}.{}", e.name, m.name), line_of(m.name_span.start)));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             AST::Item::Impl(i) => {
-//RS                 for m in &i.methods {
-//RS                     out.push((
-//RS                         format!("{}.{}", i.type_name, m.name),
-//RS                         line_of(m.name_span.start),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn compile_with_mode(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: Sema::CompileMode,
-//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| Driver::compile_src(src, file, mode))
-//RS }
-//RS 
-//RS /// Back-compat: compile and return only Rust (drops lints).
-//RS pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
-//RS     compile(src).map(|o| o.rust)
-//RS }
-//RS 
-//RS pub use Comptime::{CtReport, CtValue};
-//RS pub use Diagnostics::render_all as render_diagnostics;
-//RS pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
-//RS pub use Sema::check_pure_program_root;
-//RS 
-//RS /// Pretty-print source to canonical Jet style (M6/S44).
-//RS pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| Formatter::format_source(src))
-//RS }
-//RS 
-//RS /// Pretty-print source with explicit formatter controls.
-//RS pub fn format_source_with_options(
-//RS     src: &str,
-//RS     options: Formatter::FormatOptions,
-//RS ) -> Result<String, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| Formatter::format_source_with_options(src, options))
-//RS }
-//RS 
-//RS /// Front-end check for one document (LSP / editor integration).
-//RS pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
-//RS     with_compiler_stack(|| LSP::check_document(path, text))
-//RS }
-//RS 
-//RS /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
-//RS /// interpreter and return the value `run()` returns, together with everything
-//RS /// the program printed.
-//RS ///
-//RS /// The captured output is part of the result, not a local the evaluator drops
-//RS /// (#2068): swallowing it made `jet eval` on a printing program show only its
-//RS /// `()` return value. Callers render the value with `render_pretty()` (human)
-//RS /// or `to_json()` (machine/`--json`).
-//RS ///
-//RS /// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
-//RS pub fn eval_pure_program_value(
-//RS     src: &str,
-//RS     file: &str,
-//RS ) -> Result<(CtValue, String), Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| eval_pure_program_value_inner(src, file))
-//RS }
-//RS 
-//RS fn eval_pure_program_value_inner(
-//RS     src: &str,
-//RS     file: &str,
-//RS ) -> Result<(CtValue, String), Vec<Diagnostic>> {
-//RS     // Use the checked eval bundle rather than rebuilding a top-level function
-//RS     // map.  The bundle carries the same impl/trait methods and sema facts that
-//RS     // the forced interpreter consumes, so eval cannot silently lose operators.
-//RS     let (diagnostics, bundle, _effect_facts) = Driver::check_eval_with_effect_facts(src, file);
-//RS     if diagnostics
-//RS         .iter()
-//RS         .any(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
-//RS     {
-//RS         return Err(diagnostics);
-//RS     }
-//RS     let bundle = bundle.ok_or(diagnostics)?;
-//RS     let (mir, artifact) = lower_checked_semantic_mir_program_for(
-//RS         &bundle,
-//RS         jet_foundation::MIR::MirArtifactRequest::new(
-//RS             jet_foundation::MIR::MirArtifactTarget::Interpreter,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS         ),
-//RS     );
-//RS     let mut globals = BTreeMap::new();
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             if let AST::Item::Const(constant) = item {
-//RS                 if let Some(value) = &constant.ct {
-//RS                     let value = crate::Comptime::MirBridge::ct_to_mir_value(
-//RS                         value.clone(),
-//RS                         jet_foundation::Diagnostics::Span::new(0, 0),
-//RS                     )
-//RS                     .map_err(|error| vec![error])?;
-//RS                     globals
-//RS                         .entry(constant.name.clone())
-//RS                         .or_insert(value);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let config = Codegen::MIREval::MirEvalConfig {
-//RS         base_dir: bundle.project_root.clone(),
-//RS         globals,
-//RS         ..Default::default()
-//RS     };
-//RS     let result = Codegen::MIREval::evaluate_mir_program_with_config(&mir, artifact, &config)
-//RS         .map_err(|error| vec![error.into_diagnostic()])?;
-//RS     let value = crate::Comptime::MirBridge::mir_to_ct_value(
-//RS         result.value,
-//RS         jet_foundation::Diagnostics::Span::new(0, 0),
-//RS     )
-//RS     .map_err(|error| vec![error])?;
-//RS     Ok((value, result.stdout))
-//RS }
-//RS 
-//RS /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program through the canonical
-//RS /// MIR evaluator and return the value `run()` returns, together with everything
-//RS /// the program printed.
-//RS ///
-//RS /// The captured output is returned as a JSON string value by this convenience
-//RS /// wrapper. Returns `Err` diagnostics on failure.
-//RS pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
-//RS     with_compiler_stack(|| eval_pure_program_inner(src, file))
-//RS }
-//RS 
-//RS fn eval_pure_program_inner(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
-//RS     use std::collections::HashMap;
-//RS 
-//RS     let (toks, lex_diags) = Lexer::lex(src);
-//RS     if !lex_diags.is_empty() {
-//RS         return Err(lex_diags);
-//RS     }
-//RS     let prog = Parser::parse_with_source(&toks, src)?;
-//RS 
-//RS     // Collect functions into a map for the comptime evaluator.
-//RS     let func_map: HashMap<String, &AST::Func> = prog
-//RS         .items
-//RS         .iter()
-//RS         .filter_map(|item| {
-//RS             if let AST::Item::Func(f) = item {
-//RS                 Some((f.name.clone(), f))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         })
-//RS         .collect();
-//RS 
-//RS     let main_fn = func_map.get("run").ok_or_else(|| {
-//RS         vec![Diagnostics::Diagnostic::error(
-//RS             "E3401",
-//RS             "no `run` function found for `jet eval`".to_string(),
-//RS             "pure evaluation needs a `fn run() -[]>` entry point".to_string(),
-//RS             "add `fn run() -[]> { … }` to the program".to_string(),
-//RS             None,
-//RS         )]
-//RS     })?;
-//RS 
-//RS     // Run main() via the comptime engine with a dev sink capturing print output.
-//RS     let base_dir = std::path::Path::new(file)
-//RS         .parent()
-//RS         .unwrap_or(std::path::Path::new("."));
-//RS     let mut sink = Comptime::DevSink::new();
-//RS     let program = Comptime::ProgramInfo::empty();
-//RS     Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program).map_err(|d| vec![d])?;
-//RS     let text = sink.stdout;
-//RS     // Render the captured output as a JSON string.
-//RS     let json = if text.trim().is_empty() {
-//RS         "null".to_string()
-//RS     } else {
-//RS         // Try to parse as a number or bool for cleaner output; otherwise quote it.
-//RS         let trimmed = text.trim();
-//RS         if trimmed == "true" || trimmed == "false" {
-//RS             trimmed.to_string()
-//RS         } else if jet_foundation::Numeric::CtBigInt::from_str(trimmed).is_ok()
-//RS             || trimmed.parse::<f64>().is_ok()
-//RS         {
-//RS             trimmed.to_string()
-//RS         } else {
-//RS             format!("{:?}", trimmed)
-//RS         }
-//RS     };
-//RS     Ok(json)
-//RS }
-// END-PORT-PENDING 0722 Source/lib.rs:1803-3131
+// Private continuation of canonical Host.Facade, not a second driver.
+use jet_driver.[Authority, Driver, Loader, Sema, Policy, Comptime, CompileOutput, AST, Syntax, TargetMachine, CFFI, FFI, Lexer, Parser, Formatter, Codegen, Diagnostics]
+use jetpack.[WorkspaceFile, Overlay]
+use jet_foundation.[MIR, Numeric]
+use Diagnostics.[Diagnostic, Span, Severity]
+use Comptime.[CtReport, CtValue]
+use std.[fs, io, env, process, path]
 
+// Rust: Source/lib.rs:1803
+fn workspace_build_authority(file: String) -> (Authority.AuthorityResolver, WorkspaceFile.WorkspaceSource)? [Diagnostic]! {
+    selected_path :: absolute_source_path(file)
+    root :: selected_path.parent() ?? OSPath.from(".")
+    resolver :: if Authority.AuthorityResolver.open(root) == {
+        .Ok(resolver) -> ^resolver
+        .Err(error) -> { if error.is_missing() -> return Ok(None); return Err([error.diagnostic()]) }
+    }
+    source :: resolver.resolve_workspace_source().map_err(error -> [workspace_build_root_diagnostic(selected_path, &error.workspace_diagnostic())]) ?? return Ok(None)
+    entry_name :: selected_path.file_name() ?? return Ok(None)
+    checked_entry :: resolver.checked_file(OSPath.from(entry_name)).map_err(error -> [error.diagnostic()])
+    if checked_entry.path != source.path -> return Ok(None)
+    resolver.revalidate_source(&source).map_err(error -> [error.diagnostic()])
+    if source.role != WorkspaceFile.WorkspaceSourceRole.Index {
+        return Err([Diagnostic.error("E1334", "workspace build entry is selected by an authority source", "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry", "declare the workspace index in `workspace.jet`, or build the member entry directly", None)])
+    }
+    Ok(Val((^resolver, ^source)))
+}
+
+// Rust: Source/lib.rs:1852
+fn absolute_source_path(file: String) -> OSPath {
+    selected_path :: OSPath.from(file)
+    if selected_path.is_absolute() -> selected_path
+    else -> env.current_dir().unwrap_or_else(_ -> OSPath.from(".")).join(selected_path)
+}
+
+// Rust: Source/lib.rs:1863
+struct CheckedBuildEntry {
+    package: Authority.CheckedPackage
+    file: Authority.CheckedFile?
+    entry_fn: String?
+    // Rust: Source/lib.rs:1870
+    fn source_file(&self) -> &Authority.CheckedFile { self.file.as_ref() ?? &self.package.member.manifest.file }
+    // Rust: Source/lib.rs:1876
+    fn revalidate(&self, workspace_resolver: &Authority.AuthorityResolver) -> Authority.AuthorityError! {
+        workspace_resolver.revalidate_member(&self.package.member)
+        member_resolver :: Authority.AuthorityResolver.from_checked_directory(&self.package.member.directory)
+        if &self.file == {
+            .Val(file) -> member_resolver.revalidate_file(file)
+            .None -> workspace_resolver.revalidate_file(&self.package.member.manifest.file)
+        }
+    }
+}
+
+// Rust: Source/lib.rs:1891
+fn workspace_member_entry(resolver: &Authority.AuthorityResolver, member: String, checked_package: Authority.CheckedPackage) -> CheckedBuildEntry? Diagnostic! {
+    resolver.revalidate_member(&checked_package.member).map_err(error -> error.diagnostic())
+    member_resolver :: Authority.AuthorityResolver.from_checked_directory(&checked_package.member.directory)
+    if checked_package.facts.resolve_run_entry_checked(&member_resolver).map_err(error -> Diagnostic.error("E3501", "workspace member `{member}` has an invalid typed output", error, "repair the member's typed Package output before building the workspace", None)) == {
+        .Val(entry) -> return Ok(Val(CheckedBuildEntry{package: ^checked_package, file: Val(^entry.file), entry_fn: Val(^entry.callable)}))
+        .None -> {}
+    }
+    loop candidate in [OSPath.from(Syntax.DEFAULT_ENTRY_FILE), OSPath.from("src").join(Syntax.DEFAULT_ENTRY_FILE)] {
+        if member_resolver.checked_file(candidate) == {
+            .Ok(file) -> return Ok(Val(CheckedBuildEntry{package: ^checked_package, file: Val(^file), entry_fn: None}))
+            .Err(error) -> { if !error.is_missing() -> return Err(error.diagnostic()) }
+        }
+    }
+    named :: OSPath.from("{checked_package.facts.name}.{Syntax.FILE_EXT}")
+    if member_resolver.checked_file(named) == {
+        .Ok(file) -> return Ok(Val(CheckedBuildEntry{package: ^checked_package, file: Val(^file), entry_fn: None}))
+        .Err(error) -> { if !error.is_missing() -> return Err(error.diagnostic()) }
+    }
+    if checked_package.facts.resolve_build_entry_checked(&member_resolver).map_err(error -> {
+        code :: if error.contains("two build entries for the package:") -> "E3520" else -> "E3501"
+        Diagnostic.error(code, error, "a package has one checked build authority", "keep one `fn build` in the member package", None)
+    }) == {
+        .Val(entry) -> {
+            selected_file :: if entry.path != checked_package.member.manifest.file.path -> Val(^entry) else -> None
+            return Ok(Val(CheckedBuildEntry{package: ^checked_package, file: ^selected_file, entry_fn: None}))
+        }
+        .None -> {}
+    }
+    Ok(None)
+}
+
+// Rust: Source/lib.rs:1982
+fn read_real_generated_file(project_root: OSPath, selected_path: OSPath) -> [U8] io.Error! {
+    if path_has_symlinked_component(project_root, selected_path) || fs.symlink_metadata(selected_path).is_ok_and(metadata -> metadata.file_type().is_symlink()) {
+        return Err(io.Error.new(.PermissionDenied, "generated source path contains a symlink"))
+    }
+    fs.read(selected_path)
+}
+
+// Rust: Source/lib.rs:1997
+fn write_exported_generated_file(project_root: OSPath, selected_path: OSPath, bytes: &[U8]) -> io.Error! {
+    if path_has_symlinked_component(project_root, selected_path) || fs.symlink_metadata(selected_path).is_ok_and(metadata -> metadata.file_type().is_symlink()) {
+        return Err(io.Error.new(.PermissionDenied, "generated export path contains a symlink"))
+    }
+    parent :: selected_path.parent() ?? return Err(io.Error.new(.InvalidInput, "generated export has no parent directory"))
+    ensure_real_directory(parent)
+    loop attempt in 0..<100 {
+        temporary :: parent.join(".jet-export-{process.id()}-{attempt}")
+        // GATE #4494: native exclusive-create, write, fsync and rename.
+        file := if fs.OpenOptions.new().create_new(true).write(true).open(temporary) == {
+            .Ok(file) -> ^file
+            .Err(error) -> { if error.kind() == .AlreadyExists -> continue; return Err(error) }
+        }
+        if file.write_all(bytes).and_then(_ -> file.sync_all()) == {
+            .Ok(_) -> {}
+            .Err(error) -> { _ :: fs.remove_file(temporary); return Err(error) }
+        }
+        fs.rename(temporary, selected_path)
+        return Ok(())
+    }
+    Err(io.Error.new(.AlreadyExists, "could not allocate a unique generated export temporary file"))
+}
+
+// Rust: Source/lib.rs:2042
+fn path_has_symlinked_component(root: OSPath, selected_path: OSPath) -> Bool {
+    relative :: selected_path.strip_prefix(root).ok() ?? return true
+    current := ~root
+    loop component in relative.components() {
+        part :: if component == { .Normal(part) -> part; _ -> return true }
+        current.push(part)
+        if fs.symlink_metadata(current).is_ok_and(metadata -> metadata.file_type().is_symlink()) -> return true
+    }
+    false
+}
+
+// Rust: Source/lib.rs:2061
+fn ensure_real_directory(selected_path: OSPath) -> io.Error! {
+    current := OSPath.new()
+    loop component in selected_path.components() {
+        if component == {
+            .Prefix(prefix) -> current.push(prefix.as_os_str())
+            // GATE #4483: native separator comes from the selected target.
+            .RootDir -> current.push(path.MAIN_SEPARATOR.to_string())
+            .CurDir -> {}
+            .ParentDir -> return Err(io.Error.new(.InvalidInput, "generated export path contains a parent component"))
+            .Normal(part) -> current.push(part)
+        }
+        if fs.symlink_metadata(current) == {
+            .Ok(metadata) -> {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(io.Error.new(.PermissionDenied, "generated export directory `{current.display()}` is not real"))
+                }
+            }
+            .Err(error) -> {
+                if error.kind() != .NotFound -> return Err(error)
+                fs.create_dir(current)
+            }
+        }
+    }
+    Ok(())
+}
+
+// Rust: Source/lib.rs:2100
+pub fn build_project_root(file: String) -> OSPath [Diagnostic]! {
+    absolute :: absolute_source_path(file)
+    directory :: absolute.parent() ?? OSPath.from(".")
+    Loader.selected_project_root(directory).map_err(diagnostic -> [diagnostic])
+}
+
+// Rust: Source/lib.rs:2116
+fn resolve_build_grants(file: String, cli: &[String]) -> [String] [Diagnostic]! {
+    allowed := Set<String>.from_iter(cli.iter().cloned())
+    workspace_denies := Set<String>{}
+    workspace_grants := [String:Set<String>]{:}
+    package_name := None
+    absolute :: absolute_source_path(file)
+    entry_dir :: absolute.parent() ?? OSPath.from(".")
+    workspace_root :: Loader.find_workspace_root_checked(entry_dir).map_err(diagnostic -> [workspace_build_root_diagnostic(entry_dir, &diagnostic)])
+    workspace_checked :: workspace_root.as_ref().map(root -> {
+        resolver :: Authority.AuthorityResolver.open(root).map_err(error -> [workspace_build_root_diagnostic(root, &error.diagnostic())])
+        source :: resolver.resolve_workspace_source().map_err(error -> [workspace_build_root_diagnostic(root, &error.workspace_diagnostic())]) ?? return Err([Diagnostic.error("E3503", "build policy in `{root.display()}` is malformed", "the workspace root disappeared before build policy was selected", "restore the workspace declaration before running build code", None)])
+        resolver.revalidate_source(&source).map_err(error -> [error.diagnostic()])
+        Ok((^resolver, ^source))
+    }).transpose()
+    workspace_policy :: workspace_checked.as_ref().map((resolver, source) -> load_workspace_build_policy(resolver, source)).transpose()
+    workspace_path :: workspace_checked.as_ref().map((_, source) -> ~source.path)
+    package_root :: Loader.find_manifest_root_checked(entry_dir).map_err(diagnostic -> [diagnostic]).filter(root -> workspace_root.as_ref().is_none_or(workspace -> Loader.is_physically_within(workspace, root)))
+    if package_root.is_none() {
+        if Loader.stale_manifest_name_diagnostic(entry_dir) == { .Val((_, diagnostic)) -> return Err([diagnostic]); .None -> {} }
+    }
+    if package_root.as_ref() == {
+        .Val(dir) -> {
+            package :: Loader.package_facts_for_root(dir) ?? return Err([Diagnostic.error("E3503", "package facts in `{dir.display()}` are missing", "the selected package root has no checked Package declaration", "restore the package declaration before running build code", None)])
+            package_name = Val(~package.name)
+            loop effect in package.build_allow {
+                if Comptime.Build.BuildCapability.parse(effect) == { .Val(capability) -> { _ :: allowed.insert(capability.flag().to_string()) }; .None -> {} }
+            }
+        }
+        .None -> {}
+    }
+    // Exactly one nested-workspace policy layer; never merge enclosing ceilings.
+    if (workspace_policy, workspace_path.as_ref()) == {
+        (.Val(policy), .Val(workspace)) -> {
+            loop effect in policy.build_deny {
+                capability :: Comptime.Build.BuildCapability.parse(effect) ?? return Err([Diagnostic.error("E3503", "build policy in `{workspace.display()}` is malformed", "unknown build effect `{effect}`", "use one of the declared build effects in `policy.deny`", None)])
+                _ :: workspace_denies.insert(capability.flag().to_string())
+            }
+            // BTreeMap's sorted subject order determines the first invalid effect.
+            subjects :: policy.build_grants.keys().sorted()
+            loop subject in subjects {
+                grants := workspace_grants.entry(subject).or_insert(Set<String>{})
+                loop effect in policy.build_grants[subject] {
+                    capability :: Comptime.Build.BuildCapability.parse(effect) ?? return Err([Diagnostic.error("E3503", "build policy in `{workspace.display()}` is malformed", "unknown build effect `{effect}`", "use one of the declared build effects in `policy.grants`", None)])
+                    _ :: grants.insert(capability.flag().to_string())
+                }
+            }
+        }
+        _ -> {}
+    }
+    subject :: if package_name == {
+        .Val(name) -> name
+        .None -> {
+            if workspace_root.is_some() -> Loader.authority_name_for_entry(absolute).map_err(diagnostic -> [diagnostic])
+            else -> (absolute.file_stem().and_then(name -> name.to_str()).filter(name -> !name.is_empty()) ?? "app").to_string()
+        }
+    }
+    if workspace_grants.get(subject) == { .Val(grants) -> allowed.extend(grants.iter().cloned()); .None -> {} }
+    loop denied in workspace_denies -> { _ :: allowed.remove(denied) }
+    Ok(allowed.into_iter().sorted().collect())
+}
+
+// Rust: Source/lib.rs:2263
+fn load_workspace_build_policy(resolver: &Authority.AuthorityResolver, source: &WorkspaceFile.WorkspaceSource) -> Overlay.OverlayPolicy [Diagnostic]! {
+    WorkspaceFile.evaluate_checked_source(source, resolver).map(plan -> ^plan.overlay_policy).map_err(diagnostic -> [workspace_build_root_diagnostic(source.path, &diagnostic)])
+}
+// Rust: Source/lib.rs:2277
+fn production_build_policy() -> Comptime.Build.BuildPolicy {
+    ci :: env.var("CI").ok().is_some_and(value -> {
+        trimmed := value.trim() // #4303
+        folded :: trimmed.to_ascii_lowercase()
+        folded == "1" || folded == "true" || folded == "yes"
+    })
+    if ci -> Comptime.Build.BuildPolicy.ci_default() else -> Comptime.Build.BuildPolicy.local_default()
+}
+
+// Rust: Source/lib.rs:2291
+fn compile_bundle_path_opts(file: String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, cross_target: String?) -> CompileOutput [Diagnostic]! {
+    compile_bundle_path_opts_with_settings(file, mode, no_os, gates, web_target, cross_target, &[:])
+}
+// Rust: Source/lib.rs:2310
+fn compile_bundle_path_opts_with_settings(file: String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, cross_target: String?, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_with_profile_and_settings(file, mode, no_os, gates, web_target, cross_target, "dev", setting_overrides))
+}
+// Rust: Source/lib.rs:2332
+fn compile_bundle_path_opts_with_profile_and_settings(file: String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, cross_target: String?, profile: String, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_with_profile_and_settings(file, mode, no_os, gates, web_target, cross_target, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2357
+pub fn compile_web(file: String) -> CompileOutput [Diagnostic]! { compile_web_with_gates(file, Policy.GateSet.default()) }
+// Rust: Source/lib.rs:2361
+pub fn compile_web_with_gates(file: String, gates: Policy.GateSet) -> CompileOutput [Diagnostic]! { compile_web_with_gates_and_settings(file, gates, &[:]) }
+// Rust: Source/lib.rs:2368
+pub fn compile_web_with_gates_and_settings(file: String, gates: Policy.GateSet, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! { compile_web_with_gates_and_profile_and_settings(file, gates, "dev", setting_overrides) }
+// Rust: Source/lib.rs:2376
+pub fn compile_web_with_gates_and_profile_and_settings(file: String, gates: Policy.GateSet, profile: String, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> {
+        if file_selects_programmable_build(file) -> compile_programmable_build_opts_with_builder_and_profile_and_settings(file, &[], false, gates, false, true, false, None, None, profile, setting_overrides, None)
+        else -> compile_bundle_path_opts_with_profile_and_settings(file, Sema.CompileMode.Run, false, gates, true, None, profile, setting_overrides)
+    })
+}
+// Rust: Source/lib.rs:2415
+pub fn compile_web_with_target_machine(file: String, machine: &TargetMachine.TargetMachine) -> CompileOutput Driver.TargetMachineCompileError! {
+    compile_web_with_target_machine_and_profile_and_settings(file, machine, Policy.GateSet.default(), "dev", false, &[:])
+}
+// Rust: Source/lib.rs:2432
+pub fn compile_web_with_target_machine_and_profile_and_settings(file: String, machine: &TargetMachine.TargetMachine, gates: Policy.GateSet, profile: String, locked: Bool, setting_overrides: &[String:String]) -> CompileOutput Driver.TargetMachineCompileError! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_with_target_machine_and_profile_and_settings(file, Sema.CompileMode.Run, machine, gates, profile, locked, setting_overrides))
+}
+// Rust: Source/lib.rs:2453
+pub fn compile_plugin_with_gates(file: String, gates: Policy.GateSet) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_plugin_with_gates(file, Sema.CompileMode.Check, gates, Val(Syntax.TARGET_SANDBOX)))
+}
+// Rust: Source/lib.rs:2472
+pub fn compile_plugin(file: String) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_plugin(file, Sema.CompileMode.Check, Val(Syntax.TARGET_SANDBOX)))
+}
+// Rust: Source/lib.rs:2485
+pub fn compile_library(file: String, output: String?) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_library(file, Sema.CompileMode.Check, output))
+}
+// Rust: Source/lib.rs:2491
+pub fn compile_library_with_gates(file: String, output: String?, gates: Policy.GateSet) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_library_with_gates(file, Sema.CompileMode.Check, gates, output))
+}
+// Rust: Source/lib.rs:2506
+pub fn compile_library_with_gates_and_settings(file: String, output: String?, gates: Policy.GateSet, locked: Bool, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    compile_library_with_gates_and_profile_and_settings(file, output, gates, locked, "dev", setting_overrides)
+}
+// Rust: Source/lib.rs:2523
+pub fn compile_library_with_gates_and_profile_and_settings(file: String, output: String?, gates: Policy.GateSet, locked: Bool, profile: String, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_library_with_gates_and_profile_and_settings(file, Sema.CompileMode.Check, gates, output, locked, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2547
+pub fn compile_for_debug(file: String) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_opts_dbg(file, Sema.CompileMode.Run, false, Policy.GateSet.default(), false, true, None))
+}
+// Rust: Source/lib.rs:2565
+pub fn compile_with_entry(file: String, entry_fn: String) -> CompileOutput [Diagnostic]! { compile_with_entry_and_settings(file, entry_fn, "dev", &[:]) }
+// Rust: Source/lib.rs:2569
+pub fn compile_with_entry_and_settings(file: String, entry_fn: String, profile: String, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_with_entry_and_settings(file, entry_fn, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2585
+pub fn compile_output_with_options(file: String, output: String, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, cross_target: String?) -> CompileOutput [Diagnostic]! {
+    compile_output_with_options_and_settings(file, output, no_os, gates, web_target, plugin_target, cross_target, &[:])
+}
+// Rust: Source/lib.rs:2606
+pub fn compile_output_with_options_and_settings(file: String, output: String, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, cross_target: String?, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    compile_output_with_options_and_profile_and_settings(file, output, no_os, gates, web_target, plugin_target, cross_target, "dev", setting_overrides)
+}
+// Rust: Source/lib.rs:2629
+pub fn compile_output_with_options_and_profile_and_settings(file: String, output: String, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, cross_target: String?, profile: String, setting_overrides: &[String:String]) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_bundle_path_output_opts_with_profile_and_settings(file, output, no_os, gates, web_target, plugin_target, cross_target, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2656
+pub fn compile_web_with_path(src: String, file: String) -> CompileOutput [Diagnostic]! {
+    with_compiler_stack(() -> Driver.compile_src_with_options(src, file, Sema.CompileMode.Run, Driver.CompileSrcOptions{web_target: true}))
+}
+
+// Rust: Source/lib.rs:2671
+pub fn resolve_c_links(file: String) -> [String] [Diagnostic]! { resolve_c_links_for_target(file, None) }
+// Rust: Source/lib.rs:2675
+pub fn resolve_c_links_for_target(file: String, target: String?) -> [String] [Diagnostic]! {
+    with_compiler_stack(() -> {
+        bundle :: Loader.load_entry_with_overlay(file, None, false)
+        resolve_c_links_for_bundle(&bundle, target)
+    })
+}
+// Rust: Source/lib.rs:2685
+pub fn resolve_c_links_for_target_with_source_closure(file: String, target: String?, source_closure: &[(OSPath, String)]) -> [String] [Diagnostic]! {
+    overlays :: source_closure.iter().map((path, source) -> (&path, &source)).collect()
+    with_compiler_stack(() -> {
+        bundle :: Loader.load_entry_with_overlays(file, &overlays, false)
+        resolve_c_links_for_bundle(&bundle, target)
+    })
+}
+// Rust: Source/lib.rs:2706
+pub fn resolve_c_links_for_bundle(bundle: &AST.ProgramBundle, target: String?) -> [String] [Diagnostic]! {
+    if !bundle.cffi.links_c() -> return Ok([])
+    entry :: bundle.modules.get(bundle.entry).map(module -> &module.path)
+    // Link discovery is post-check work, not a semantic check.
+    if target == {
+        .Val(selected) -> CFFI.rustc_link_args_for_target_with_entry(&bundle.cffi, &bundle.project_root, selected, entry)
+        .None -> CFFI.rustc_link_args_for_target_with_entry(&bundle.cffi, &bundle.project_root, FFI.host_target(), entry)
+    }
+}
+
+// Rust: Source/lib.rs:2734
+pub fn compile_tests_with_path(src: String, file: String) -> (String, FFI.FfiLink?) [Diagnostic]! {
+    compile_tests_with_path_cov_and_profile(src, file, false, "dev", &[:]).map((generated, ffi, _) -> (^generated, ^ffi))
+}
+// Rust: Source/lib.rs:2745
+pub fn compile_tests_with_path_cov(src: String, file: String, coverage: Bool) -> (String, FFI.FfiLink?) [Diagnostic]! {
+    compile_tests_with_path_cov_and_profile(src, file, coverage, "dev", &[:]).map((generated, ffi, _) -> (^generated, ^ffi))
+}
+// Rust: Source/lib.rs:2756
+pub fn compile_tests_with_path_cov_and_profile(src: String, file: String, coverage: Bool, profile: String, setting_overrides: &[String:String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    _ :: src
+    with_compiler_stack(() -> Driver.compile_tests_with_profile(file, coverage, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2771
+pub fn compile_test_override_with_path(src: String, file: String, coverage: Bool) -> (String, FFI.FfiLink?) [Diagnostic]! {
+    compile_test_override_with_path_and_profile(src, file, coverage, "dev", &[:]).map((generated, ffi, _) -> (^generated, ^ffi))
+}
+// Rust: Source/lib.rs:2788
+pub fn compile_test_override_with_path_and_profile(src: String, file: String, coverage: Bool, profile: String, setting_overrides: &[String:String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    _ :: src
+    with_compiler_stack(() -> Driver.compile_test_override_with_profile(file, coverage, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2802
+use Driver.FuzzCompileError
+// Rust: Source/lib.rs:2804
+pub fn compile_fuzz_with_path(file: String, test_name: String?) -> (String, FFI.FfiLink?) FuzzCompileError! {
+    with_compiler_stack(() -> Driver.compile_fuzz(file, test_name))
+}
+
+// Rust: Source/lib.rs:2814
+pub fn has_entry_fn(file: String, name: String) -> Bool {
+    with_compiler_stack(() -> {
+        if Loader.load_entry_with_overlay(file, None, false) == {
+            .Ok(bundle) -> bundle.modules[bundle.entry].items.iter().any(item -> if item == { .Func(function) -> function.name == name; _ -> false })
+            .Err(_) -> false
+        }
+    })
+}
+// Rust: Source/lib.rs:2830
+pub fn has_test_blocks(file: String) -> Bool {
+    with_compiler_stack(() -> {
+        if Loader.load_entry_with_overlay(file, None, false) == {
+            .Ok(bundle) -> bundle.modules.iter().flat_map(module -> module.items.iter()).any(item -> if item == { .Test(_) -> true; _ -> false })
+            .Err(_) -> true
+        }
+    })
+}
+// Rust: Source/lib.rs:2842
+fn item_has_contracts(item: &AST.Item) -> Bool {
+    if item == {
+        .Func(function) -> !function.pre.is_empty() || !function.post.is_empty()
+        .Impl(implementation) -> implementation.methods.iter().any(method -> !method.pre.is_empty() || !method.post.is_empty())
+        .CodeModule(module) -> module.body.as_ref().is_some_and(items -> items.iter().any(item_has_contracts))
+        _ -> false
+    }
+}
+// Rust: Source/lib.rs:2862
+pub fn has_test_contracts(file: String) -> Bool {
+    with_compiler_stack(() -> {
+        if Loader.load_entry_with_overlay(file, None, false) == {
+            .Ok(bundle) -> bundle.modules.iter().flat_map(module -> module.items.iter()).any(item_has_contracts)
+            .Err(_) -> true
+        }
+    })
+}
+
+// Rust: Source/lib.rs:2880
+pub fn coverable_functions(file: String, profile: String, setting_overrides: &[String:String]) -> [(String, USize)] {
+    with_compiler_stack(() -> coverable_functions_inner(file, profile, setting_overrides))
+}
+// Rust: Source/lib.rs:2888
+fn coverable_functions_inner(file: String, profile: String, setting_overrides: &[String:String]) -> [(String, USize)] {
+    (diagnostics, checked_bundle, _) :: Driver.check_file_with_effect_facts_profile_and_settings(file, None, false, profile, setting_overrides)
+    bundle :: checked_bundle.unwrap_or_else(() -> {
+        detail :: diagnostics.first().map(diagnostic -> "{diagnostic.code}: {diagnostic.what}") ?? "the checked bundle was unavailable"
+        panic("coverage metadata unavailable for `{file}`: {detail}")
+    })
+    entry :: &bundle.modules[bundle.entry]
+    src :: &entry.source
+    line_of :: (off: USize) -> src.bytes()[0..<off.min(src.len())].iter().filter(b -> b == 10).count() + 1
+    out := []
+    loop item in &entry.items {
+        if item == {
+            .Func(f) -> { if f.name != "run" -> out.push((~f.name, line_of(f.name_span.start))) }
+            .Struct(s) -> {
+                loop m in &s.methods -> out.push(("{s.name}.{m.name}", line_of(m.name_span.start)))
+                loop b in &s.trait_impls {
+                    loop m in &b.methods -> out.push(("{s.name}.{m.name}", line_of(m.name_span.start)))
+                }
+            }
+            .Enum(e) -> {
+                loop m in &e.methods -> out.push(("{e.name}.{m.name}", line_of(m.name_span.start)))
+                loop b in &e.trait_impls {
+                    loop m in &b.methods -> out.push(("{e.name}.{m.name}", line_of(m.name_span.start)))
+                }
+            }
+            .Impl(i) -> {
+                loop m in &i.methods -> out.push(("{i.type_name}.{m.name}", line_of(m.name_span.start)))
+            }
+            _ -> {}
+        }
+    }
+    ^out
+}
+
+// Rust: Source/lib.rs:2956
+fn compile_with_mode(src: String, file: String, mode: Sema.CompileMode) -> CompileOutput [Diagnostic]! { with_compiler_stack(() -> Driver.compile_src(src, file, mode)) }
+// Rust: Source/lib.rs:2965
+pub fn compile_rust(src: String) -> String [Diagnostic]! { compile(src).map(output -> ^output.rust) }
+// Rust: Source/lib.rs:2969-2972: no root rendering/check aliases; callers use canonical owners.
+use Diagnostics.[render_all, render_all_colored, render_all_json, render_all_linked]
+use Sema.check_pure_program_root
+// Rust: Source/lib.rs:2975
+pub fn format_source(src: String) -> String [Diagnostic]! { with_compiler_stack(() -> Formatter.format_source(src)) }
+// Rust: Source/lib.rs:2980
+pub fn format_source_with_options(src: String, options: Formatter.FormatOptions) -> String [Diagnostic]! { with_compiler_stack(() -> Formatter.format_source_with_options(src, options)) }
+// Rust: Source/lib.rs:2988
+pub fn check_document(path: String, text: String) -> [Diagnostic] { with_compiler_stack(() -> LSP.check_document(path, text)) }
+
+// Rust: Source/lib.rs:3002
+pub fn eval_pure_program_value(src: String, file: String) -> (CtValue, String) [Diagnostic]! { with_compiler_stack(() -> eval_pure_program_value_inner(src, file)) }
+// Rust: Source/lib.rs:3009
+fn eval_pure_program_value_inner(src: String, file: String) -> (CtValue, String) [Diagnostic]! {
+    (diagnostics, checked_bundle, _) :: Driver.check_eval_with_effect_facts(src, file)
+    if diagnostics.iter().any(diagnostic -> diagnostic.severity == Severity.Error) -> return Err(^diagnostics)
+    bundle :: checked_bundle ?? return Err(^diagnostics)
+    (mir, artifact) :: lower_checked_semantic_mir_program_for(&bundle, MIR.MirArtifactRequest.new(MIR.MirArtifactTarget.Interpreter, MIR.MirArtifactKind.NativeExecutable, MIR.MirArtifactBuildMode.Dev))
+    globals := [String:MIR.MirValue]{:}
+    loop module in &bundle.modules {
+        loop item in &module.items {
+            if item == {
+                .Const(constant) -> {
+                    if &constant.ct == {
+                        .Val(value) -> {
+                            converted :: Comptime.MirBridge.ct_to_mir_value(~value, Span.new(0, 0)).map_err(error -> [error])
+                            _ :: globals.entry(~constant.name).or_insert(^converted)
+                        }
+                        .None -> {}
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    config := Codegen.MIREval.MirEvalConfig.default()
+    config.base_dir = ~bundle.project_root
+    config.globals = ^globals
+    result :: Codegen.MIREval.evaluate_mir_program_with_config(&mir, artifact, &config).map_err(error -> [error.into_diagnostic()])
+    value :: Comptime.MirBridge.mir_to_ct_value(^result.value, Span.new(0, 0)).map_err(error -> [error])
+    Ok((^value, ^result.stdout))
+}
+
+// Rust: Source/lib.rs:3070
+pub fn eval_pure_program(src: String, file: String) -> String [Diagnostic]! { with_compiler_stack(() -> eval_pure_program_inner(src, file)) }
+// Rust: Source/lib.rs:3074
+fn eval_pure_program_inner(src: String, file: String) -> String [Diagnostic]! {
+    (toks, lex_diags) :: Lexer.lex(src)
+    if !lex_diags.is_empty() -> return Err(^lex_diags)
+    prog :: Parser.parse_with_source(&toks, src)
+    func_map := [String:&AST.Func]{:}
+    loop item in &prog.items {
+        if item == { .Func(f) -> func_map[~f.name] = &f; _ -> {} }
+    }
+    main_fn :: func_map.get("run") ?? return Err([Diagnostic.error("E3401", "no `run` function found for `jet eval`", "pure evaluation needs a `fn run() -[]>` entry point", "add `fn run() -[]> { … }` to the program", None)])
+    base_dir :: OSPath.from(file).parent() ?? OSPath.from(".")
+    sink := Comptime.DevSink.new()
+    program :: Comptime.ProgramInfo.empty()
+    Comptime.run_main(main_fn, &func_map, base_dir, &sink, &program).map_err(d -> [d])
+    text :: ^sink.stdout
+    trimmed := text.trim() // #4303
+    json :: if trimmed.is_empty() -> "null"
+        else if trimmed == "true" || trimmed == "false" -> trimmed.to_string()
+        else if Numeric.CtBigInt.from_str(trimmed).is_ok() || trimmed.parse<F64>().is_ok() -> trimmed.to_string()
+        else -> format("{:?}", trimmed) // GATE #4500: canonical escape-debug string spelling.
+    Ok(json)
+}

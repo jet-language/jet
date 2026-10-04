@@ -1,1803 +1,796 @@
-// PORT-PENDING 0674 source-cmdcompile-module-group-slice-13767: Source/CmdCompile.rs:13767-15565
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn write_plugin_artifacts(
-//RS     file: &str,
-//RS     plugin: &jet::Codegen::PluginArtifacts,
-//RS     verbose: bool,
-//RS     out_dir: &Path,
-//RS     mode: OutputMode,
-//RS ) -> Result<PluginBuildPaths, PluginBuildError> {
-//RS     let step = |msg: String| {
-//RS         if verbose {
-//RS             write_mode_status(mode, &format!("[build] {msg}\n"));
-//RS         }
-//RS     };
-//RS     fs::create_dir_all(out_dir).map_err(|e| {
-//RS         PluginBuildError::ToolFailure(format!(
-//RS             "couldn't create the {} folder: {}",
-//RS             out_dir.display(),
-//RS             e
-//RS         ))
-//RS     })?;
-//RS     let name = stem(file);
-//RS     let wit_dir = out_dir.join(format!("{name}_wit"));
-//RS     fs::create_dir_all(&wit_dir).map_err(|e| {
-//RS         PluginBuildError::ToolFailure(format!("couldn't create {}: {}", wit_dir.display(), e))
-//RS     })?;
-//RS     let wit_path = wit_dir.join("world.wit");
-//RS     let guest_rust_path = out_dir.join(format!("{name}_plugin.rs"));
-//RS     let core_wasm_path = out_dir.join(format!("{name}_core.wasm"));
-//RS     let embedded_wasm_path = out_dir.join(format!("{name}_embedded.wasm"));
-//RS     let component_wasm_path = out_dir.join(format!("{name}.wasm"));
-//RS 
-//RS     fs::write(&wit_path, &plugin.wit).map_err(|e| {
-//RS         PluginBuildError::ToolFailure(format!("couldn't write {}: {}", wit_path.display(), e))
-//RS     })?;
-//RS     fs::write(&guest_rust_path, &plugin.guest_rust).map_err(|e| {
-//RS         PluginBuildError::ToolFailure(format!(
-//RS             "couldn't write {}: {}",
-//RS             guest_rust_path.display(),
-//RS             e
-//RS         ))
-//RS     })?;
-//RS 
-//RS     step(format!("wit emit    -> {}", wit_path.display()));
-//RS     step(format!("guest rust  -> {}", guest_rust_path.display()));
-//RS     step(format!(
-//RS         "rustc wasm  {} -> {}",
-//RS         guest_rust_path.display(),
-//RS         core_wasm_path.display()
-//RS     ));
-//RS     let rustc = Command::new("rustc")
-//RS         .args([
-//RS             "--edition",
-//RS             "2021",
-//RS             "--target",
-//RS             "wasm32-unknown-unknown",
-//RS             "--crate-type",
-//RS             "cdylib",
-//RS             "-O",
-//RS             "--crate-name",
-//RS         ])
-//RS         .arg(jet::Syntax::sanitize_crate_name(
-//RS             guest_rust_path
-//RS                 .file_stem()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("out"),
-//RS         ))
-//RS         .args([
-//RS             guest_rust_path.to_str().unwrap(),
-//RS             "-o",
-//RS             core_wasm_path.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .map_err(|e| {
-//RS             PluginBuildError::ToolFailure(format!(
-//RS                 "couldn't run `rustc --target wasm32-unknown-unknown` ({e}) — is the wasm32-unknown-unknown target installed?"
-//RS             ))
-//RS         })?;
-//RS     if !rustc.status.success() {
-//RS         return Err(PluginBuildError::GeneratedCodeRejected(format!(
-//RS             "rustc rejected the generated plugin guest module\n{}",
-//RS             String::from_utf8_lossy(&rustc.stderr)
-//RS         )));
-//RS     }
-//RS 
-//RS     step(format!(
-//RS         "wit embed   {} -> {}",
-//RS         core_wasm_path.display(),
-//RS         embedded_wasm_path.display()
-//RS     ));
-//RS     let embed = Command::new("wasm-tools")
-//RS         .args([
-//RS             "component",
-//RS             "embed",
-//RS             wit_dir.to_str().unwrap(),
-//RS             "--world",
-//RS             &plugin.world_name,
-//RS             core_wasm_path.to_str().unwrap(),
-//RS             "-o",
-//RS             embedded_wasm_path.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .map_err(|e| {
-//RS             PluginBuildError::ToolFailure(format!(
-//RS                 "couldn't run `wasm-tools` ({e}) — install it (ships in the project's `nix develop` shell) or add it to PATH"
-//RS             ))
-//RS         })?;
-//RS     if !embed.status.success() {
-//RS         return Err(PluginBuildError::ToolFailure(format!(
-//RS             "`wasm-tools component embed` failed\n{}",
-//RS             String::from_utf8_lossy(&embed.stderr)
-//RS         )));
-//RS     }
-//RS 
-//RS     step(format!(
-//RS         "wit lift    {} -> {}",
-//RS         embedded_wasm_path.display(),
-//RS         component_wasm_path.display()
-//RS     ));
-//RS     let new = Command::new("wasm-tools")
-//RS         .args([
-//RS             "component",
-//RS             "new",
-//RS             embedded_wasm_path.to_str().unwrap(),
-//RS             "-o",
-//RS             component_wasm_path.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .map_err(|e| PluginBuildError::ToolFailure(format!("couldn't run `wasm-tools` ({e})")))?;
-//RS     if !new.status.success() {
-//RS         return Err(PluginBuildError::ToolFailure(format!(
-//RS             "`wasm-tools component new` failed\n{}",
-//RS             String::from_utf8_lossy(&new.stderr)
-//RS         )));
-//RS     }
-//RS 
-//RS     Ok(PluginBuildPaths {
-//RS         wit: wit_path,
-//RS         guest_rust: guest_rust_path,
-//RS         core_wasm: core_wasm_path,
-//RS         component_wasm: component_wasm_path,
-//RS     })
-//RS }
-//RS 
-//RS struct LibraryBuildPaths {
-//RS     shared: Option<PathBuf>,
-//RS     staticlib: Option<PathBuf>,
-//RS     header: Option<PathBuf>,
-//RS     loadable: Option<PathBuf>,
-//RS     bindings: Vec<PathBuf>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS enum LibraryBuildError {
-//RS     Io(String),
-//RS     Tool(String),
-//RS     GeneratedCode(String),
-//RS }
-//RS 
-//RS impl std::fmt::Display for LibraryBuildError {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Io(error) | Self::Tool(error) => formatter.write_str(error),
-//RS             Self::GeneratedCode(stderr) => formatter.write_str(stderr),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl From<std::io::Error> for LibraryBuildError {
-//RS     fn from(error: std::io::Error) -> Self {
-//RS         Self::Io(error.to_string())
-//RS     }
-//RS }
-//RS 
-//RS struct LibraryStage {
-//RS     path: PathBuf,
-//RS }
-//RS 
-//RS impl Drop for LibraryStage {
-//RS     fn drop(&mut self) {
-//RS         let _ = fs::remove_dir_all(&self.path);
-//RS     }
-//RS }
-//RS 
-//RS fn library_reparse_point(metadata: &fs::Metadata) -> bool {
-//RS     if metadata.file_type().is_symlink() {
-//RS         return true;
-//RS     }
-//RS     #[cfg(windows)]
-//RS     {
-//RS         use std::os::windows::fs::MetadataExt;
-//RS         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-//RS         return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
-//RS     }
-//RS     #[cfg(not(windows))]
-//RS     {
-//RS         false
-//RS     }
-//RS }
-//RS 
-//RS fn validate_library_output_root(root: &Path) -> Result<(), LibraryBuildError> {
-//RS     match fs::symlink_metadata(root) {
-//RS         Ok(metadata) => {
-//RS             if library_reparse_point(&metadata) || !metadata.is_dir() {
-//RS                 return Err(LibraryBuildError::Io(format!(
-//RS                     "Library output root `{}` is not a real directory",
-//RS                     root.display()
-//RS                 )));
-//RS             }
-//RS         }
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             fs::create_dir(root)?;
-//RS         }
-//RS         Err(error) => return Err(error.into()),
-//RS     }
-//RS     let first = fs::canonicalize(root)?;
-//RS     let second = fs::canonicalize(root)?;
-//RS     if first != second {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "Library output root `{}` changed while it was being resolved",
-//RS             root.display()
-//RS         )));
-//RS     }
-//RS     let metadata = fs::symlink_metadata(root)?;
-//RS     if library_reparse_point(&metadata) || !metadata.is_dir() {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "Library output root `{}` changed to a symlink or reparse point",
-//RS             root.display()
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn library_owned_paths(target: &Path, stem: &str) -> Vec<PathBuf> {
-//RS     [
-//RS         format!("lib{stem}.a"),
-//RS         format!("lib{stem}.so"),
-//RS         format!("lib{stem}.dylib"),
-//RS         format!("lib{stem}.dll"),
-//RS         format!("{stem}.h"),
-//RS         format!("{stem}.jetlib"),
-//RS         format!("{stem}.rs"),
-//RS         format!(".{stem}.jet-library.complete"),
-//RS     ]
-//RS     .into_iter()
-//RS     .map(|name| target.join(name))
-//RS     .chain(
-//RS         ["h", "hpp", "rs", "zig", "go", "py", "mjs", "swift"]
-//RS             .into_iter()
-//RS             .map(|extension| target.join("bindings").join(format!("{stem}.{extension}"))),
-//RS     )
-//RS     .collect()
-//RS }
-//RS 
-//RS fn remove_library_owned_path(path: &Path) -> Result<(), LibraryBuildError> {
-//RS     let metadata = match fs::symlink_metadata(path) {
-//RS         Ok(metadata) => metadata,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-//RS         Err(error) => return Err(error.into()),
-//RS     };
-//RS     if library_reparse_point(&metadata) {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "refusing to remove symlink or reparse point `{}`",
-//RS             path.display()
-//RS         )));
-//RS     }
-//RS     if metadata.is_dir() {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "refusing to remove directory where a Library file belongs: `{}`",
-//RS             path.display()
-//RS         )));
-//RS     }
-//RS     fs::remove_file(path)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_library_bindings_root(target: &Path) -> Result<(), LibraryBuildError> {
-//RS     let root = target.join("bindings");
-//RS     let metadata = match fs::symlink_metadata(&root) {
-//RS         Ok(metadata) => metadata,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-//RS         Err(error) => return Err(error.into()),
-//RS     };
-//RS     if library_reparse_point(&metadata) || !metadata.is_dir() {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "Library bindings root `{}` is not a real directory",
-//RS             root.display()
-//RS         )));
-//RS     }
-//RS     let first = fs::canonicalize(&root)?;
-//RS     let second = fs::canonicalize(&root)?;
-//RS     if first != second {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "Library bindings root `{}` changed while it was being resolved",
-//RS             root.display()
-//RS         )));
-//RS     }
-//RS     let metadata = fs::symlink_metadata(&root)?;
-//RS     if library_reparse_point(&metadata) || !metadata.is_dir() {
-//RS         return Err(LibraryBuildError::Io(format!(
-//RS             "Library bindings root `{}` changed to a symlink or reparse point",
-//RS             root.display()
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn clean_library_outputs(target: &Path, stem: &str) -> Result<(), LibraryBuildError> {
-//RS     // Validate both parents before inspecting any owned output. A swapped or
-//RS     // symlinked root would otherwise make stale-output cleanup leave the
-//RS     // target tree and remove an unrelated path.
-//RS     validate_library_output_root(target)?;
-//RS     validate_library_bindings_root(target)?;
-//RS     for path in library_owned_paths(target, stem) {
-//RS         remove_library_owned_path(&path)?;
-//RS     }
-//RS     let stage_prefix = format!(".jet-library-stage-{stem}-{}-", std::process::id());
-//RS     for entry in fs::read_dir(target)? {
-//RS         let entry = entry?;
-//RS         let name = entry.file_name();
-//RS         if !name.to_string_lossy().starts_with(&stage_prefix) {
-//RS             continue;
-//RS         }
-//RS         let metadata = fs::symlink_metadata(entry.path())?;
-//RS         if library_reparse_point(&metadata) || !metadata.is_dir() {
-//RS             return Err(LibraryBuildError::Io(format!(
-//RS                 "refusing to remove invalid Library staging path `{}`",
-//RS                 entry.path().display()
-//RS             )));
-//RS         }
-//RS         fs::remove_dir_all(entry.path())?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn new_library_stage(target: &Path, stem: &str) -> Result<LibraryStage, LibraryBuildError> {
-//RS     for serial in 0..64u32 {
-//RS         let path = target.join(format!(
-//RS             ".jet-library-stage-{stem}-{}-{serial}",
-//RS             std::process::id()
-//RS         ));
-//RS         match fs::create_dir(&path) {
-//RS             Ok(()) => return Ok(LibraryStage { path }),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS             Err(error) => return Err(error.into()),
-//RS         }
-//RS     }
-//RS     Err(LibraryBuildError::Io(
-//RS         "could not allocate a unique Library staging directory".to_string(),
-//RS     ))
-//RS }
-//RS 
-//RS fn write_library_staged(path: &Path, bytes: &[u8]) -> Result<(), LibraryBuildError> {
-//RS     let mut file = fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(path)?;
-//RS     file.write_all(bytes)?;
-//RS     file.sync_all()?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn publish_library_file(staged: &Path, final_path: &Path) -> Result<(), LibraryBuildError> {
-//RS     if let Ok(metadata) = fs::symlink_metadata(final_path) {
-//RS         if library_reparse_point(&metadata) {
-//RS             return Err(LibraryBuildError::Io(format!(
-//RS                 "refusing to replace symlink or reparse point `{}`",
-//RS                 final_path.display()
-//RS             )));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             return Err(LibraryBuildError::Io(format!(
-//RS                 "refusing to replace directory `{}`",
-//RS                 final_path.display()
-//RS             )));
-//RS         }
-//RS         #[cfg(windows)]
-//RS         fs::remove_file(final_path)?;
-//RS     }
-//RS     fs::rename(staged, final_path)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn library_stem(name: &str) -> String {
-//RS     let mut stem = name
-//RS         .chars()
-//RS         .map(|ch| {
-//RS             if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
-//RS                 ch
-//RS             } else {
-//RS                 '_'
-//RS             }
-//RS         })
-//RS         .collect::<String>();
-//RS     if stem.is_empty() {
-//RS         stem.push_str("library");
-//RS     }
-//RS     if stem.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-//RS         stem.insert(0, '_');
-//RS     }
-//RS     stem
-//RS }
-//RS 
-//RS fn library_rustc(
-//RS     source: &Path,
-//RS     crate_type: &str,
-//RS     output: &Path,
-//RS     profile: BuildProfile,
-//RS     verbose: bool,
-//RS     linker: &crate::NativeLinker::Selection,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     mode: OutputMode,
-//RS ) -> Result<(), LibraryBuildError> {
-//RS     let mut command = Command::new("rustc");
-//RS     command
-//RS         .arg("--edition")
-//RS         .arg("2021")
-//RS         .arg("--crate-type")
-//RS         .arg(crate_type)
-//RS         .arg("--crate-name")
-//RS         .arg(jet::Syntax::sanitize_crate_name(
-//RS             source
-//RS                 .file_stem()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("out"),
-//RS         ))
-//RS         .arg(source)
-//RS         .arg("-o")
-//RS         .arg(output);
-//RS     let config = profile.config();
-//RS     command.args(release_profile_cfg_args(&profile));
-//RS     command.args(config.rustc_args_for_target(ffi.is_some(), true));
-//RS     command.args(linker.rustc_args());
-//RS     if let Some(link) = ffi {
-//RS         command
-//RS             .arg("--extern")
-//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS             command
-//RS                 .arg("-L")
-//RS                 .arg(format!("dependency={}", deps_dir.display()));
-//RS         }
-//RS     }
-//RS     if verbose {
-//RS         write_mode_status(
-//RS             mode,
-//RS             &format!(
-//RS                 "[build] rustc {} -> {} (linker {})\n",
-//RS                 source.display(),
-//RS                 output.display(),
-//RS                 linker.label()
-//RS             ),
-//RS         );
-//RS     }
-//RS     let result = command
-//RS         .output()
-//RS         .map_err(|error| LibraryBuildError::Tool(format!("couldn't start rustc: {error}")))?;
-//RS     if !result.status.success() {
-//RS         return Err(LibraryBuildError::GeneratedCode(
-//RS             String::from_utf8_lossy(&result.stderr).into_owned(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Canonicalize the metadata fields in a rustc-produced Unix archive.
-//RS ///
-//RS /// Rustc's static-library member order and payloads are already content
-//RS /// addressed by the generated source.  The archive container still records
-//RS /// process metadata, so normalize those fixed-width fields before publishing
-//RS /// the artifact.  This keeps repeated library builds byte-identical without
-//RS /// depending on an external `ar` invocation.
-//RS fn normalize_static_archive(path: &Path) -> Result<(), LibraryBuildError> {
-//RS     const GLOBAL_HEADER: &[u8] = b"!<arch>\n";
-//RS     const MEMBER_HEADER: usize = 60;
-//RS     let mut archive = fs::read(path)?;
-//RS     if !archive.starts_with(GLOBAL_HEADER) {
-//RS         return Err(LibraryBuildError::GeneratedCode(format!(
-//RS             "rustc produced an invalid static archive `{}`",
-//RS             path.display()
-//RS         )));
-//RS     }
-//RS     let mut offset = GLOBAL_HEADER.len();
-//RS     while offset < archive.len() {
-//RS         let end = offset.checked_add(MEMBER_HEADER).ok_or_else(|| {
-//RS             LibraryBuildError::GeneratedCode(format!(
-//RS                 "static archive `{}` has an overflowing member header",
-//RS                 path.display()
-//RS             ))
-//RS         })?;
-//RS         if end > archive.len() || &archive[offset + 58..end] != b"`\n" {
-//RS             return Err(LibraryBuildError::GeneratedCode(format!(
-//RS                 "rustc produced a malformed static archive `{}`",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         // GNU archive fields: mtime [16..28], uid [28..34], gid [34..40],
-//RS         // mode [40..48].  Keep the member name and size untouched.
-//RS         for (start, width, value) in [(16, 12, b"0"), (28, 6, b"0"), (34, 6, b"0")] {
-//RS             archive[offset + start..offset + start + width].fill(b' ');
-//RS             archive[offset + start] = value[0];
-//RS         }
-//RS         archive[offset + 40..offset + 48].fill(b' ');
-//RS         archive[offset + 40..offset + 46].copy_from_slice(b"100644");
-//RS         let size = std::str::from_utf8(&archive[offset + 48..offset + 58])
-//RS             .ok()
-//RS             .and_then(|field| field.trim().parse::<usize>().ok())
-//RS             .ok_or_else(|| {
-//RS                 LibraryBuildError::GeneratedCode(format!(
-//RS                     "static archive `{}` has an invalid member size",
-//RS                     path.display()
-//RS                 ))
-//RS             })?;
-//RS         let data_end = end.checked_add(size).ok_or_else(|| {
-//RS             LibraryBuildError::GeneratedCode(format!(
-//RS                 "static archive `{}` has an overflowing member payload",
-//RS                 path.display()
-//RS             ))
-//RS         })?;
-//RS         if data_end > archive.len() {
-//RS             return Err(LibraryBuildError::GeneratedCode(format!(
-//RS                 "static archive `{}` has a truncated member payload",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         offset = data_end + (size & 1);
-//RS     }
-//RS     fs::write(path, archive)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn build_library(
-//RS     project_root: &Path,
-//RS     rust_code: &str,
-//RS     artifacts: &jet::Codegen::LibraryArtifacts,
-//RS     config: &jet::LibraryExport::LibraryConfig,
-//RS     profile: BuildProfile,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     verbose: bool,
-//RS     mode: OutputMode,
-//RS ) -> Result<LibraryBuildPaths, LibraryBuildError> {
-//RS     let stem = library_stem(&config.name);
-//RS     let target = build_output_root(project_root);
-//RS     validate_library_output_root(&target)?;
-//RS     clean_library_outputs(&target, &stem)?;
-//RS     let stage = new_library_stage(&target, &stem)?;
-//RS     let needs_shared = config.native || config.loadable;
-//RS     let shared_name = format!(
-//RS         "lib{stem}.{}",
-//RS         if cfg!(target_os = "macos") {
-//RS             "dylib"
-//RS         } else if cfg!(target_os = "windows") {
-//RS             "dll"
-//RS         } else {
-//RS             "so"
-//RS         }
-//RS     );
-//RS     let shared = needs_shared.then(|| target.join(&shared_name));
-//RS     let staged_shared = needs_shared.then(|| stage.path.join(&shared_name));
-//RS     let staticlib = config.native.then(|| target.join(format!("lib{stem}.a")));
-//RS     let staged_staticlib = config
-//RS         .native
-//RS         .then(|| stage.path.join(format!("lib{stem}.a")));
-//RS     let header = config.native.then(|| target.join(format!("{stem}.h")));
-//RS     let staged_header = config.native.then(|| stage.path.join(format!("{stem}.h")));
-//RS     let bindings_dir = config.native.then(|| target.join("bindings"));
-//RS     let staged_bindings_dir = config.native.then(|| stage.path.join("bindings"));
-//RS     let linker = crate::NativeLinker::for_target(None);
-//RS 
-//RS     if needs_shared {
-//RS         let source = stage.path.join(format!("{stem}.rs"));
-//RS         write_library_staged(&source, rust_code.as_bytes())?;
-//RS         let shared_path = staged_shared
-//RS             .as_ref()
-//RS             .expect("shared path for native Library");
-//RS         library_rustc(
-//RS             &source,
-//RS             "cdylib",
-//RS             shared_path,
-//RS             profile.clone(),
-//RS             verbose,
-//RS             &linker,
-//RS             ffi,
-//RS             mode,
-//RS         )?;
-//RS         if let Some(staticlib_path) = &staged_staticlib {
-//RS             library_rustc(
-//RS                 &source,
-//RS                 "staticlib",
-//RS                 staticlib_path,
-//RS                 profile.clone(),
-//RS                 verbose,
-//RS                 &linker,
-//RS                 ffi,
-//RS                 mode,
-//RS             )?;
-//RS             normalize_static_archive(staticlib_path)?;
-//RS         }
-//RS     }
-//RS 
-//RS     if let Some(staged_header) = &staged_header {
-//RS         write_library_staged(staged_header, artifacts.header.as_bytes())?;
-//RS     }
-//RS 
-//RS     let mut binding_paths = Vec::new();
-//RS     let mut staged_binding_paths = Vec::new();
-//RS     if let Some(staged_bindings_dir) = &staged_bindings_dir {
-//RS         fs::create_dir(staged_bindings_dir)?;
-//RS         for (language, text) in &artifacts.bindings {
-//RS             let extension = match language.as_str() {
-//RS                 "c" => "h",
-//RS                 "cpp" => "hpp",
-//RS                 "rust" => "rs",
-//RS                 "zig" => "zig",
-//RS                 "go" => "go",
-//RS                 "python" => "py",
-//RS                 "javascript" => "mjs",
-//RS                 "swift" => "swift",
-//RS                 _ => continue,
-//RS             };
-//RS             let path = target.join("bindings").join(format!("{stem}.{extension}"));
-//RS             let staged_path = staged_bindings_dir.join(format!("{stem}.{extension}"));
-//RS             write_library_staged(&staged_path, text.as_bytes())?;
-//RS             binding_paths.push(path);
-//RS             staged_binding_paths.push(staged_path);
-//RS         }
-//RS     }
-//RS 
-//RS     let loadable = config
-//RS         .loadable
-//RS         .then(|| target.join(format!("{stem}.jetlib")));
-//RS     let staged_loadable = if config.loadable {
-//RS         let path = stage.path.join(format!("{stem}.jetlib"));
-//RS         let shared_path = staged_shared
-//RS             .as_ref()
-//RS             .expect("loadable Library has shared payload");
-//RS         let payload = fs::read(shared_path)?;
-//RS         let exports = artifacts
-//RS             .exports
-//RS             .iter()
-//RS             .map(|export| {
-//RS                 let scalar = match export.scalar {
-//RS                     jet::Codegen::ExportScalar::Int => jet::JetLibScalar::Int,
-//RS                     jet::Codegen::ExportScalar::Float => jet::JetLibScalar::Float,
-//RS                     jet::Codegen::ExportScalar::Bool => jet::JetLibScalar::Bool,
-//RS                     jet::Codegen::ExportScalar::Text => jet::JetLibScalar::Text,
-//RS                 };
-//RS                 let conventions = export
-//RS                     .conventions
-//RS                     .iter()
-//RS                     .map(|convention| match convention {
-//RS                         jet_foundation::MIR::MirAccess::Read => jet::JetLibAccess::Read,
-//RS                         jet_foundation::MIR::MirAccess::Write => jet::JetLibAccess::Write,
-//RS                         jet_foundation::MIR::MirAccess::Move => jet::JetLibAccess::Move,
-//RS                     })
-//RS                     .collect();
-//RS                 jet::JetLibExport::with_conventions(export.name.clone(), scalar, conventions)
-//RS             })
-//RS             .collect();
-//RS         let mut stamp = jet::JetLibStamp::for_library_with_identity(
-//RS             config.name.clone(),
-//RS             exports,
-//RS             config.declared_effects.clone(),
-//RS             env!("JET_COMPILER_BUILD_ID"),
-//RS             env!("JET_BUILD_TARGET"),
-//RS             native_toolchain_identity(),
-//RS         );
-//RS         stamp.entry = config.entry.clone();
-//RS         stamp.seal_payload(&payload);
-//RS         let artifact = jet::JetLibArtifact { stamp, payload };
-//RS         write_library_staged(&path, &artifact.encode())?;
-//RS         Some(path)
-//RS     } else {
-//RS         None
-//RS     };
-//RS 
-//RS     validate_library_output_root(&target)?;
-//RS     if let Some(bindings_dir) = &bindings_dir {
-//RS         validate_library_bindings_root(&target)?;
-//RS         match fs::symlink_metadata(bindings_dir) {
-//RS             Ok(metadata) if library_reparse_point(&metadata) || !metadata.is_dir() => {
-//RS                 return Err(LibraryBuildError::Io(format!(
-//RS                     "Library bindings root `{}` is not a real directory",
-//RS                     bindings_dir.display()
-//RS                 )));
-//RS             }
-//RS             Ok(_) => {}
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                 fs::create_dir(bindings_dir)?;
-//RS             }
-//RS             Err(error) => return Err(error.into()),
-//RS         }
-//RS     }
-//RS 
-//RS     let mut publications = Vec::new();
-//RS     if let (Some(shared), Some(staged_shared)) = (&shared, &staged_shared) {
-//RS         publications.push((staged_shared.clone(), shared.clone()));
-//RS     }
-//RS     if let (Some(staticlib), Some(staged_staticlib)) = (&staticlib, &staged_staticlib) {
-//RS         publications.push((staged_staticlib.clone(), staticlib.clone()));
-//RS     }
-//RS     if let (Some(header), Some(staged_header)) = (&header, &staged_header) {
-//RS         publications.push((staged_header.clone(), header.clone()));
-//RS     }
-//RS     publications.extend(
-//RS         staged_binding_paths
-//RS             .into_iter()
-//RS             .zip(binding_paths.iter().cloned()),
-//RS     );
-//RS     if let (Some(loadable), Some(staged_loadable)) = (&loadable, &staged_loadable) {
-//RS         publications.push((staged_loadable.clone(), loadable.clone()));
-//RS     }
-//RS     let completion = target.join(format!(".{stem}.jet-library.complete"));
-//RS     let staged_completion = stage.path.join(format!(".{stem}.jet-library.complete"));
-//RS     let mut completion_text = String::from("jet-library-set-v1\n");
-//RS     for (staged_path, final_path) in &publications {
-//RS         let relative = final_path.strip_prefix(&target).map_err(|_| {
-//RS             LibraryBuildError::Io(format!(
-//RS                 "Library publication path `{}` escaped target root",
-//RS                 final_path.display()
-//RS             ))
-//RS         })?;
-//RS         let digest = jet::SHA256::sha256_hex(&fs::read(staged_path)?);
-//RS         completion_text.push_str(&format!("{}\tsha256-{digest}\n", relative.display()));
-//RS     }
-//RS     write_library_staged(&staged_completion, completion_text.as_bytes())?;
-//RS     publications.push((staged_completion, completion));
-//RS     validate_library_output_root(&target)?;
-//RS     validate_library_bindings_root(&target)?;
-//RS     for (staged_path, final_path) in publications {
-//RS         if let Err(error) = publish_library_file(&staged_path, &final_path) {
-//RS             let _ = clean_library_outputs(&target, &stem);
-//RS             return Err(error);
-//RS         }
-//RS     }
-//RS 
-//RS     if let Err(error) = validate_library_output_root(&target) {
-//RS         let _ = clean_library_outputs(&target, &stem);
-//RS         return Err(error);
-//RS     }
-//RS     Ok(LibraryBuildPaths {
-//RS         shared,
-//RS         staticlib,
-//RS         header,
-//RS         loadable,
-//RS         bindings: binding_paths,
-//RS     })
-//RS }
-//RS 
-//RS fn build_inner(
-//RS     file: &str,
-//RS     rust_code: &str,
-//RS     runtime_bundle: Option<&jet::AST::ProgramBundle>,
-//RS     bin: PathBuf,
-//RS     profile: BuildProfile,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     clinks: &[String],
-//RS     verbose: bool,
-//RS     cross_target: Option<&str>,
-//RS     web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
-//RS     plugin: Option<&jet::Codegen::PluginArtifacts>,
-//RS     mode: OutputMode,
-//RS     _restored_cache: bool,
-//RS     // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
-//RS     // the caller from the checked canonical AST, profile, toolchain, manifest,
-//RS     // runtime/Core, dependency-interface, instance, and optional Rust FFI bridge
-//RS     // identities. `None` when external bytes are not represented by the key,
-//RS     // such as `embed_file` or explicit C links. `build` also rejects cross-target
-//RS     cache_key: Option<String>,
-//RS     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-//RS     // #3953: the caller selected the Cranelift dev backend for this build.
-//RS     dev_aot: bool,
-//RS ) {
-//RS     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
-//RS     // Step labels are deterministic so they can be golden-tested.
-//RS     let step = |msg: String| {
-//RS         if verbose {
-//RS             write_mode_status(mode, &format!("[build] {msg}\n"));
-//RS         }
-//RS     };
-//RS     let native_store = Store::from_env().ok();
-//RS     let output_names = bin
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .map(|name| vec![name.to_string()])
-//RS         .unwrap_or_default();
-//RS     let compiler_nodes = runtime_bundle
-//RS         .map(|bundle| {
-//RS             jet::Driver::compiler_nodes_for_bundle_with_outputs(bundle, None, &output_names)
-//RS         })
-//RS         .unwrap_or_default();
-//RS     let record_program = build_record_program(file);
-//RS     let packages = runtime_bundle
-//RS         .map(crate::CheckReceipt::PackageRow::from_bundle)
-//RS         .unwrap_or_default();
-//RS 
-//RS     // Native outputs live below the project-owned `.jet/build`; the command may
-//RS     // run from any project subdirectory, so the project root anchors the held
-//RS     // output authority rather than the working directory.
-//RS     let project_root = jet::build_project_root(file).unwrap_or_else(|diagnostics| {
-//RS         let source = fs::read_to_string(file).unwrap_or_default();
-//RS         report_problems(mode, file, &source, &diagnostics);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     let previous_record = native_store.as_ref().and_then(|store| {
-//RS         store
-//RS             .last_build_record(&project_root, &record_program)
-//RS             .ok()
-//RS             .flatten()
-//RS     });
-//RS     let output_root = bin
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or_else(|| Path::new("."))
-//RS         .to_path_buf();
-//RS     let output_authority = jet_devserver::WebHost::WebOutputAuthority::open_or_create(
-//RS         &output_root,
-//RS         &project_root,
-//RS     )
-//RS     .unwrap_or_else(|error| {
-//RS         let message = format!("error: couldn't create the `.jet/build` folder safely: {error}");
-//RS         write_mode_diagnostic(mode, &format!("{message}\n"));
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     // #3953: dev profiles build through Cranelift: this `jet`'s runner with
-//RS     // the compiled image appended, and no Rust, rustc or linker. The cache
-//RS     // holds only the image. A refusal falls back to rustc below with a note
-//RS     // that names the reason.
-//RS     let mut cache_key = cache_key;
-//RS     if dev_aot {
-//RS         if let Some(bundle) = runtime_bundle.filter(|_| {
-//RS             ffi.is_none()
-//RS                 && clinks.is_empty()
-//RS                 && cross_target.is_none()
-//RS                 && target_machine.is_none()
-//RS                 && web.is_none()
-//RS                 && plugin.is_none()
-//RS         }) {
-//RS             if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-//RS                 if crate::DevAot::restore(store, key, &bin) {
-//RS                     step("cache hit -> reused cached image".to_string());
-//RS                     persist_build_record(
-//RS                         native_store.as_ref(),
-//RS                         &project_root,
-//RS                         &record_program,
-//RS                         &compiler_nodes,
-//RS                         &packages,
-//RS                         previous_record.as_ref(),
-//RS                         true,
-//RS                         0.0,
-//RS                         0.0,
-//RS                     );
-//RS                     return;
-//RS                 }
-//RS             }
-//RS             let started = Instant::now();
-//RS             step(format!("cranelift  -> {}", bin.display()));
-//RS             match crate::DevAot::build(bundle, profile.budget_name(), &bin, native_store.as_ref()) {
-//RS                 Ok(image) => {
-//RS                     if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-//RS                         if let Err(error) = store.publish_bytes(key, &image, false) {
-//RS                             crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
-//RS                             exit(ExitCodes::USER_ERROR);
-//RS                         }
-//RS                         step("cache store -> saved image for next time".to_string());
-//RS                     }
-//RS                     persist_build_record(
-//RS                         native_store.as_ref(),
-//RS                         &project_root,
-//RS                         &record_program,
-//RS                         &compiler_nodes,
-//RS                         &packages,
-//RS                         previous_record.as_ref(),
-//RS                         false,
-//RS                         started.elapsed().as_secs_f64() * 1000.0,
-//RS                         0.0,
-//RS                     );
-//RS                     return;
-//RS                 }
-//RS                 Err(reason) => {
-//RS                     if !mode.json {
-//RS                         write_mode_status(
-//RS                             mode,
-//RS                             &format!("[build] note: building with rustc because {reason}\n"),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // The key describes the Cranelift backend; the rustc executable is
-//RS         // stored apart, under that key plus the rustc and linker identity.
-//RS         cache_key = cache_key.map(|key| rustc_fallback_cache_key(&key));
-//RS     }
-//RS     // A Cranelift-selected build skipped Rust generation. rustc needs it only
-//RS     // when its executable is not cached; it is generated below, after the
-//RS     // cache lookup.
-//RS     let rust_deferred = dev_aot && rust_code.is_empty() && runtime_bundle.is_some();
-//RS     let rs_name = format!("{}.rs", stem(file));
-//RS     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
-//RS         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
-//RS         write_mode_diagnostic(mode, &format!("{message}\n"));
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     });
-//RS     step(format!("emit Rust  -> {}", rs_path.display()));
-//RS     output_authority
-//RS         .replace_file(&rs_name, rust_code.as_bytes())
-//RS         .unwrap_or_else(|error| {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &format!("error: couldn't write {}: {}\n", rs_path.display(), error),
-//RS             );
-//RS         });
-//RS     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
-//RS     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
-//RS         let web = web.unwrap_or_else(|| {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &jet::Diagnostics::render_ice_report("missing web codegen output", "", false),
-//RS             );
-//RS             exit(ExitCodes::ICE);
-//RS         });
-//RS         let emit_maps = !profile.is_release();
-//RS         let paths = match write_web_artifacts(
-//RS             file,
-//RS             web,
-//RS             ffi,
-//RS             verbose,
-//RS             &output_authority,
-//RS             None,
-//RS             emit_maps,
-//RS             mode,
-//RS         ) {
-//RS             Ok(p) => p,
-//RS             Err(msg) => {
-//RS                 write_mode_diagnostic(mode, &format!("{msg}\n"));
-//RS                 exit(ExitCodes::ICE);
-//RS             }
-//RS         };
-//RS         let _ = rust_code;
-//RS         let _ = bin;
-//RS         let _ = ffi;
-//RS         let _ = clinks;
-//RS         if !mode.json {
-//RS             let mut note = format!(
-//RS                 "note: `--target=web` wrote `{}`, `{}`, `{}`, `{}`, `{}`",
-//RS                 paths.manifest.display(),
-//RS                 paths.dom.display(),
-//RS                 paths.js.display(),
-//RS                 paths.wasm.display(),
-//RS                 paths.html.display(),
-//RS             );
-//RS             if let Some(js_map) = &paths.js_map {
-//RS                 note.push_str(&format!(", `{}`", js_map.display()));
-//RS             }
-//RS             if let Some(wasm_map) = &paths.wasm_map {
-//RS                 note.push_str(&format!(", `{}`", wasm_map.display()));
-//RS             }
-//RS             write_mode_status(mode, &format!("{note}\n"));
-//RS         }
-//RS         return;
-//RS     }
-//RS 
-//RS     // D-PLUGIN1=B (c81): `sandbox` is another Jet backend target — build the
-//RS     // sandboxed wasm32 Component Model module instead of a native binary.
-//RS     if cross_target == Some(jet::Syntax::TARGET_SANDBOX) {
-//RS         let plugin = plugin.unwrap_or_else(|| {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &jet::Diagnostics::render_ice_report("missing sandbox codegen output", "", false),
-//RS             );
-//RS             exit(ExitCodes::ICE);
-//RS         });
-//RS         let paths = match write_plugin_artifacts(file, plugin, verbose, &output_root, mode) {
-//RS             Ok(p) => p,
-//RS             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &jet::Diagnostics::render_ice_report(
-//RS                         "rustc rejected generated code",
-//RS                         &msg,
-//RS                         true,
-//RS                     ),
-//RS                 );
-//RS                 exit(ExitCodes::ICE);
-//RS             }
-//RS             Err(PluginBuildError::ToolFailure(msg)) => {
-//RS                 let diag = jet::Manifest::e1259(&msg);
-//RS                 let src = format!("// sandbox build for {}", file);
-//RS                 report_problems(mode, "<sandbox>", &src, &[diag]);
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         };
-//RS         let _ = profile;
-//RS         let _ = ffi;
-//RS         let _ = clinks;
-//RS         write_mode_status(
-//RS             mode,
-//RS             &format!(
-//RS                 "note: `--target=sandbox` wrote `{}`, `{}`, `{}`, `{}`\n",
-//RS                 paths.wit.display(),
-//RS                 paths.guest_rust.display(),
-//RS                 paths.core_wasm.display(),
-//RS                 paths.component_wasm.display(),
-//RS             ),
-//RS         );
-//RS         return;
-//RS     }
-//RS 
-//RS     if let Some(machine) = target_machine.filter(|machine| {
-//RS         machine.no_os
-//RS             && (machine.triple.contains("aarch64")
-//RS                 || machine.triple.contains("thumb")
-//RS                 || machine.triple.starts_with("arm"))
-//RS     }) {
-//RS         // Link a Rust static archive so the checked program brings the target
-//RS         // core/alloc and compiler-builtins it uses. Startup alone is not the
-//RS         // program, and a bare --emit=obj omits its Rust runtime dependencies.
-//RS         let usage = runtime_bundle
-//RS             .map(|bundle| {
-//RS                 jet::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter())
-//RS             })
-//RS             .unwrap_or_default();
-//RS         let dossier = machine.target_dossier(
-//RS             &usage,
-//RS             jet::TargetMachine::ExecutionTier::Aot,
-//RS             env!("CARGO_PKG_VERSION"),
-//RS             "none",
-//RS         );
-//RS         let mut identity = b"jet-firmware-build-v1\0".to_vec();
-//RS         append_cache_field(&mut identity, rust_code);
-//RS         append_cache_field(&mut identity, &profile.cache_tag());
-//RS         append_cache_field(&mut identity, native_toolchain_identity());
-//RS         identity.extend_from_slice(&dossier.cache_bytes(&machine.triple));
-//RS         let target_digest = jet::SHA256::sha256_hex(&identity);
-//RS         let target_dir = PathBuf::from(".jet").join("target").join(format!(
-//RS             "{}-{target_digest}",
-//RS             jet::Syntax::sanitize_crate_name(&machine.name)
-//RS         ));
-//RS         let program_object = target_dir.join(format!(
-//RS             "{}.program.a",
-//RS             jet::Syntax::sanitize_crate_name(&stem(file))
-//RS         ));
-//RS         if let Err(error) = fs::create_dir_all(&target_dir) {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "error: couldn't create firmware work directory {}: {error}\n",
-//RS                     target_dir.display()
-//RS                 ),
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let rustc_started = Instant::now();
-//RS         step(format!("rustc object -> {}", program_object.display()));
-//RS         let mut rustc = Command::new("rustc");
-//RS         rustc
-//RS             .arg("--edition")
-//RS             .arg("2021")
-//RS             .arg("--crate-type")
-//RS             .arg("staticlib")
-//RS             .arg("--emit")
-//RS             .arg("link")
-//RS             .arg("--target")
-//RS             .arg(&machine.triple)
-//RS             .arg("--crate-name")
-//RS             .arg(jet::Syntax::sanitize_crate_name(&stem(file)))
-//RS             .args(release_profile_cfg_args(&profile))
-//RS             .arg("-C")
-//RS             .arg("panic=abort")
-//RS             .arg("-C")
-//RS             .arg("relocation-model=static")
-//RS             .arg(&rs_path)
-//RS             .arg("-o")
-//RS             .arg(&program_object);
-//RS         let rustc_output = match rustc.output() {
-//RS             Ok(output) => output,
-//RS             Err(error) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &format!("error: couldn't run rustc for firmware object: {error}\n"),
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         };
-//RS         if !rustc_output.status.success() {
-//RS             let detail = String::from_utf8_lossy(&rustc_output.stderr);
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &jet::Diagnostics::render_ice_report(
-//RS                     "the generated Rust did not compile for the selected target.",
-//RS                     &detail,
-//RS                     true,
-//RS                 ),
-//RS             );
-//RS             exit(ExitCodes::ICE);
-//RS         }
-//RS         let artifacts = match jet::Driver::build_target_machine_firmware(
-//RS             machine,
-//RS             &usage,
-//RS             &program_object,
-//RS             &target_dir,
-//RS         ) {
-//RS             Ok(artifacts) => artifacts,
-//RS             Err(jet::Driver::TargetMachineCompileError::Diagnostics(diags)) => {
-//RS                 report_problems(mode, file, rust_code, &diags);
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             Err(jet::Driver::TargetMachineCompileError::Machine(errors)) => {
-//RS                 write_mode_diagnostic(
-//RS                     mode,
-//RS                     &format!("error: target machine firmware link failed: {errors:?}\n"),
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         };
-//RS         if let Err(error) = fs::copy(&artifacts.elf, &bin) {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "error: couldn't publish firmware {}: {error}\n",
-//RS                     bin.display()
-//RS                 ),
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         persist_build_record(
-//RS             native_store.as_ref(),
-//RS             &project_root,
-//RS             &record_program,
-//RS             &compiler_nodes,
-//RS             &packages,
-//RS             previous_record.as_ref(),
-//RS             false,
-//RS             rustc_started.elapsed().as_secs_f64() * 1000.0,
-//RS             0.0,
-//RS         );
-//RS         step(format!("firmware link -> {}", artifacts.elf.display()));
-//RS         return;
-//RS     }
-//RS 
-//RS     // Cross-compiled and explicit C-linked builds bypass the host binary cache.
-//RS     // Rust FFI bridges are cacheable because their content-addressed identity
-//RS     // is folded into the caller's native key.
-//RS     // D-BUILDNORM1=A: the key is the caller's pre-sema canonical-AST key
-//RS     // (D-BUILDPROFILE1's profile tag is already folded into it). Kept only when
-//RS     // this build is cacheable.
-//RS     if let Some(key) = &cache_key {
-//RS         if native_store.as_ref().is_some_and(|store| {
-//RS             matches!(
-//RS                 store.restore_file(key, &bin),
-//RS                 Ok(ArtifactRestore::Hit { .. })
-//RS             )
-//RS         }) {
-//RS             step("cache hit -> reused cached binary".to_string());
-//RS             persist_build_record(
-//RS                 native_store.as_ref(),
-//RS                 &project_root,
-//RS                 &record_program,
-//RS                 &compiler_nodes,
-//RS                 &packages,
-//RS                 previous_record.as_ref(),
-//RS                 true,
-//RS                 0.0,
-//RS                 0.0,
-//RS             );
-//RS             return;
-//RS         }
-//RS     }
-//RS     if verbose {
-//RS         if cache_key.is_some() {
-//RS             step("cache miss -> compiling".to_string());
-//RS         } else if cross_target.is_some() {
-//RS             step("cache bypassed (cross-compiled build)".to_string());
-//RS         } else {
-//RS             step("cache bypassed (C-linked build)".to_string());
-//RS         }
-//RS     }
-//RS     let generated_rust;
-//RS     let rust_code = match runtime_bundle.filter(|_| rust_deferred) {
-//RS         Some(bundle) => {
-//RS             let mut rust =
-//RS                 jet::Driver::emit_native_rust_for_checked_bundle(bundle, profile.budget_name(), ffi);
-//RS             inject_game_crash_reporter_bootstrap(&mut rust, program_uses_game_runtime(bundle));
-//RS             output_authority
-//RS                 .replace_file(&rs_name, rust.as_bytes())
-//RS                 .unwrap_or_else(|error| {
-//RS                     write_mode_diagnostic(
-//RS                         mode,
-//RS                         &format!("error: couldn't write {}: {}\n", rs_path.display(), error),
-//RS                     );
-//RS                 });
-//RS             generated_rust = rust;
-//RS             generated_rust.as_str()
-//RS         }
-//RS         None => rust_code,
-//RS     };
-//RS 
-//RS     step(format!(
-//RS         "rustc      {} -> {}",
-//RS         rs_path.display(),
-//RS         bin.display()
-//RS     ));
-//RS     let mut rustc_flags = Vec::new();
-//RS     // A no-OS Wasm artifact is a reactor, not a hosted executable.  Keep the
-//RS     // selected entry export explicit so wasm-ld never asks for `main` or
-//RS     // synthesizes `_start`; the ordinary Web target still takes the separate
-//RS     // MIRWeb artifact path above.
-//RS     let no_os_wasm =
-//RS         target_machine.is_some_and(|machine| machine.no_os && machine.triple.starts_with("wasm32"));
-//RS     if no_os_wasm {
-//RS         rustc_flags.extend([
-//RS             "--crate-type".to_string(),
-//RS             "cdylib".to_string(),
-//RS             "-C".to_string(),
-//RS             "link-arg=--no-entry".to_string(),
-//RS             "-C".to_string(),
-//RS             "link-arg=--export=__jet_program_entry".to_string(),
-//RS         ]);
-//RS     }
-//RS     // E2-M15: cross-compilation target triple.
-//RS     let ffi_present = ffi.is_some();
-//RS     let config = profile.config();
-//RS     rustc_flags.extend(release_profile_cfg_args(&profile));
-//RS     rustc_flags.extend(config.rustc_args_for_target(ffi_present, cross_target.is_none()));
-//RS     let linker = crate::NativeLinker::for_target(cross_target);
-//RS     rustc_flags.extend(linker.rustc_args());
-//RS     if verbose {
-//RS         step(format!("linker     -> {}", linker.label()));
-//RS     }
-//RS     let cache_flags = rustc_flags
-//RS         .iter()
-//RS         .map(std::ffi::OsString::from)
-//RS         .collect::<Vec<_>>();
-//RS     let cache_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
-//RS     // Rust FFI glue can implement runtime traits for foreign types. Keep that
-//RS     let prepared_runtime = if ffi_present {
-//RS         if verbose {
-//RS             step("runtime store bypassed (Rust FFI glue)".to_string());
-//RS         }
-//RS         jet_store::runtime::PreparedRuntime::inline(rust_code)
-//RS     } else if let Some(store) = native_store.as_ref() {
-//RS         match jet_store::runtime::prepare(
-//RS             store,
-//RS             std::ffi::OsStr::new("rustc"),
-//RS             rust_code,
-//RS             &cache_flags,
-//RS             &cache_env,
-//RS         ) {
-//RS             Ok(prepared) => {
-//RS                 if verbose {
-//RS                     let status = if prepared.prebuilt() {
-//RS                         "prebuilt"
-//RS                     } else if prepared.cache_hit() {
-//RS                         "cache hit"
-//RS                     } else if prepared.is_split() {
-//RS                         "cache store"
-//RS                     } else {
-//RS                         "bypassed (inline fallback)"
-//RS                     };
-//RS                     step(format!("runtime   -> {status}"));
-//RS                 }
-//RS                 prepared
-//RS             }
-//RS             Err(jet_store::runtime::RuntimeError::Cache(error)) => {
-//RS                 if verbose {
-//RS                     step(format!("runtime store bypassed ({error})"));
-//RS                 }
-//RS                 jet_store::runtime::PreparedRuntime::inline(rust_code)
-//RS             }
-//RS             Err(jet_store::runtime::RuntimeError::Tool(_)) => {
-//RS                 crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     } else {
-//RS         if verbose {
-//RS             step("runtime store bypassed (store unavailable)".to_string());
-//RS         }
-//RS         jet_store::runtime::PreparedRuntime::inline(rust_code)
-//RS     };
-//RS     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
-//RS     // path, never straight onto the shared `.jet/build/<stem>` display path. Two
-//RS     // concurrent `jet` processes compiling different source that happens to
-//RS     // share a file stem would otherwise race — process A could `store_cached`
-//RS     // its hash against process B's freshly-overwritten `.jet/build/<stem>`,
-//RS     // mapping A's key to B's binary in the shared content cache. `process::id()`
-//RS     // disambiguates the processes; we `store_cached` from this private path
-//RS     // (safe — only ever racing another process computing the *same* key, i.e.
-//RS     // the same content) and only then rename into the shared display path.
-//RS     // The private work path also keeps rustc's generated source and intermediates
-//RS     // out of the visible artifact directory.
-//RS     let bin_name = match bin.file_name().and_then(|name| name.to_str()) {
-//RS         Some(name) if !name.is_empty() => name.to_owned(),
-//RS         _ => {
-//RS             crate::cli_error!(
-//RS                 "E2105",
-//RS                 "build output `{}` has no UTF-8 file name",
-//RS                 bin.display()
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let work = output_root.join(format!(".work.{}.{}", bin_name, std::process::id()));
-//RS     if let Err(e) = fs::create_dir_all(&work) {
-//RS         crate::cli_error!("E2105", "couldn't create the build work dir: {}", e);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let tmp_bin = work.join(&bin_name);
-//RS     let tmp_rs = work.join(format!("{}.rs", stem(file)));
-//RS     let entry_parent = Path::new(file)
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .map(Path::to_path_buf)
-//RS         .unwrap_or_else(|| PathBuf::from("."));
-//RS     let project_root = runtime_bundle
-//RS         .map(|bundle| bundle.project_root.clone())
-//RS         .or_else(|| {
-//RS             jet::Loader::find_package_root_checked(&entry_parent)
-//RS                 .ok()
-//RS                 .flatten()
-//RS         })
-//RS         .unwrap_or(entry_parent);
-//RS     let project_root_prefix = fs::canonicalize(&project_root).ok();
-//RS     let crate_name = jet::Syntax::sanitize_crate_name(&stem(file));
-//RS     let metadata_key = cache_key.clone().unwrap_or_else(|| {
-//RS         let mut bytes = b"jet.rustc-metadata.v1\0".to_vec();
-//RS         append_cache_field(&mut bytes, &crate_name);
-//RS         append_cache_field(&mut bytes, rust_code);
-//RS         for flag in &rustc_flags {
-//RS             append_cache_field(&mut bytes, flag);
-//RS         }
-//RS         if let Some(link) = ffi {
-//RS             append_cache_field(&mut bytes, &link.cache_identity);
-//RS         }
-//RS         append_link_identity(&mut bytes, clinks, project_root_prefix.as_deref());
-//RS         jet::SHA256::sha256_hex(&bytes)
-//RS     });
-//RS     // Pin the crate name to the file stem — the name rustc used to infer from
-//RS     // `.jet/build/<stem>.rs` — so the private working-dir source name doesn't
-//RS     // leak into codegen. Everything here is decided once and replayed per
-//RS     // attempt: one rustc invocation over one prepared program.
-//RS     let run_rustc = |prepared: &jet_store::runtime::PreparedRuntime| -> std::process::Output {
-//RS         #[cfg(debug_assertions)]
-//RS         let rust = if std::env::var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
-//RS             format!(
-//RS                 "{}\ncompile_error!(\"JET_RUSTC_REJECTION_SENTINEL\");\ncompile_error!(\"JET_RUSTC_REJECTION_SECOND_SENTINEL\");\n",
-//RS                 prepared.rust()
-//RS             )
-//RS         } else {
-//RS             prepared.rust().to_string()
-//RS         };
-//RS         #[cfg(not(debug_assertions))]
-//RS         let rust = prepared.rust().to_string();
-//RS         if let Err(e) = fs::write(&tmp_rs, rust) {
-//RS             crate::cli_error!("E2105", "couldn't write {}: {}", tmp_rs.display(), e);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let mut cmd = Command::new("rustc");
-//RS         cmd.arg("--edition").arg("2021").args(&rustc_flags);
-//RS         cmd.arg("--crate-name").arg(&crate_name);
-//RS         cmd.arg("-C").arg(format!("metadata={metadata_key}"));
-//RS         // Keep project and per-process work paths out of generated DWARF and
-//RS         // ThinLTO records. Both prefixes have stable targets across checkouts.
-//RS         if let Some(project_prefix) = &project_root_prefix {
-//RS             cmd.arg("--remap-path-prefix")
-//RS                 .arg(format!("{}=/jet/project", project_prefix.display()));
-//RS         }
-//RS         cmd.arg("--remap-path-prefix")
-//RS             .arg(format!("{}=/jet/build", work.display()));
-//RS         if let Ok(work_prefix) = fs::canonicalize(&work) {
-//RS             cmd.arg("--remap-path-prefix")
-//RS                 .arg(format!("{}=/jet/build", work_prefix.display()));
-//RS         }
-//RS         cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
-//RS         prepared.add_rustc_args(&mut cmd);
-//RS         if let Some(link) = ffi {
-//RS             cmd.arg("--extern")
-//RS                 .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS             for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS                 cmd.arg("-L")
-//RS                     .arg(format!("dependency={}", deps_dir.display()));
-//RS             }
-//RS         }
-//RS         // S59 (E2-M14): native C library link flags (`-L native=…`, `-l <name>`).
-//RS         for arg in clinks {
-//RS             cmd.arg(arg);
-//RS         }
-//RS         match cmd.output() {
-//RS             Ok(output) => output,
-//RS             Err(_) => {
-//RS                 crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     };
-//RS 
-//RS     // rustc owns the backend and linker in one production invocation. Keep the
-//RS     // receipt explicit: Jet-side backend preparation is separate from the
-//RS     // rustc invocation that performs backend code generation and linking.
-//RS     let rustc_started = Instant::now();
-//RS     let mut out = run_rustc(&prepared_runtime);
-//RS     // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
-//RS     // cost a compile but must never cost a working build. If the thin crate is
-//RS     // rejected — a runtime item the exporter left private, an impl the split
-//RS     // moved away from its type — rebuild the exact inline monolith and report on
-//RS     // that instead. `jet build` of correct Jet cannot regress into an I2 banner.
-//RS     if !out.status.success() && prepared_runtime.is_split() {
-//RS         if verbose {
-//RS             step("runtime cache bypassed (split crate rejected — inline retry)".to_string());
-//RS         }
-//RS         out = run_rustc(&jet_store::runtime::PreparedRuntime::inline(rust_code));
-//RS     }
-//RS 
-//RS     if !out.status.success() {
-//RS         // Preserve the shared `.jet/build/<stem>.rs` artifact (written above)
-//RS         // for the ICE bug report, but drop this process's private working dir.
-//RS         let _ = fs::remove_dir_all(&work);
-//RS         let stderr = String::from_utf8_lossy(&out.stderr);
-//RS         // I2: a *missing C library* is a user/system problem, not generated-code
-//RS         // rejection. Detect a linker "cannot find -l<name>" and print a clean
-//RS         // E3209 diagnostic naming the lib + fix — NOT the bug-in-jet banner. The
-//RS         // ICE banner stays only for genuine codegen-rejected-by-rustc.
-//RS         if let Some(missing) = missing_c_lib(&stderr) {
-//RS             let diag = jet::CFFI::e3209(&missing);
-//RS             report_problems(mode, file, "", &[diag]);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         if let Some(linker) = missing_linker(&stderr) {
-//RS             write_mode_diagnostic(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "Error [L2101]: rustc could not find linker `{linker}`.\n Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary.\n Fix: Run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`).\nMore: jet-lang.dev/e/L2101\n"
-//RS                 ),
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let log_name = rustc_log_name(file);
-//RS         let rustc_log_path = output_authority.path().join(&log_name);
-//RS         let log_detail = match output_authority.replace_file(&log_name, &out.stderr) {
-//RS             Ok(()) => format!("  rustc log: {}", rustc_log_path.display()),
-//RS             Err(error) => format!(
-//RS                 "  rustc log: {} (could not write: {})",
-//RS                 rustc_log_path.display(),
-//RS                 error
-//RS             ),
-//RS         };
-//RS         let rustc_error = first_rustc_error_block(&stderr)
-//RS             .map(|block| format!("  rustc error:\n{block}"))
-//RS             .unwrap_or_else(|| {
-//RS                 let stderr = stderr.trim();
-//RS                 if stderr.is_empty() {
-//RS                     String::new()
-//RS                 } else {
-//RS                     format!("  rustc stderr:\n{stderr}")
-//RS                 }
-//RS             });
-//RS         if verbose {
-//RS             if let Some(block) = first_rustc_error_block(&stderr) {
-//RS                 write_mode_status(mode, &format!("[build] rustc error:\n{block}\n"));
-//RS             }
-//RS         }
-//RS         let detail = if rustc_error.is_empty() {
-//RS             format!("  generated: {}\n{log_detail}", rs_path.display())
-//RS         } else {
-//RS             format!(
-//RS                 "  generated: {}\n{log_detail}\n{rustc_error}",
-//RS                 rs_path.display()
-//RS             )
-//RS         };
-//RS         write_mode_diagnostic(
-//RS             mode,
-//RS             &jet::Diagnostics::render_ice_report(
-//RS                 "the generated Rust did not compile.",
-//RS                 &detail,
-//RS                 true,
-//RS             ),
-//RS         );
-//RS         exit(ExitCodes::ICE);
-//RS     }
-//RS 
-//RS     step(format!("link       -> {}", bin.display()));
-//RS 
-//RS     // Store into the content cache from the private path first, so the cache
-//RS     // entry is written from exactly the binary this process just built.
-//RS     if let Some(key) = cache_key {
-//RS         if let Some(store) = native_store.as_ref() {
-//RS             if let Err(error) = store.publish_file(&key, &tmp_bin) {
-//RS                 let _ = fs::remove_dir_all(&work);
-//RS                 crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             step("cache store -> saved binary for next time".to_string());
-//RS         }
-//RS     }
-//RS     // Then publish the private binary onto the shared, human-readable display
-//RS     // path (`.jet/build/<stem>`) that `jet run`/`jet build` hand back. A same-dir
-//RS     // rename is atomic; last writer wins the convenience slot, which was never
-//RS     // a content identity. Fall back to copy if rename crosses a filesystem.
-//RS     if fs::rename(&tmp_bin, &bin).is_err() {
-//RS         if let Err(e) = fs::copy(&tmp_bin, &bin) {
-//RS             let _ = fs::remove_file(&tmp_bin);
-//RS             crate::cli_error!("E2105", "couldn't finish writing {}: {}", bin.display(), e);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let _ = fs::remove_file(&tmp_bin);
-//RS     }
-//RS     persist_build_record(
-//RS         native_store.as_ref(),
-//RS         &project_root,
-//RS         &record_program,
-//RS         &compiler_nodes,
-//RS         &packages,
-//RS         previous_record.as_ref(),
-//RS         false,
-//RS         rustc_started.elapsed().as_secs_f64() * 1000.0,
-//RS         0.0,
-//RS     );
-//RS     // Drop the private working dir (generated `.rs` + rustc intermediates).
-//RS     let _ = fs::remove_dir_all(&work);
-//RS }
-//RS 
-//RS pub(crate) fn build(
-//RS     file: &str,
-//RS     rust_code: &str,
-//RS     runtime_bundle: Option<&jet::AST::ProgramBundle>,
-//RS     bin: PathBuf,
-//RS     profile: BuildProfile,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     clinks: &[String],
-//RS     verbose: bool,
-//RS     cross_target: Option<&str>,
-//RS     web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
-//RS     plugin: Option<&jet::Codegen::PluginArtifacts>,
-//RS     mode: OutputMode,
-//RS     restored_cache: bool,
-//RS     cache_key: Option<String>,
-//RS ) {
-//RS     build_inner(
-//RS         file,
-//RS         rust_code,
-//RS         runtime_bundle,
-//RS         bin,
-//RS         profile,
-//RS         ffi,
-//RS         clinks,
-//RS         verbose,
-//RS         cross_target,
-//RS         web,
-//RS         plugin,
-//RS         mode,
-//RS         restored_cache,
-//RS         cache_key,
-//RS         None,
-//RS         false,
-//RS     );
-//RS }
-//RS 
-//RS pub(crate) fn build_target_machine(
-//RS     file: &str,
-//RS     rust_code: &str,
-//RS     runtime_bundle: Option<&jet::AST::ProgramBundle>,
-//RS     bin: PathBuf,
-//RS     profile: BuildProfile,
-//RS     ffi: Option<&jet::FFI::FfiLink>,
-//RS     clinks: &[String],
-//RS     verbose: bool,
-//RS     cross_target: Option<&str>,
-//RS     web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
-//RS     plugin: Option<&jet::Codegen::PluginArtifacts>,
-//RS     mode: OutputMode,
-//RS     restored_cache: bool,
-//RS     cache_key: Option<String>,
-//RS     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-//RS     dev_aot: bool,
-//RS ) {
-//RS     build_inner(
-//RS         file,
-//RS         rust_code,
-//RS         runtime_bundle,
-//RS         bin,
-//RS         profile,
-//RS         ffi,
-//RS         clinks,
-//RS         verbose,
-//RS         cross_target,
-//RS         web,
-//RS         plugin,
-//RS         mode,
-//RS         restored_cache,
-//RS         cache_key,
-//RS         target_machine,
-//RS         dev_aot,
-//RS     );
-//RS }
-//RS 
-//RS /// The store-log name of the program `file`: its path below the workspace
-//RS /// root, the one root that owns the workspace `.jet/` state.
-//RS fn build_record_program(file: &str) -> String {
-//RS     let input = Path::new(file);
-//RS     let absolute = if input.is_absolute() {
-//RS         input.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .unwrap_or_else(|_| PathBuf::from("."))
-//RS             .join(input)
-//RS     };
-//RS     let absolute = fs::canonicalize(&absolute).unwrap_or(absolute);
-//RS     jet::build_project_root(file)
-//RS         .ok()
-//RS         .and_then(|root| absolute.strip_prefix(&root).ok().map(Path::to_path_buf))
-//RS         .unwrap_or_else(|| input.to_path_buf())
-//RS         .display()
-//RS         .to_string()
-//RS         .replace('\\', "/")
-//RS }
-//RS 
-//RS fn persist_build_record(
-//RS     store: Option<&Store>,
-//RS     workspace_root: &Path,
-//RS     program: &str,
-//RS     nodes: &[jet::Comptime::Build::BuildPlanNode],
-//RS     packages: &[crate::CheckReceipt::PackageRow],
-//RS     previous: Option<&jet_store::BuildRecord>,
-//RS     cache_hit: bool,
-//RS     compile_duration_ms: f64,
-//RS     link_duration_ms: f64,
-//RS ) {
-//RS     if nodes.is_empty() {
-//RS         return;
-//RS     }
-//RS     let nodes = nodes
-//RS         .iter()
-//RS         .map(|node| {
-//RS             // The front end ran whenever this path runs, so a Check node is
-//RS             // never "cached" here; only the restored artifact's nodes are.
-//RS             let why_ran = if cache_hit && node.kind != jet::Comptime::Build::BuildNodeKind::Check {
-//RS                 "cached".to_string()
-//RS             } else if previous.is_none() {
-//RS                 "first-run".to_string()
-//RS             } else if let Some(input) = node.inputs.first() {
-//RS                 format!("input:{input}")
-//RS             } else {
-//RS                 "first-run".to_string()
-//RS             };
-//RS             let duration_ms = match node.kind {
-//RS                 jet::Comptime::Build::BuildNodeKind::Check => 0.0,
-//RS                 jet::Comptime::Build::BuildNodeKind::Compile => compile_duration_ms,
-//RS                 jet::Comptime::Build::BuildNodeKind::Link => link_duration_ms,
-//RS             };
-//RS             jet_store::BuildNodeRecord {
-//RS                 kind: node.kind.as_str().to_string(),
-//RS                 key: node.key.clone(),
-//RS                 subject: node.subject.clone(),
-//RS                 duration_ms,
-//RS                 why_ran,
-//RS                 inputs: node.inputs.clone(),
-//RS             }
-//RS         })
-//RS         .chain(crate::CheckReceipt::package_nodes(packages, previous, false))
-//RS         .collect::<Vec<_>>();
-//RS     let Some(store) = store else {
-//RS         return;
-//RS     };
-//RS     let record = jet_store::BuildRecord::new(program.to_string(), nodes);
-//RS     let record_key = jet::SHA256::sha256_hex(record.to_json().as_bytes());
-//RS     let _ = store.publish_last_build_record(workspace_root, &record_key, &record);
-//RS }
-//RS 
-//RS /// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet
-//RS /// debug` backend — a debug-profile build whose checked MIR source carries
-//RS /// the line-map metadata consumed by `crates/jet-debug/src/Inferior.rs`, then
-//RS /// either the `(jet)` terminal session or the DAP server (`--dap`) drives it.
-//RS /// Returns the process exit code.
-//RS pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => {
-//RS             crate::cli_error!("E2105", "can't find the file `{}`", file);
-//RS             return ExitCodes::USER_ERROR;
-//RS         }
-//RS     };
-//RS     let project_root = match jet::build_project_root(file) {
-//RS         Ok(root) => root,
-//RS         Err(diagnostics) => {
-//RS             report_problems(mode, file, &src, &diagnostics);
-//RS             return ExitCodes::USER_ERROR;
-//RS         }
-//RS     };
-//RS     let out = match jet::compile_for_debug(file) {
-//RS         Ok(o) => o,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, &src, &diags);
-//RS             return ExitCodes::USER_ERROR;
-//RS         }
-//RS     };
-//RS     let clinks = match jet::resolve_c_links(file) {
-//RS         Ok(a) => a,
-//RS         Err(diags) => {
-//RS             report_problems(mode, file, &src, &diags);
-//RS             return ExitCodes::USER_ERROR;
-//RS         }
-//RS     };
-//RS     let bin = build_output_root(&project_root).join(format!("{}_dbg", stem(file)));
-//RS     build(
-//RS         file,
-//RS         &out.rust,
-//RS         None,
-//RS         bin.clone(),
-//RS         BuildProfile::Debug,
-//RS         out.ffi.as_ref(),
-//RS         &clinks,
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         mode,
-//RS         false,
-//RS         // `jet debug` builds carry a line-map and launch interactively; not cached.
-//RS         None,
-//RS     );
-//RS     // `build()` always writes the generated Rust to `.jet/build/<stem>.rs` (the
-//RS     // debug binary path is the only caller-chosen path) — lldb's `-f` flag
-//RS     // matches by basename, so this is what `Inferior::set_breakpoint` needs.
-//RS     let rust_file = format!("{}.rs", stem(file));
-//RS     if dap {
-//RS         jet::Debug::run_dap(&bin, &rust_file, &out.rust, file, &src)
-//RS     } else {
-//RS         jet::Debug::run_native(&bin, &rust_file, &out.rust, file, &src, raw_frames)
-//RS     }
-//RS }
-//RS 
-//RS /// Scan a failed rustc/linker stderr for a missing C library and return its
-//RS /// link name. Matches the GNU ld / lld phrasing `cannot find -l<name>` (and the
-//RS /// `-l<name>` form some linkers print). Used to keep a missing *system library*
-//RS /// off the I2 ICE path — it's a user/system problem, not generated-code being
-//RS /// rejected.
-//RS fn missing_c_lib(stderr: &str) -> Option<String> {
-//RS     for line in stderr.lines() {
-//RS         // e.g. "cannot find -lraylib" / "cannot find -lraylib: No such file"
-//RS         if let Some(rest) = line.split("cannot find -l").nth(1) {
-//RS             let name: String = rest
-//RS                 .chars()
-//RS                 .take_while(|c| !c.is_whitespace() && *c != ':' && *c != '\'' && *c != '"')
-//RS                 .collect();
-//RS             if !name.is_empty() {
-//RS                 return Some(name);
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// Scan a failed rustc stderr for a missing system linker. This is an
-//RS /// environment/toolchain problem (L2101), not a generated-Rust ICE.
-//RS fn missing_linker(stderr: &str) -> Option<String> {
-//RS     for line in stderr.lines() {
-//RS         if let Some(rest) = line.split("linker `").nth(1) {
-//RS             if let Some((name, tail)) = rest.split_once('`') {
-//RS                 if !name.is_empty() && tail.contains("not found") {
-//RS                     return Some(name.to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS fn rustc_log_name(file: &str) -> String {
-//RS     format!("{}.rustc.log", stem(file))
-//RS }
-//RS 
-//RS fn is_rustc_error_header(line: &str) -> bool {
-//RS     let line = line.trim_start();
-//RS     line.starts_with("error:") || line.starts_with("error[")
-//RS }
-//RS fn is_rustc_diagnostic_header(line: &str) -> bool {
-//RS     let line = line.trim_start();
-//RS     is_rustc_error_header(line) || line.starts_with("warning:")
-//RS }
-//RS 
-//RS fn first_rustc_error_block(stderr: &str) -> Option<&str> {
-//RS     let mut block_start = None;
-//RS     let mut block_end = stderr.len();
-//RS     let mut offset = 0;
-//RS     for line in stderr.split_inclusive('\n') {
-//RS         let content = line.strip_suffix('\n').unwrap_or(line);
-//RS         let content = content.strip_suffix('\r').unwrap_or(content);
-//RS         if block_start.is_some() && is_rustc_diagnostic_header(content) {
-//RS             block_end = offset;
-//RS             break;
-//RS         }
-//RS         if block_start.is_none() && is_rustc_error_header(content) {
-//RS             block_start = Some(offset);
-//RS         }
-//RS         offset += line.len();
-//RS     }
-//RS     let start = block_start?;
-//RS     let block = stderr.get(start..block_end)?.trim_end();
-//RS     (!block.is_empty()).then_some(block)
-//RS }
-//RS 
-//RS #[cfg(test)]
-// END-PORT-PENDING 0674 Source/CmdCompile.rs:13767-15565
+// Native build fragment of Cli.Compile.Scaffold; publication is owned by Main.
+use std.fs as fs // GATE #4494 retained native filesystem primitives; #4409 IO kinds.
+use std.process.[Command, exit, id] // GATE #4494 process spawn and exit.
+use std.time.Instant // GATE #4494 monotonic clock.
+use core.sys.target.[selected_os]
+use jet_foundation.TEXT_NUL
+use jet_store.[Store, ArtifactRestore, BuildRecord, BuildNodeRecord]
+use jet_store.runtime.[PreparedRuntime, RuntimeError, prepare]
+use jet.Codegen.[PluginArtifacts, LibraryArtifacts, ExportScalar]
+use jet.Codegen.MIRWeb.WebArtifacts
+use jet.LibraryExport.LibraryConfig
+use jet.AST.ProgramBundle
+use jet.FFI.FfiLink
+use jet.TargetMachine.[TargetMachine, TargetMachineUse, ExecutionTier]
+use jet.Comptime.Build.[BuildPlanNode, BuildNodeKind]
+use jet.[JetLibScalar, JetLibAccess, JetLibExport, JetLibStamp, JetLibArtifact]
+use jet_foundation.MIR.MirAccess
+use NativeLinker.Selection
+use CheckReceipt.PackageRow
+
+// Rust: Source/CmdCompile.rs:13767
+pub fn write_plugin_artifacts(file: String, plugin: &PluginArtifacts, verbose: Bool, out_dir: &OSPath, mode: OutputMode) -> PluginBuildPaths PluginBuildError! {
+    step :: |msg: String| -> { if verbose -> write_mode_status(mode, "[build] {msg}\n") }
+    fs.create_dir_all(out_dir) ?? return Err(.ToolFailure("couldn't create the {out_dir.display()} folder: {err}"))
+    name :: stem(file)
+    wit_dir :: out_dir.join("{name}_wit")
+    fs.create_dir_all(&wit_dir) ?? return Err(.ToolFailure("couldn't create {wit_dir.display()}: {err}"))
+    wit_path :: wit_dir.join("world.wit")
+    guest_rust_path :: out_dir.join("{name}_plugin.rs")
+    core_wasm_path :: out_dir.join("{name}_core.wasm")
+    embedded_wasm_path :: out_dir.join("{name}_embedded.wasm")
+    component_wasm_path :: out_dir.join("{name}.wasm")
+    fs.write(&wit_path, &plugin.wit) ?? return Err(.ToolFailure("couldn't write {wit_path.display()}: {err}"))
+    fs.write(&guest_rust_path, &plugin.guest_rust) ?? return Err(.ToolFailure("couldn't write {guest_rust_path.display()}: {err}"))
+    step("wit emit    -> {wit_path.display()}")
+    step("guest rust  -> {guest_rust_path.display()}")
+    step("rustc wasm  {guest_rust_path.display()} -> {core_wasm_path.display()}")
+    rustc :: Command.new("rustc").args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "--crate-name"])
+        .arg(jet.Syntax.sanitize_crate_name(guest_rust_path.file_stem().and_then(|name| -> name.to_str()).unwrap_or("out")))
+        .args([guest_rust_path.to_str().unwrap(), "-o", core_wasm_path.to_str().unwrap()])
+        .output() ?? return Err(.ToolFailure("couldn't run `rustc --target wasm32-unknown-unknown` ({err}) — is the wasm32-unknown-unknown target installed?"))
+    if !rustc.status.success() -> return Err(.GeneratedCodeRejected("rustc rejected the generated plugin guest module\n{String.from_utf8_lossy(&rustc.stderr)}"))
+    step("wit embed   {core_wasm_path.display()} -> {embedded_wasm_path.display()}")
+    embed :: Command.new("wasm-tools").args(["component", "embed", wit_dir.to_str().unwrap(), "--world", plugin.world_name, core_wasm_path.to_str().unwrap(), "-o", embedded_wasm_path.to_str().unwrap()])
+        .output() ?? return Err(.ToolFailure("couldn't run `wasm-tools` ({err}) — install it (ships in the project's `nix develop` shell) or add it to PATH"))
+    if !embed.status.success() -> return Err(.ToolFailure("`wasm-tools component embed` failed\n{String.from_utf8_lossy(&embed.stderr)}"))
+    step("wit lift    {embedded_wasm_path.display()} -> {component_wasm_path.display()}")
+    new :: Command.new("wasm-tools").args(["component", "new", embedded_wasm_path.to_str().unwrap(), "-o", component_wasm_path.to_str().unwrap()])
+        .output() ?? return Err(.ToolFailure("couldn't run `wasm-tools` ({err})"))
+    if !new.status.success() -> return Err(.ToolFailure("`wasm-tools component new` failed\n{String.from_utf8_lossy(&new.stderr)}"))
+    Ok(PluginBuildPaths{wit: wit_path, guest_rust: guest_rust_path, core_wasm: core_wasm_path, component_wasm: component_wasm_path})
+}
+
+// Rust: Source/CmdCompile.rs:13909
+struct LibraryBuildPaths {
+    shared: OSPath?
+    staticlib: OSPath?
+    header: OSPath?
+    loadable: OSPath?
+    bindings: [OSPath]
+}
+// Rust: Source/CmdCompile.rs:13918
+#Error
+enum LibraryBuildError {
+    Io(String)
+    Tool(String)
+    GeneratedCode(String)
+}
+impl LibraryBuildError {
+    // Rust: Source/CmdCompile.rs:13925
+    fn fmt(&self, formatter: &std.fmt.Formatter) -> Unit std.fmt.Error! {
+        match self {
+            .Io(error), .Tool(error) -> formatter.write_str(error)
+            .GeneratedCode(stderr) -> formatter.write_str(stderr)
+        }
+    }
+    // Rust: Source/CmdCompile.rs:13934
+    fn from(error: std.io.Error) -> LibraryBuildError { .Io(error.to_string()) }
+}
+// Rust: Source/CmdCompile.rs:13939
+struct LibraryStage { path: OSPath }
+impl Drop for LibraryStage {
+    // Rust: Source/CmdCompile.rs:13944
+    fn drop(&self) -> { _ :: fs.remove_dir_all(&self.path) }
+}
+// Rust: Source/CmdCompile.rs:13949
+fn library_reparse_point(metadata: &fs.Metadata) -> Bool {
+    if metadata.file_type().is_symlink() -> return true
+    if selected_os() == "windows" {
+        // Rust: Source/CmdCompile.rs:13956
+        FILE_ATTRIBUTE_REPARSE_POINT :: U32{0x0400}
+        // GATE #4494 Windows MetadataExt.file_attributes.
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    false
+}
+// Rust: Source/CmdCompile.rs:13965
+fn validate_library_output_root(root: &OSPath) -> Unit LibraryBuildError! {
+    match fs.symlink_metadata(root) {
+        .Ok(metadata) -> {
+            if library_reparse_point(&metadata) || !metadata.is_dir() -> return Err(.Io("Library output root `{root.display()}` is not a real directory"))
+        }
+        .Err(error) -> {
+            if error.kind() != .NotFound -> return Err(LibraryBuildError.from(error))
+            fs.create_dir(root) ?? return Err(LibraryBuildError.from(err))
+        }
+    }
+    first :: fs.canonicalize(root) ?? return Err(LibraryBuildError.from(err))
+    second :: fs.canonicalize(root) ?? return Err(LibraryBuildError.from(err))
+    if first != second -> return Err(.Io("Library output root `{root.display()}` changed while it was being resolved"))
+    metadata :: fs.symlink_metadata(root) ?? return Err(LibraryBuildError.from(err))
+    if library_reparse_point(&metadata) || !metadata.is_dir() -> return Err(.Io("Library output root `{root.display()}` changed to a symlink or reparse point"))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:13998
+fn library_owned_paths(target: &OSPath, stem: String) -> [OSPath] {
+    paths := [OSPath]{}
+    loop name in ["lib{stem}.a", "lib{stem}.so", "lib{stem}.dylib", "lib{stem}.dll", "{stem}.h", "{stem}.jetlib", "{stem}.rs", ".{stem}.jet-library.complete"] -> &paths.push(target.join(name))
+    loop extension in ["h", "hpp", "rs", "zig", "go", "py", "mjs", "swift"] -> &paths.push(target.join("bindings").join("{stem}.{extension}"))
+    paths
+}
+// Rust: Source/CmdCompile.rs:14019
+fn remove_library_owned_path(path: &OSPath) -> Unit LibraryBuildError! {
+    metadata :: fs.symlink_metadata(path) ?? {
+        if err.kind() == .NotFound -> return Ok(())
+        return Err(LibraryBuildError.from(err))
+    }
+    if library_reparse_point(&metadata) -> return Err(.Io("refusing to remove symlink or reparse point `{path.display()}`"))
+    if metadata.is_dir() -> return Err(.Io("refusing to remove directory where a Library file belongs: `{path.display()}`"))
+    fs.remove_file(path) ?? return Err(LibraryBuildError.from(err))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14041
+fn validate_library_bindings_root(target: &OSPath) -> Unit LibraryBuildError! {
+    root :: target.join("bindings")
+    metadata :: fs.symlink_metadata(&root) ?? {
+        if err.kind() == .NotFound -> return Ok(())
+        return Err(LibraryBuildError.from(err))
+    }
+    if library_reparse_point(&metadata) || !metadata.is_dir() -> return Err(.Io("Library bindings root `{root.display()}` is not a real directory"))
+    first :: fs.canonicalize(&root) ?? return Err(LibraryBuildError.from(err))
+    second :: fs.canonicalize(&root) ?? return Err(LibraryBuildError.from(err))
+    if first != second -> return Err(.Io("Library bindings root `{root.display()}` changed while it was being resolved"))
+    after :: fs.symlink_metadata(&root) ?? return Err(LibraryBuildError.from(err))
+    if library_reparse_point(&after) || !after.is_dir() -> return Err(.Io("Library bindings root `{root.display()}` changed to a symlink or reparse point"))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14072
+fn clean_library_outputs(target: &OSPath, stem: String) -> Unit LibraryBuildError! {
+    // Validate both parents before stale-output cleanup can leave the target.
+    validate_library_output_root(target)?
+    validate_library_bindings_root(target)?
+    loop path in library_owned_paths(target, stem) -> remove_library_owned_path(&path)?
+    stage_prefix :: ".jet-library-stage-{stem}-{id()}-"
+    entries :: fs.read_dir(target) ?? return Err(LibraryBuildError.from(err))
+    loop item in entries {
+        entry :: item ?? return Err(LibraryBuildError.from(err))
+        if !entry.file_name().to_string_lossy().starts_with(stage_prefix) -> next
+        metadata :: fs.symlink_metadata(entry.path()) ?? return Err(LibraryBuildError.from(err))
+        if library_reparse_point(&metadata) || !metadata.is_dir() -> return Err(.Io("refusing to remove invalid Library staging path `{entry.path().display()}`"))
+        fs.remove_dir_all(entry.path()) ?? return Err(LibraryBuildError.from(err))
+    }
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14100
+fn new_library_stage(target: &OSPath, stem: String) -> LibraryStage LibraryBuildError! {
+    loop serial in U32{0}..<U32{64} {
+        path :: target.join(".jet-library-stage-{stem}-{id()}-{serial}")
+        match fs.create_dir(&path) {
+            .Ok(_) -> return Ok(LibraryStage{path: path})
+            .Err(error) -> {
+                if error.kind() == .AlreadyExists -> next
+                return Err(LibraryBuildError.from(error))
+            }
+        }
+    }
+    Err(.Io("could not allocate a unique Library staging directory"))
+}
+// Rust: Source/CmdCompile.rs:14117
+fn write_library_staged(path: &OSPath, bytes: &[U8]) -> Unit LibraryBuildError! {
+    file := fs.OpenOptions.new().write(true).create_new(true).open(path) ?? return Err(LibraryBuildError.from(err))
+    file.write_all(bytes) ?? return Err(LibraryBuildError.from(err))
+    file.sync_all() ?? return Err(LibraryBuildError.from(err))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14127
+fn publish_library_file(staged: &OSPath, final_path: &OSPath) -> Unit LibraryBuildError! {
+    if fs.symlink_metadata(final_path) == .Ok(metadata) {
+        if library_reparse_point(&metadata) -> return Err(.Io("refusing to replace symlink or reparse point `{final_path.display()}`"))
+        if metadata.is_dir() -> return Err(.Io("refusing to replace directory `{final_path.display()}`"))
+        if selected_os() == "windows" -> fs.remove_file(final_path) ?? return Err(LibraryBuildError.from(err))
+    }
+    fs.rename(staged, final_path) ?? return Err(LibraryBuildError.from(err))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14148
+fn library_stem(name: String) -> String {
+    result := String.new()
+    loop ch in name.chars() -> &result.push(if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' -> ch else '_')
+    if result.is_empty() -> &result.push_str("library")
+    if result.bytes().first().is_some_and(|byte| -> byte.is_ascii_digit()) -> &result.insert(0, '_')
+    result
+}
+// Rust: Source/CmdCompile.rs:14168
+fn library_rustc(source: &OSPath, crate_type: String, output: &OSPath, profile: BuildProfile, verbose: Bool, linker: &Selection, ffi: FfiLink?, mode: OutputMode) -> Unit LibraryBuildError! {
+    command := Command.new("rustc")
+    command.arg("--edition").arg("2021").arg("--crate-type").arg(crate_type).arg("--crate-name")
+        .arg(jet.Syntax.sanitize_crate_name(source.file_stem().and_then(|name| -> name.to_str()).unwrap_or("out")))
+        .arg(source).arg("-o").arg(output)
+    config :: profile.config()
+    command.args(release_profile_cfg_args(&profile))
+    command.args(config.rustc_args_for_target(ffi.is_some(), true))
+    command.args(linker.rustc_args())
+    if ffi == .Val(link) {
+        command.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        loop deps_dir in link.dependency_dirs() {
+            if deps_dir.is_dir() -> command.arg("-L").arg("dependency={deps_dir.display()}")
+        }
+    }
+    if verbose -> write_mode_status(mode, "[build] rustc {source.display()} -> {output.display()} (linker {linker.label()})\n")
+    result :: command.output() ?? return Err(.Tool("couldn't start rustc: {err}"))
+    if !result.status.success() -> return Err(.GeneratedCode(String.from_utf8_lossy(&result.stderr)))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14237
+// Canonicalize process metadata in a Unix archive, preserving names and payloads.
+fn normalize_static_archive(path: &OSPath) -> Unit LibraryBuildError! {
+    // Rust: Source/CmdCompile.rs:14238
+    GLOBAL_HEADER :: "!<arch>\n".bytes()
+    // Rust: Source/CmdCompile.rs:14239
+    MEMBER_HEADER :: 60
+    archive := fs.read(path) ?? return Err(LibraryBuildError.from(err))
+    if !archive.starts_with(GLOBAL_HEADER) -> return Err(.GeneratedCode("rustc produced an invalid static archive `{path.display()}`"))
+    offset := GLOBAL_HEADER.len()
+    loop offset < archive.len() {
+        end :: offset.checked_add(MEMBER_HEADER).unwrap_or_else(|| -> return Err(.GeneratedCode("static archive `{path.display()}` has an overflowing member header")))
+        if end > archive.len() || archive[offset + 58..<end] != "`\n".bytes() -> return Err(.GeneratedCode("rustc produced a malformed static archive `{path.display()}`"))
+        loop (start, width) in [(16, 12), (28, 6), (34, 6)] {
+            &archive[offset + start..<offset + start + width].fill(U8{32})
+            archive[offset + start] = U8{48}
+        }
+        &archive[offset + 40..<offset + 48].fill(U8{32})
+        &archive[offset + 40..<offset + 46].copy_from_slice("100644".bytes())
+        size_text :: String.from_utf8(&archive[offset + 48..<offset + 58]).ok()
+        size :: size_text.and_then(|field| -> {
+            trimmed := field.trim() // #4303
+            trimmed.parse::<USize>().ok()
+        }).unwrap_or_else(|| -> return Err(.GeneratedCode("static archive `{path.display()}` has an invalid member size")))
+        data_end :: end.checked_add(size).unwrap_or_else(|| -> return Err(.GeneratedCode("static archive `{path.display()}` has an overflowing member payload")))
+        if data_end > archive.len() -> return Err(.GeneratedCode("static archive `{path.display()}` has a truncated member payload"))
+        offset = data_end + (size & 1)
+    }
+    fs.write(path, archive) ?? return Err(LibraryBuildError.from(err))
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:14296
+fn build_library(project_root: &OSPath, rust_code: String, artifacts: &LibraryArtifacts, config: &LibraryConfig, profile: BuildProfile, ffi: FfiLink?, verbose: Bool, mode: OutputMode) -> LibraryBuildPaths LibraryBuildError! {
+    stem :: library_stem(config.name)
+    target :: build_output_root(project_root)
+    validate_library_output_root(&target)?
+    clean_library_outputs(&target, stem)?
+    stage :: new_library_stage(&target, stem)?
+    needs_shared :: config.native || config.loadable
+    // GATE #4483 selected target OS, never the host OS.
+    shared_ext :: if selected_os() == "macos" -> "dylib" else if selected_os() == "windows" -> "dll" else "so"
+    shared_name :: "lib{stem}.{shared_ext}"
+    shared :: if needs_shared -> Val(target.join(shared_name)) else None
+    staged_shared :: if needs_shared -> Val(stage.path.join(shared_name)) else None
+    staticlib :: if config.native -> Val(target.join("lib{stem}.a")) else None
+    staged_staticlib :: if config.native -> Val(stage.path.join("lib{stem}.a")) else None
+    header :: if config.native -> Val(target.join("{stem}.h")) else None
+    staged_header :: if config.native -> Val(stage.path.join("{stem}.h")) else None
+    bindings_dir :: if config.native -> Val(target.join("bindings")) else None
+    staged_bindings_dir :: if config.native -> Val(stage.path.join("bindings")) else None
+    linker :: NativeLinker.for_target(None)
+    if needs_shared {
+        source :: stage.path.join("{stem}.rs")
+        write_library_staged(&source, rust_code.bytes())?
+        library_rustc(&source, "cdylib", &staged_shared.expect("shared path for native Library"), profile, verbose, &linker, ffi, mode)?
+        if staged_staticlib == .Val(path) {
+            library_rustc(&source, "staticlib", &path, profile, verbose, &linker, ffi, mode)?
+            normalize_static_archive(&path)?
+        }
+    }
+    if staged_header == .Val(path) -> write_library_staged(&path, artifacts.header.bytes())?
+    binding_paths := [OSPath]{}
+    staged_binding_paths := [OSPath]{}
+    if staged_bindings_dir == .Val(dir) {
+        fs.create_dir(&dir) ?? return Err(LibraryBuildError.from(err))
+        loop (language, text) in artifacts.bindings {
+            extension :: match language {
+                "c" -> "h"
+                "cpp" -> "hpp"
+                "rust" -> "rs"
+                "zig" -> "zig"
+                "go" -> "go"
+                "python" -> "py"
+                "javascript" -> "mjs"
+                "swift" -> "swift"
+                _ -> next
+            }
+            path :: target.join("bindings").join("{stem}.{extension}")
+            staged_path :: dir.join("{stem}.{extension}")
+            write_library_staged(&staged_path, text.bytes())?
+            &binding_paths.push(path)
+            &staged_binding_paths.push(staged_path)
+        }
+    }
+    loadable :: if config.loadable -> Val(target.join("{stem}.jetlib")) else None
+    staged_loadable :: if config.loadable {
+        path :: stage.path.join("{stem}.jetlib")
+        payload :: fs.read(&staged_shared.expect("loadable Library has shared payload")) ?? return Err(LibraryBuildError.from(err))
+        exports := [JetLibExport]{}
+        loop export in artifacts.exports {
+            scalar :: match export.scalar {
+                .Int -> JetLibScalar.Int
+                .Float -> JetLibScalar.Float
+                .Bool -> JetLibScalar.Bool
+                .Text -> JetLibScalar.Text
+            }
+            conventions := [JetLibAccess]{}
+            loop convention in export.conventions -> &conventions.push(match convention {
+                .Read -> JetLibAccess.Read
+                .Write -> JetLibAccess.Write
+                .Move -> JetLibAccess.Move
+            })
+            &exports.push(JetLibExport.with_conventions(export.name, scalar, conventions))
+        }
+        stamp := JetLibStamp.for_library_with_identity(config.name, exports, config.declared_effects, env!("JET_COMPILER_BUILD_ID"), env!("JET_BUILD_TARGET"), native_toolchain_identity())
+        stamp.entry = config.entry
+        stamp.seal_payload(&payload)
+        artifact :: JetLibArtifact{stamp: stamp, payload: payload}
+        write_library_staged(&path, &artifact.encode())?
+        Val(path)
+    } else None
+    validate_library_output_root(&target)?
+    if bindings_dir == .Val(dir) {
+        validate_library_bindings_root(&target)?
+        match fs.symlink_metadata(&dir) {
+            .Ok(metadata) -> {
+                if library_reparse_point(&metadata) || !metadata.is_dir() -> return Err(.Io("Library bindings root `{dir.display()}` is not a real directory"))
+            }
+            .Err(error) -> {
+                if error.kind() != .NotFound -> return Err(LibraryBuildError.from(error))
+                fs.create_dir(&dir) ?? return Err(LibraryBuildError.from(err))
+            }
+        }
+    }
+    publications := [(OSPath, OSPath)]{}
+    if shared == .Val(final_path) && staged_shared == .Val(staged_path) -> &publications.push((staged_path, final_path))
+    if staticlib == .Val(final_path) && staged_staticlib == .Val(staged_path) -> &publications.push((staged_path, final_path))
+    if header == .Val(final_path) && staged_header == .Val(staged_path) -> &publications.push((staged_path, final_path))
+    loop (staged_path, final_path) in staged_binding_paths.iter().zip(binding_paths.iter()) -> &publications.push((staged_path, final_path))
+    if loadable == .Val(final_path) && staged_loadable == .Val(staged_path) -> &publications.push((staged_path, final_path))
+    completion :: target.join(".{stem}.jet-library.complete")
+    staged_completion :: stage.path.join(".{stem}.jet-library.complete")
+    completion_text := String.from("jet-library-set-v1\n")
+    loop (staged_path, final_path) in publications {
+        relative :: final_path.strip_prefix(&target) ?? return Err(.Io("Library publication path `{final_path.display()}` escaped target root"))
+        bytes :: fs.read(&staged_path) ?? return Err(LibraryBuildError.from(err))
+        digest :: jet.SHA256.sha256_hex(&bytes)
+        &completion_text.push_str("{relative.display()}\tsha256-{digest}\n")
+    }
+    write_library_staged(&staged_completion, completion_text.bytes())?
+    &publications.push((staged_completion, completion))
+    validate_library_output_root(&target)?
+    validate_library_bindings_root(&target)?
+    loop (staged_path, final_path) in publications {
+        publish_library_file(&staged_path, &final_path) ?? {
+            _ :: clean_library_outputs(&target, stem)
+            return Err(err)
+        }
+    }
+    validate_library_output_root(&target) ?? {
+        _ :: clean_library_outputs(&target, stem)
+        return Err(err)
+    }
+    Ok(LibraryBuildPaths{shared: shared, staticlib: staticlib, header: header, loadable: loadable, bindings: binding_paths})
+}
+
+// Rust: Source/CmdCompile.rs:14514
+fn build_inner(file: String, rust_code: String, runtime_bundle: ProgramBundle?, bin: OSPath, profile: BuildProfile, ffi: FfiLink?, clinks: &[String], verbose: Bool, cross_target: String?, web: WebArtifacts?, plugin: PluginArtifacts?, mode: OutputMode, _restored_cache: Bool, cache_key_input: String?, target_machine: TargetMachine?, dev_aot: Bool) -> {
+    step :: |msg: String| -> { if verbose -> write_mode_status(mode, "[build] {msg}\n") }
+    native_store :: Store.from_env().ok()
+    output_names :: bin.file_name().and_then(|name| -> name.to_str()).map(|name| -> [name.to_string()]).unwrap_or_default()
+    compiler_nodes :: runtime_bundle.map(|bundle| -> jet.Driver.compiler_nodes_for_bundle_with_outputs(bundle, None, &output_names)).unwrap_or_default()
+    record_program :: build_record_program(file)
+    packages :: runtime_bundle.map(CheckReceipt.PackageRow.from_bundle).unwrap_or_default()
+    project_root :: jet.build_project_root(file) ?? {
+        source :: fs.read_to_string(file).unwrap_or_default()
+        report_problems(mode, file, source, &err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    previous_record :: native_store.and_then(|store| -> store.last_build_record(&project_root, record_program).ok().flatten())
+    output_root :: bin.parent().filter(|parent| -> !parent.as_os_str().is_empty()).unwrap_or(OSPath.from("."))
+    output_authority :: jet_devserver.WebHost.WebOutputAuthority.open_or_create(&output_root, &project_root) ?? {
+        write_mode_diagnostic(mode, "error: couldn't create the `.jet/build` folder safely: {err}\n")
+        exit(ExitCodes.USER_ERROR)
+    }
+    cache_key := cache_key_input
+    if dev_aot {
+        if runtime_bundle == .Val(bundle) && ffi.is_none() && clinks.is_empty() && cross_target.is_none() && target_machine.is_none() && web.is_none() && plugin.is_none() {
+            if cache_key == .Val(key) && native_store == .Val(store) && DevAot.restore(&store, key, &bin) {
+                step("cache hit -> reused cached image")
+                persist_build_record(native_store, &project_root, record_program, &compiler_nodes, &packages, previous_record, true, 0.0, 0.0)
+                return
+            }
+            started :: Instant.now()
+            step("cranelift  -> {bin.display()}")
+            match DevAot.build(&bundle, profile.budget_name(), &bin, native_store) {
+                .Ok(image) -> {
+                    if cache_key == .Val(key) && native_store == .Val(store) {
+                        store.publish_bytes(key, &image, false) ?? {
+                            cli_error!("E2105", "couldn't store build cache artifact: {err}")
+                            exit(ExitCodes.USER_ERROR)
+                        }
+                        step("cache store -> saved image for next time")
+                    }
+                    persist_build_record(native_store, &project_root, record_program, &compiler_nodes, &packages, previous_record, false, started.elapsed().as_secs_f64() * 1000.0, 0.0)
+                    return
+                }
+                .Err(reason) -> { if !mode.json -> write_mode_status(mode, "[build] note: building with rustc because {reason}\n") }
+            }
+        }
+        cache_key = cache_key.map(|key| -> rustc_fallback_cache_key(key))
+    }
+    rust_deferred :: dev_aot && rust_code.is_empty() && runtime_bundle.is_some()
+    rs_name :: "{stem(file)}.rs"
+    rs_path :: output_authority.path_for(rs_name) ?? {
+        write_mode_diagnostic(mode, "error: invalid web Rust output `{rs_name}`: {err}\n")
+        exit(ExitCodes.USER_ERROR)
+    }
+    step("emit Rust  -> {rs_path.display()}")
+    output_authority.replace_file(rs_name, rust_code.bytes()) ?? { write_mode_diagnostic(mode, "error: couldn't write {rs_path.display()}: {err}\n") }
+    if cross_target == Val(jet.Syntax.BUILD_TARGET_WEB) {
+        web_output :: web.unwrap_or_else(|| -> {
+            write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("missing web codegen output", "", false))
+            exit(ExitCodes.ICE)
+        })
+        paths :: write_web_artifacts(file, &web_output, ffi, verbose, &output_authority, None, !profile.is_release(), mode) ?? {
+            write_mode_diagnostic(mode, "{err}\n")
+            exit(ExitCodes.ICE)
+        }
+        if !mode.json {
+            note := "note: `--target=web` wrote `{paths.manifest.display()}`, `{paths.dom.display()}`, `{paths.js.display()}`, `{paths.wasm.display()}`, `{paths.html.display()}`"
+            if paths.js_map == .Val(js_map) -> &note.push_str(", `{js_map.display()}`")
+            if paths.wasm_map == .Val(wasm_map) -> &note.push_str(", `{wasm_map.display()}`")
+            write_mode_status(mode, "{note}\n")
+        }
+        return
+    }
+    if cross_target == Val(jet.Syntax.TARGET_SANDBOX) {
+        plugin_output :: plugin.unwrap_or_else(|| -> {
+            write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("missing sandbox codegen output", "", false))
+            exit(ExitCodes.ICE)
+        })
+        paths :: write_plugin_artifacts(file, &plugin_output, verbose, &output_root, mode) ?? {
+            match err {
+                .GeneratedCodeRejected(msg) -> {
+                    write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("rustc rejected generated code", msg, true))
+                    exit(ExitCodes.ICE)
+                }
+                .ToolFailure(msg) -> {
+                    diag :: jet.Manifest.e1259(msg)
+                    report_problems(mode, "<sandbox>", "// sandbox build for {file}", &[diag])
+                    exit(ExitCodes.USER_ERROR)
+                }
+            }
+        }
+        write_mode_status(mode, "note: `--target=sandbox` wrote `{paths.wit.display()}`, `{paths.guest_rust.display()}`, `{paths.core_wasm.display()}`, `{paths.component_wasm.display()}`\n")
+        return
+    }
+    if target_machine == .Val(machine) && machine.no_os && (machine.triple.contains("aarch64") || machine.triple.contains("thumb") || machine.triple.starts_with("arm")) {
+        usage :: runtime_bundle.map(|bundle| -> TargetMachineUse.from_core_apis(bundle.used_core.iter())).unwrap_or_default()
+        dossier :: machine.target_dossier(&usage, ExecutionTier.Aot, env!("CARGO_PKG_VERSION"), "none")
+        identity := "jet-firmware-build-v1{TEXT_NUL}".bytes().to_vec()
+        append_cache_field(&identity, rust_code)
+        append_cache_field(&identity, profile.cache_tag())
+        append_cache_field(&identity, native_toolchain_identity())
+        &identity.extend_from_slice(&dossier.cache_bytes(machine.triple))
+        target_digest :: jet.SHA256.sha256_hex(&identity)
+        target_dir :: OSPath.from(".jet").join("target").join("{jet.Syntax.sanitize_crate_name(machine.name)}-{target_digest}")
+        program_object :: target_dir.join("{jet.Syntax.sanitize_crate_name(stem(file))}.program.a")
+        fs.create_dir_all(&target_dir) ?? {
+            write_mode_diagnostic(mode, "error: couldn't create firmware work directory {target_dir.display()}: {err}\n")
+            exit(ExitCodes.USER_ERROR)
+        }
+        rustc_started :: Instant.now()
+        step("rustc object -> {program_object.display()}")
+        rustc := Command.new("rustc")
+        rustc.arg("--edition").arg("2021").arg("--crate-type").arg("staticlib").arg("--emit").arg("link")
+            .arg("--target").arg(machine.triple).arg("--crate-name").arg(jet.Syntax.sanitize_crate_name(stem(file)))
+            .args(release_profile_cfg_args(&profile)).arg("-C").arg("panic=abort").arg("-C").arg("relocation-model=static")
+            .arg(&rs_path).arg("-o").arg(&program_object)
+        rustc_output :: rustc.output() ?? {
+            write_mode_diagnostic(mode, "error: couldn't run rustc for firmware object: {err}\n")
+            exit(ExitCodes.USER_ERROR)
+        }
+        if !rustc_output.status.success() {
+            detail :: String.from_utf8_lossy(&rustc_output.stderr)
+            write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("the generated Rust did not compile for the selected target.", detail, true))
+            exit(ExitCodes.ICE)
+        }
+        artifacts :: jet.Driver.build_target_machine_firmware(&machine, &usage, &program_object, &target_dir) ?? {
+            match err {
+                .Diagnostics(diags) -> report_problems(mode, file, rust_code, &diags)
+                .Machine(errors) -> write_mode_diagnostic(mode, "error: target machine firmware link failed: {errors:?}\n")
+            }
+            exit(ExitCodes.USER_ERROR)
+        }
+        fs.copy(&artifacts.elf, &bin) ?? {
+            write_mode_diagnostic(mode, "error: couldn't publish firmware {bin.display()}: {err}\n")
+            exit(ExitCodes.USER_ERROR)
+        }
+        persist_build_record(native_store, &project_root, record_program, &compiler_nodes, &packages, previous_record, false, rustc_started.elapsed().as_secs_f64() * 1000.0, 0.0)
+        step("firmware link -> {artifacts.elf.display()}")
+        return
+    }
+    if cache_key == .Val(key) && native_store.is_some_and(|store| -> match store.restore_file(key, &bin) {
+        .Ok(.Hit { .. }) -> true
+        _ -> false
+    }) {
+        step("cache hit -> reused cached binary")
+        persist_build_record(native_store, &project_root, record_program, &compiler_nodes, &packages, previous_record, true, 0.0, 0.0)
+        return
+    }
+    if verbose {
+        if cache_key.is_some() -> step("cache miss -> compiling")
+        else if cross_target.is_some() -> step("cache bypassed (cross-compiled build)")
+        else -> step("cache bypassed (C-linked build)")
+    }
+    generated_rust := rust_code
+    if runtime_bundle == .Val(bundle) && rust_deferred {
+        generated_rust = jet.Driver.emit_native_rust_for_checked_bundle(&bundle, profile.budget_name(), ffi)
+        inject_game_crash_reporter_bootstrap(&generated_rust, program_uses_game_runtime(&bundle))
+        output_authority.replace_file(rs_name, generated_rust.bytes()) ?? { write_mode_diagnostic(mode, "error: couldn't write {rs_path.display()}: {err}\n") }
+    }
+    step("rustc      {rs_path.display()} -> {bin.display()}")
+    rustc_flags := [String]{}
+    no_os_wasm :: target_machine.is_some_and(|machine| -> machine.no_os && machine.triple.starts_with("wasm32"))
+    if no_os_wasm -> &rustc_flags.extend(["--crate-type", "cdylib", "-C", "link-arg=--no-entry", "-C", "link-arg=--export=__jet_program_entry"])
+    ffi_present :: ffi.is_some()
+    config :: profile.config()
+    &rustc_flags.extend(release_profile_cfg_args(&profile))
+    &rustc_flags.extend(config.rustc_args_for_target(ffi_present, cross_target.is_none()))
+    linker :: NativeLinker.for_target(cross_target)
+    &rustc_flags.extend(linker.rustc_args())
+    if verbose -> step("linker     -> {linker.label()}")
+    cache_flags :: rustc_flags.iter().map(std.ffi.OsString.from).collect()
+    cache_env :: [(std.ffi.OsString, std.ffi.OsString)]{}
+    prepared_runtime :: if ffi_present {
+        if verbose -> step("runtime store bypassed (Rust FFI glue)")
+        PreparedRuntime.inline(generated_rust)
+    } else if native_store == .Val(store) {
+        match prepare(&store, std.ffi.OsStr.new("rustc"), generated_rust, &cache_flags, &cache_env) {
+            .Ok(prepared) -> {
+                if verbose {
+                    status :: if prepared.prebuilt() -> "prebuilt" else if prepared.cache_hit() -> "cache hit" else if prepared.is_split() -> "cache store" else "bypassed (inline fallback)"
+                    step("runtime   -> {status}")
+                }
+                prepared
+            }
+            .Err(.Cache(error)) -> {
+                if verbose -> step("runtime store bypassed ({error})")
+                PreparedRuntime.inline(generated_rust)
+            }
+            .Err(.Tool(_)) -> {
+                cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again")
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    } else {
+        if verbose -> step("runtime store bypassed (store unavailable)")
+        PreparedRuntime.inline(generated_rust)
+    }
+    // Compile privately, cache that exact binary, then publish the convenience path.
+    bin_name :: bin.file_name().and_then(|name| -> name.to_str()).filter(|name| -> !name.is_empty()).unwrap_or_else(|| -> {
+        cli_error!("E2105", "build output `{bin.display()}` has no UTF-8 file name")
+        exit(ExitCodes.USER_ERROR)
+    })
+    work :: output_root.join(".work.{bin_name}.{id()}")
+    fs.create_dir_all(&work) ?? {
+        cli_error!("E2105", "couldn't create the build work dir: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    tmp_bin :: work.join(bin_name)
+    tmp_rs :: work.join("{stem(file)}.rs")
+    entry_parent :: OSPath.from(file).parent().filter(|parent| -> !parent.as_os_str().is_empty()).unwrap_or(OSPath.from("."))
+    runtime_project_root :: runtime_bundle.map(|bundle| -> bundle.project_root).or_else(|| -> jet.Loader.find_package_root_checked(&entry_parent).ok().flatten()).unwrap_or(entry_parent)
+    project_root_prefix :: fs.canonicalize(&runtime_project_root).ok()
+    crate_name :: jet.Syntax.sanitize_crate_name(stem(file))
+    metadata_key :: cache_key.unwrap_or_else(|| -> {
+        bytes := "jet.rustc-metadata.v1{TEXT_NUL}".bytes().to_vec()
+        append_cache_field(&bytes, crate_name)
+        append_cache_field(&bytes, generated_rust)
+        loop flag in rustc_flags -> append_cache_field(&bytes, flag)
+        if ffi == .Val(link) -> append_cache_field(&bytes, link.cache_identity)
+        append_link_identity(&bytes, clinks, project_root_prefix)
+        jet.SHA256.sha256_hex(&bytes)
+    })
+    run_rustc :: |prepared: &PreparedRuntime| -> {
+        rust := prepared.rust()
+        if cfg!(debug_assertions) && std.env.var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
+            rust = "{rust}\ncompile_error!(\"JET_RUSTC_REJECTION_SENTINEL\");\ncompile_error!(\"JET_RUSTC_REJECTION_SECOND_SENTINEL\");\n"
+        }
+        fs.write(&tmp_rs, rust) ?? {
+            cli_error!("E2105", "couldn't write {tmp_rs.display()}: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+        cmd := Command.new("rustc")
+        cmd.arg("--edition").arg("2021").args(&rustc_flags)
+        cmd.arg("--crate-name").arg(crate_name).arg("-C").arg("metadata={metadata_key}")
+        if project_root_prefix == .Val(prefix) -> cmd.arg("--remap-path-prefix").arg("{prefix.display()}=/jet/project")
+        cmd.arg("--remap-path-prefix").arg("{work.display()}=/jet/build")
+        if fs.canonicalize(&work) == .Ok(prefix) -> cmd.arg("--remap-path-prefix").arg("{prefix.display()}=/jet/build")
+        cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin)
+        prepared.add_rustc_args(&cmd)
+        if ffi == .Val(link) {
+            cmd.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+            loop deps_dir in link.dependency_dirs() {
+                if deps_dir.is_dir() -> cmd.arg("-L").arg("dependency={deps_dir.display()}")
+            }
+        }
+        loop arg in clinks -> cmd.arg(arg)
+        cmd.output() ?? {
+            cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    rustc_started :: Instant.now()
+    out := run_rustc(&prepared_runtime)
+    if !out.status.success() && prepared_runtime.is_split() {
+        if verbose -> step("runtime cache bypassed (split crate rejected — inline retry)")
+        out = run_rustc(&PreparedRuntime.inline(generated_rust))
+    }
+    if !out.status.success() {
+        _ :: fs.remove_dir_all(&work)
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        if missing_c_lib(stderr) == .Val(missing) {
+            diag :: jet.CFFI.e3209(missing)
+            report_problems(mode, file, "", &[diag])
+            exit(ExitCodes.USER_ERROR)
+        }
+        if missing_linker(stderr) == .Val(missing) {
+            write_mode_diagnostic(mode, "Error [L2101]: rustc could not find linker `{missing}`.\n Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary.\n Fix: Run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`).\nMore: jet-lang.dev/e/L2101\n")
+            exit(ExitCodes.USER_ERROR)
+        }
+        log_name :: rustc_log_name(file)
+        rustc_log_path :: output_authority.path().join(log_name)
+        log_detail :: match output_authority.replace_file(log_name, &out.stderr) {
+            .Ok(_) -> "  rustc log: {rustc_log_path.display()}"
+            .Err(error) -> "  rustc log: {rustc_log_path.display()} (could not write: {error})"
+        }
+        rustc_error :: first_rustc_error_block(stderr).map(|block| -> "  rustc error:\n{block}").unwrap_or_else(|| -> {
+            trimmed := stderr.trim() // #4303
+            if trimmed.is_empty() -> "" else "  rustc stderr:\n{trimmed}"
+        })
+        if verbose && first_rustc_error_block(stderr) == .Val(block) -> write_mode_status(mode, "[build] rustc error:\n{block}\n")
+        detail :: if rustc_error.is_empty() -> "  generated: {rs_path.display()}\n{log_detail}" else "  generated: {rs_path.display()}\n{log_detail}\n{rustc_error}"
+        write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("the generated Rust did not compile.", detail, true))
+        exit(ExitCodes.ICE)
+    }
+    step("link       -> {bin.display()}")
+    if cache_key == .Val(key) && native_store == .Val(store) {
+        store.publish_file(key, &tmp_bin) ?? {
+            _ :: fs.remove_dir_all(&work)
+            cli_error!("E2105", "couldn't store build cache artifact: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+        step("cache store -> saved binary for next time")
+    }
+    if fs.rename(&tmp_bin, &bin).is_err() {
+        fs.copy(&tmp_bin, &bin) ?? {
+            _ :: fs.remove_file(&tmp_bin)
+            cli_error!("E2105", "couldn't finish writing {bin.display()}: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+        _ :: fs.remove_file(&tmp_bin)
+    }
+    persist_build_record(native_store, &runtime_project_root, record_program, &compiler_nodes, &packages, previous_record, false, rustc_started.elapsed().as_secs_f64() * 1000.0, 0.0)
+    _ :: fs.remove_dir_all(&work)
+}
+// Rust: Source/CmdCompile.rs:15286
+pub fn build(file: String, rust_code: String, runtime_bundle: ProgramBundle?, bin: OSPath, profile: BuildProfile, ffi: FfiLink?, clinks: &[String], verbose: Bool, cross_target: String?, web: WebArtifacts?, plugin: PluginArtifacts?, mode: OutputMode, restored_cache: Bool, cache_key: String?) -> {
+    build_inner(file, rust_code, runtime_bundle, bin, profile, ffi, clinks, verbose, cross_target, web, plugin, mode, restored_cache, cache_key, None, false)
+}
+// Rust: Source/CmdCompile.rs:15322
+pub fn build_target_machine(file: String, rust_code: String, runtime_bundle: ProgramBundle?, bin: OSPath, profile: BuildProfile, ffi: FfiLink?, clinks: &[String], verbose: Bool, cross_target: String?, web: WebArtifacts?, plugin: PluginArtifacts?, mode: OutputMode, restored_cache: Bool, cache_key: String?, target_machine: TargetMachine?, dev_aot: Bool) -> {
+    build_inner(file, rust_code, runtime_bundle, bin, profile, ffi, clinks, verbose, cross_target, web, plugin, mode, restored_cache, cache_key, target_machine, dev_aot)
+}
+// Rust: Source/CmdCompile.rs:15362
+fn build_record_program(file: String) -> String {
+    input :: OSPath.from(file)
+    absolute_input :: if input.is_absolute() -> input else std.env.current_dir().unwrap_or(OSPath.from(".")).join(&input)
+    absolute :: fs.canonicalize(&absolute_input).unwrap_or(absolute_input)
+    path :: jet.build_project_root(file).ok().and_then(|root| -> absolute.strip_prefix(&root).ok()).unwrap_or(input)
+    path.display().to_string().replace('\\', "/")
+}
+// Rust: Source/CmdCompile.rs:15381
+fn persist_build_record(store: Store?, workspace_root: &OSPath, program: String, nodes: &[BuildPlanNode], packages: &[PackageRow], previous: BuildRecord?, cache_hit: Bool, compile_duration_ms: F64, link_duration_ms: F64) -> {
+    if nodes.is_empty() -> return
+    records := [BuildNodeRecord]{}
+    loop node in nodes {
+        why_ran :: if cache_hit && node.kind != BuildNodeKind.Check -> "cached" else if previous.is_none() -> "first-run" else if node.inputs.first() == .Val(input) -> "input:{input}" else "first-run"
+        duration_ms :: match node.kind {
+            .Check -> 0.0
+            .Compile -> compile_duration_ms
+            .Link -> link_duration_ms
+        }
+        &records.push(BuildNodeRecord{kind: node.kind.as_str().to_string(), key: node.key, subject: node.subject, duration_ms: duration_ms, why_ran: why_ran, inputs: node.inputs})
+    }
+    &records.extend(CheckReceipt.package_nodes(packages, previous, false))
+    if store == .Val(actual) {
+        record :: BuildRecord.new(program, records)
+        record_key :: jet.SHA256.sha256_hex(record.to_json().bytes())
+        _ :: actual.publish_last_build_record(workspace_root, record_key, &record)
+    }
+}
+// Rust: Source/CmdCompile.rs:15438
+pub fn run_debug_native(file: String, raw_frames: Bool, dap: Bool, mode: OutputMode) -> I32 {
+    src :: fs.read_to_string(file) ?? {
+        cli_error!("E2105", "can't find the file `{file}`")
+        return ExitCodes.USER_ERROR
+    }
+    project_root :: jet.build_project_root(file) ?? {
+        report_problems(mode, file, src, &err)
+        return ExitCodes.USER_ERROR
+    }
+    out :: jet.compile_for_debug(file) ?? {
+        report_problems(mode, file, src, &err)
+        return ExitCodes.USER_ERROR
+    }
+    clinks :: jet.resolve_c_links(file) ?? {
+        report_problems(mode, file, src, &err)
+        return ExitCodes.USER_ERROR
+    }
+    bin :: build_output_root(&project_root).join("{stem(file)}_dbg")
+    build(file, out.rust, None, bin, BuildProfile.Debug, out.ffi, &clinks, false, None, None, None, mode, false, None)
+    rust_file :: "{stem(file)}.rs"
+    if dap -> jet.Debug.run_dap(&bin, rust_file, out.rust, file, src)
+    else -> jet.Debug.run_native(&bin, rust_file, out.rust, file, src, raw_frames)
+}
+// Rust: Source/CmdCompile.rs:15501
+fn missing_c_lib(stderr: String) -> String? {
+    loop line in stderr.lines() {
+        if line.split("cannot find -l").nth(1) == .Val(rest) {
+            name :: rest.chars().take_while(|ch| -> !ch.is_whitespace() && ch != ':' && ch != '\'' && ch != '"').collect::<String>()
+            if !name.is_empty() -> return Val(name)
+        }
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:15519
+fn missing_linker(stderr: String) -> String? {
+    loop line in stderr.lines() {
+        if line.split("linker `").nth(1) == .Val(rest) && rest.split_once('`') == .Val((name, tail)) {
+            if !name.is_empty() && tail.contains("not found") -> return Val(name.to_string())
+        }
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:15531
+fn rustc_log_name(file: String) -> String { "{stem(file)}.rustc.log" }
+// Rust: Source/CmdCompile.rs:15535
+fn is_rustc_error_header(line: String) -> Bool {
+    trimmed := line.trim_start() // #4303
+    trimmed.starts_with("error:") || trimmed.starts_with("error[")
+}
+// Rust: Source/CmdCompile.rs:15539
+fn is_rustc_diagnostic_header(line: String) -> Bool {
+    trimmed := line.trim_start() // #4303
+    is_rustc_error_header(trimmed) || trimmed.starts_with("warning:")
+}
+// Rust: Source/CmdCompile.rs:15544
+fn first_rustc_error_block(stderr: String) -> String? {
+    block_start := Int?{None}
+    block_end := stderr.len()
+    offset := 0
+    loop line in stderr.split_inclusive('\n') {
+        without_lf :: line.strip_suffix('\n').unwrap_or(line)
+        content :: without_lf.strip_suffix('\r').unwrap_or(without_lf)
+        if block_start.is_some() && is_rustc_diagnostic_header(content) {
+            block_end = offset
+            break
+        }
+        if block_start.is_none() && is_rustc_error_header(content) -> block_start = Val(offset)
+        offset += line.len()
+    }
+    if block_start == .Val(start) && stderr.get(start..<block_end) == .Val(view) {
+        block := view.trim_end() // #4303
+        if !block.is_empty() -> return Val(block)
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:15565 cfg(test) belongs to the next packet's test module.
 

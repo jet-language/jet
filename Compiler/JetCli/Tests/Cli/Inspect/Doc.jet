@@ -1,0 +1,9 @@
+use Cli.Inspect.Doc.[CHECK_RESULT_SCHEMA_VERSION, CHECK_RESULT_CONTRACT]
+use Cli.Inspect.Projection.JetCLICheckScope
+
+// Behavioral control for Source/CmdInspect.rs:82-89; no inline Rust tests.
+#Test("check_contract_retains_schema_and_explicit_scope_distinction") {
+    assert(CHECK_RESULT_SCHEMA_VERSION == U32{1})
+    assert(CHECK_RESULT_CONTRACT == "jet.check/v1")
+    assert(JetCLICheckScope.Project != JetCLICheckScope.ExplicitFile)
+}

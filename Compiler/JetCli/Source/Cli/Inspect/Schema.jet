@@ -1,223 +1,142 @@
-// PORT-PENDING 0696 source-cmdmemory-module-group: Source/CmdSchema.rs:1-219
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-MIGRATE2C (ratified 2026-06-22): `jet inspect schema` subcommand handlers.
-//RS //!
-//RS //! `jet inspect schema status` — report every `#PublishedSchema` type in the project:
-//RS //! its pinned published version, field count, and field list. If the working-tree
-//RS //! struct has a pending breaking change vs its snapshot, note it (reuses the
-//RS //! E0910 diff, so the output matches what `jet build` would refuse).
-//RS //!
-//RS //! `jet inspect schema squash --before <ver>` — re-baseline. Rewrites every snapshot to
-//RS //! the CURRENT published struct shape and records `squashed_before = <ver>`, so
-//RS //! future builds treat the current shape as the authoritative baseline and old
-//RS //! `migration` blocks for versions `< <ver>` are no longer required. This NEVER
-//RS //! edits user source — only the committed `.jet/cache/schema/*.snapshot` files.
-//RS //!
-//RS //! There is NO `jet inspect schema check` verb — `jet build`'s E0910 is already the CI gate.
-//RS 
-//RS use std::path::PathBuf;
-//RS use std::process::exit;
-//RS 
-//RS use jet::ExitCodes;
-//RS use jet::Syntax;
-//RS 
-//RS use crate::find_project_entry;
-//RS 
-//RS /// Dispatch `jet inspect schema <verb> …`.
-//RS pub(crate) fn run_schema(args: &[String]) {
-//RS     let verb = args.first().map(|s| s.as_str());
-//RS     match verb {
-//RS         Some(v) if v == Syntax::SCHEMA_VERB_STATUS => run_status(),
-//RS         Some(v) if v == Syntax::SCHEMA_VERB_SQUASH => {
-//RS             let before = flag_value(args, "--before");
-//RS             run_squash(before.as_deref());
-//RS         }
-//RS         other => {
-//RS             let fix = format!(
-//RS                 "use `jet inspect schema {}` to inspect published schemas, or `jet inspect schema {} --before <version>` to re-baseline them",
-//RS                 Syntax::SCHEMA_VERB_STATUS,
-//RS                 Syntax::SCHEMA_VERB_SQUASH
-//RS             );
-//RS             if let Some(v) = other {
-//RS                 crate::cli_error!(@fix "E2101", format!("`jet inspect schema {}` isn't a schema command", v), fix);
-//RS             } else {
-//RS                 crate::cli_error!(@fix "E2104", "`jet inspect schema` needs a verb", fix);
-//RS             }
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Locate the project root (dir containing the canonical `package.jet`; a
-//RS /// retired `pkg.jet` is handled only by the explicit migration path)
-//RS /// or exit with a clear error.
-//RS fn project_root() -> PathBuf {
-//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     crate::require_manifest_root(
-//RS         &cwd,
-//RS         "error: no package.jet found — run `jet inspect schema` inside a project",
-//RS     )
-//RS }
-//RS 
-//RS /// `jet inspect schema status` — list every snapshotted `#PublishedSchema` type.
-//RS fn run_status() {
-//RS     let root = project_root();
-//RS     let snaps = jet::Publish::load_all_snapshots(&root);
-//RS 
-//RS     if snaps.is_empty() {
-//RS         println!("no published schemas yet.");
-//RS         println!(
-//RS             "note: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`."
-//RS         );
-//RS         return;
-//RS     }
-//RS 
-//RS     // Diff each snapshot against the current working-tree struct so we can flag
-//RS     // pending breaking changes. Reuses the same E0910 pass `jet build` runs.
-//RS     let pending = pending_breaks(&root);
-//RS 
-//RS     println!("published schemas in this project:\n");
-//RS     for snap in &snaps {
-//RS         print!(
-//RS             "  {} — published {}",
-//RS             snap.type_name, snap.published_version
-//RS         );
-//RS         if let Some(before) = &snap.squashed_before {
-//RS             print!(" (squashed before {})", before);
-//RS         }
-//RS         println!();
-//RS         println!("    {} field(s):", snap.fields.len());
-//RS         for f in &snap.fields {
-//RS             println!("      {}: {}", f.name, f.ty);
-//RS         }
-//RS         if pending.iter().any(|t| t == &snap.type_name) {
-//RS             println!(
-//RS                 "    pending: a breaking change vs this snapshot — `jet build` would report E0910"
-//RS             );
-//RS         }
-//RS         println!();
-//RS     }
-//RS }
-//RS 
-//RS /// Run the schema-migration diff against the working tree and return the set of
-//RS /// `#PublishedSchema` type names that currently have a pending breaking change.
-//RS /// Reuses the exact pass `jet build` runs, then attributes each E0910 to the
-//RS /// struct it names (every E0910 message backticks the type name).
-//RS fn pending_breaks(root: &std::path::Path) -> Vec<String> {
-//RS     let entry = find_project_entry(root);
-//RS     let entry_str = entry.to_string_lossy().to_string();
-//RS     if !entry.is_file() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     if let Ok(bundle) = jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
-//RS         for module in &bundle.modules {
-//RS             // D-MIGRATE1 (I2 fix, bug #185): this advisory command runs before
-//RS             // a full `jet build` (no populated trait registry is available
-//RS             // here), so an empty `TraitRegistry` stands in. The Decode-only
-//RS             // "add"-op guard this enables (an added field must itself satisfy
-//RS             // `Decode`) then trusts every named type — a false negative here
-//RS             // only means `pending_breaks` under-reports; `jet build`'s own
-//RS             // call (`Bundle.rs`, with the real populated registry) is the
-//RS             // authoritative check and always runs before codegen.
-//RS             let reg = jet::Traits::TraitRegistry::default();
-//RS             let diags =
-//RS                 jet::Sema::check_schema_migrations(&module.items, &bundle.project_root, &reg);
-//RS             if diags.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             for item in &module.items {
-//RS                 if let jet::AST::Item::Struct(s) = item {
-//RS                     if s.is_published_schema
-//RS                         && diags
-//RS                             .iter()
-//RS                             .any(|d| d.what.contains(&format!("`{}`", s.name)))
-//RS                     {
-//RS                         out.push(s.name.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     out.sort();
-//RS     out.dedup();
-//RS     out
-//RS }
-//RS 
-//RS /// `jet inspect schema squash --before <ver>` — re-baseline snapshots to current shape.
-//RS fn run_squash(before: Option<&str>) {
-//RS     let Some(before) = before else {
-//RS         crate::cli_error!(@full "E2104", format!("`jet inspect schema {}` needs `--before <version>`", Syntax::SCHEMA_VERB_SQUASH), "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version", format!("run `jet inspect schema {} --before 2.0.0` (the version whose migrations you want to retire)", Syntax::SCHEMA_VERB_SQUASH));
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS 
-//RS     let root = project_root();
-//RS 
-//RS     // Read the canonical Package version from the selected entry. Inline
-//RS     // package carriers and package.jet use the same facts path.
-//RS     let entry = find_project_entry(&root);
-//RS     let version = jet::Loader::package_facts_for_entry(&entry)
-//RS         .ok()
-//RS         .flatten()
-//RS         .and_then(|facts| facts.version)
-//RS         .unwrap_or_else(|| "0.0.0".to_string());
-//RS 
-//RS     // Load the current working-tree #PublishedSchema structs so we re-baseline to
-//RS     // the *current* shape (not whatever the old snapshot held).
-//RS     let entry_str = entry.to_string_lossy().to_string();
-//RS     let bundle = match jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
-//RS         Ok(b) => b,
-//RS         Err(_) => {
-//RS             crate::cli_error!(
-//RS                 "E2105",
-//RS                 "couldn't load the project to read its current schema shape"
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     let mut count = 0;
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             if let jet::AST::Item::Struct(s) = item {
-//RS                 if s.is_published_schema {
-//RS                     let mut snap = jet::Publish::snapshot_from_struct(s, &version);
-//RS                     snap.squashed_before = Some(before.to_string());
-//RS                     if jet::Publish::save_snapshot(&root, &snap).is_ok() {
-//RS                         count += 1;
-//RS                         println!(
-//RS                             "  re-baselined `{}` to version {} (squashed before {})",
-//RS                             s.name, version, before
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     if count == 0 {
-//RS         println!("no `#PublishedSchema` structs found — nothing to squash.");
-//RS     } else {
-//RS         println!(
-//RS             "\nok: {} snapshot(s) re-baselined. Migration blocks for versions before {} are no longer required.",
-//RS             count, before
-//RS         );
-//RS         println!("note: this rewrote .jet/cache/schema/ only — your source is unchanged. Commit the updated snapshots.");
-//RS     }
-//RS }
-//RS 
-//RS /// Find `--flag value` or `--flag=value` in an argument slice.
-//RS fn flag_value(args: &[String], flag: &str) -> Option<String> {
-//RS     let mut it = args.iter();
-//RS     while let Some(a) = it.next() {
-//RS         if let Some(rest) = a.strip_prefix(&format!("{}=", flag)) {
-//RS             return Some(rest.to_string());
-//RS         }
-//RS         if a == flag {
-//RS             return it.next().cloned();
-//RS         }
-//RS     }
-//RS     None
-//RS }
-// END-PORT-PENDING 0696 Source/CmdSchema.rs:1-219
+// Rust: Source/CmdSchema.rs:1
+// Published schema inspection and snapshot-only re-baselining. Build's E0910
+// remains the authoritative check; squash never edits user source.
+use jet.[ExitCodes, Syntax, Publish, Loader, Traits, Sema, AST]
+use crate.[find_project_entry, require_manifest_root, cli_error]
+use std.[env, process]
 
+// Rust: Source/CmdSchema.rs:25
+pub fn run_schema(args: &[String]) -> {
+    verb :: args.first()
+    if verb == {
+        Val(value) if value == Syntax.SCHEMA_VERB_STATUS -> run_status()
+        Val(value) if value == Syntax.SCHEMA_VERB_SQUASH -> run_squash(flag_value(args, "--before"))
+        other -> {
+            fix :: "use `jet inspect schema {Syntax.SCHEMA_VERB_STATUS}` to inspect published schemas, or `jet inspect schema {Syntax.SCHEMA_VERB_SQUASH} --before <version>` to re-baseline them"
+            if other == {
+                Val(value) -> cli_error.with_fix("E2101", "`jet inspect schema {value}` isn't a schema command", fix)
+                None -> cli_error.with_fix("E2104", "`jet inspect schema` needs a verb", fix)
+            }
+            // GATE #4494: native process exit.
+            process.exit(ExitCodes.USER_ERROR)
+        }
+    }
+}
+// Rust: Source/CmdSchema.rs:52
+fn project_root() -> OSPath {
+    // GATE #4494: native working directory.
+    cwd :: env.current_dir().unwrap_or_else(_ -> OSPath.from("."))
+    require_manifest_root(cwd, "error: no package.jet found — run `jet inspect schema` inside a project")
+}
+// Rust: Source/CmdSchema.rs:61
+fn run_status() -> {
+    root :: project_root()
+    snaps :: Publish.load_all_snapshots(root)
+    if snaps.is_empty() {
+        println("no published schemas yet.")
+        println("note: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.")
+        return
+    }
+    pending :: pending_breaks(root)
+    println("published schemas in this project:\n")
+    loop snap in &snaps {
+        print("  {snap.type_name} — published {snap.published_version}")
+        if snap.squashed_before == { Val(before) -> print(" (squashed before {before})"); None -> {} }
+        println("")
+        println("    {snap.fields.len()} field(s):")
+        loop field in &snap.fields { println("      {field.name}: {field.ty}") }
+        if pending.iter().any(name -> name == snap.type_name) {
+            println("    pending: a breaking change vs this snapshot — `jet build` would report E0910")
+        }
+        println("")
+    }
+}
+// Rust: Source/CmdSchema.rs:104
+fn pending_breaks(root: &OSPath) -> [String] {
+    entry :: find_project_entry(root)
+    entry_str :: entry.to_string_lossy().to_string()
+    if !entry.is_file() { return [] }
+    out := [String]{}
+    if Loader.load_entry_with_overlay(entry_str, None, true) == {
+        Ok(bundle) -> {
+            loop module in &bundle.modules {
+                // Advisory only: named types are trusted without the populated trait
+                // registry. Build's populated-registry check remains authoritative.
+                reg :: Traits.TraitRegistry.default()
+                diags :: Sema.check_schema_migrations(module.items, bundle.project_root, reg)
+                if diags.is_empty() { next }
+                loop item in &module.items {
+                    if item == {
+                        .Struct(s) -> {
+                            if s.is_published_schema && diags.iter().any(d -> d.what.contains("`{s.name}`")) { out.push(s.name.clone()) }
+                        }
+                        _ -> {}
+                    }
+                }
+            }
+        }
+        Err(_) -> {}
+    }
+    out.sort()
+    out.dedup()
+    out
+}
+// Rust: Source/CmdSchema.rs:146
+fn run_squash(before: String?) -> {
+    cutoff :: if before == {
+        Val(value) -> value
+        None -> {
+            cli_error.full("E2104", "`jet inspect schema {Syntax.SCHEMA_VERB_SQUASH}` needs `--before <version>`",
+                "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version",
+                "run `jet inspect schema {Syntax.SCHEMA_VERB_SQUASH} --before 2.0.0` (the version whose migrations you want to retire)")
+            // GATE #4494: native process exit.
+            process.exit(ExitCodes.USER_ERROR)
+        }
+    }
+    root :: project_root()
+    entry :: find_project_entry(root)
+    version :: Loader.package_facts_for_entry(entry).ok().flatten().and_then(facts -> facts.version) ?? "0.0.0"
+    entry_str :: entry.to_string_lossy().to_string()
+    bundle :: if Loader.load_entry_with_overlay(entry_str, None, true) == {
+        Ok(bundle) -> bundle
+        Err(_) -> {
+            cli_error("E2105", "couldn't load the project to read its current schema shape")
+            // GATE #4494: native process exit.
+            process.exit(ExitCodes.USER_ERROR)
+        }
+    }
+    count := 0
+    loop module in &bundle.modules {
+        loop item in &module.items {
+            if item == {
+                .Struct(s) -> {
+                    if s.is_published_schema {
+                        snap := Publish.snapshot_from_struct(s, version)
+                        snap.squashed_before = Val(cutoff.to_string())
+                        if Publish.save_snapshot(root, snap).is_ok() {
+                            count += 1
+                            println("  re-baselined `{s.name}` to version {version} (squashed before {cutoff})")
+                        }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    if count == 0 { println("no `#PublishedSchema` structs found — nothing to squash.") }
+    else {
+        println("\nok: {count} snapshot(s) re-baselined. Migration blocks for versions before {cutoff} are no longer required.")
+        println("note: this rewrote .jet/cache/schema/ only — your source is unchanged. Commit the updated snapshots.")
+    }
+}
+// Rust: Source/CmdSchema.rs:208
+fn flag_value(args: &[String], flag: String) -> String? {
+    index := 0
+    loop index < args.len() {
+        argument :: &args[index]
+        if argument.strip_prefix("{flag}=") == { Val(rest) -> return Val(rest.to_string()); None -> {} }
+        if argument == flag { return args.get(index + 1).cloned() }
+        index += 1
+    }
+    None
+}

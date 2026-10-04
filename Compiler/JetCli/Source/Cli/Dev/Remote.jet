@@ -1,207 +1,107 @@
-// PORT-PENDING 0706 source-cmdremote-module-group: Source/CmdRemote.rs:1-203
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Host-owned remote-builder bindings (D-JPK-REMOTE1).
-//RS 
-//RS use crate::OutputMode;
-//RS use jet::Comptime::Build::RemoteBuildBinding;
-//RS use jet::ExitCodes;
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS 
-//RS pub(crate) fn run_remote(args: &[String], mode: OutputMode) -> ! {
-//RS     match args.get(1).map(String::as_str) {
-//RS         Some("bind") => bind(args, mode),
-//RS         Some("list") => list(mode),
-//RS         Some("remove") => remove(args),
-//RS         Some("help") | None => {
-//RS             println!(
-//RS                 "jet remote — manage host-owned remote builders\n\n  jet remote bind <name> --root <path> --credential-file <path> --trust-domain <name> [--execute] [--cache-read] [--cache-write] [--fallback-local]\n  jet remote list\n  jet remote remove <name>"
-//RS             );
-//RS             std::process::exit(ExitCodes::OK);
-//RS         }
-//RS         Some(other) => fail(&format!("unknown remote subcommand `{other}`")),
-//RS     }
-//RS }
-//RS 
-//RS fn bind(args: &[String], mode: OutputMode) -> ! {
-//RS     let Some(builder) = args.get(2).filter(|value| !value.starts_with('-')) else {
-//RS         fail("jet remote bind needs a builder name");
-//RS     };
-//RS     let root = value_flag(args, "--root");
-//RS     let credential_file = value_flag(args, "--credential-file");
-//RS     let trust_domain = value_flag(args, "--trust-domain");
-//RS     let Some(root) = root else {
-//RS         fail("jet remote bind needs `--root <absolute-path>`")
-//RS     };
-//RS     let Some(credential_file) = credential_file else {
-//RS         fail("jet remote bind needs `--credential-file <path>`")
-//RS     };
-//RS     let Some(trust_domain) = trust_domain else {
-//RS         fail("jet remote bind needs `--trust-domain <name>`")
-//RS     };
-//RS     let worker_id = value_flag(args, "--worker-id").unwrap_or_else(|| "worker".to_string());
-//RS     let platform = value_flag(args, "--platform")
-//RS         .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
-//RS     let abi = value_flag(args, "--abi").unwrap_or_else(|| "native".to_string());
-//RS     let timeout_ms = value_flag(args, "--timeout-ms")
-//RS         .map(|value| {
-//RS             value
-//RS                 .parse::<u64>()
-//RS                 .unwrap_or_else(|_| fail("`--timeout-ms` must be a positive integer"))
-//RS         })
-//RS         .unwrap_or(30_000);
-//RS     if timeout_ms == 0 {
-//RS         fail("`--timeout-ms` must be a positive integer");
-//RS     }
-//RS     let cache_read = has_flag(args, "--cache-read");
-//RS     let cache_write = has_flag(args, "--cache-write");
-//RS     let execute = has_flag(args, "--execute");
-//RS     let fallback_local = has_flag(args, "--fallback-local");
-//RS     let known = [
-//RS         "--root",
-//RS         "--credential-file",
-//RS         "--trust-domain",
-//RS         "--worker-id",
-//RS         "--platform",
-//RS         "--abi",
-//RS         "--timeout-ms",
-//RS         "--cache-read",
-//RS         "--cache-write",
-//RS         "--execute",
-//RS         "--fallback-local",
-//RS         jet::CLI::MACHINE_OUTPUT_FLAG,
-//RS     ];
-//RS     for argument in args.iter().skip(3) {
-//RS         let head = argument
-//RS             .split_once('=')
-//RS             .map(|(head, _)| head)
-//RS             .unwrap_or(argument);
-//RS         if argument.starts_with('-') && !known.contains(&head) {
-//RS             fail(&format!("unknown remote bind flag `{argument}`"));
-//RS         }
-//RS     }
-//RS     let binding = RemoteBuildBinding::bind_host(
-//RS         builder.clone(),
-//RS         root,
-//RS         credential_file,
-//RS         trust_domain,
-//RS         worker_id,
-//RS         platform,
-//RS         abi,
-//RS         cache_read,
-//RS         cache_write,
-//RS         execute,
-//RS         fallback_local,
-//RS         timeout_ms,
-//RS     )
-//RS     .unwrap_or_else(|error| fail(&error));
-//RS     if mode.json {
-//RS         let fields = StatusFields::new()
-//RS             .with("builder", binding.builder.clone())
-//RS             .with("root", binding.root.to_string_lossy().into_owned())
-//RS             .with("trust_domain", binding.trust_domain.clone())
-//RS             .with("worker_id", binding.worker_id.clone())
-//RS             .with("platform", binding.platform.clone())
-//RS             .with("abi", binding.abi.clone());
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("remote.bind", true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS     } else {
-//RS         println!("bound remote builder `{}`", binding.builder);
-//RS     }
-//RS     std::process::exit(ExitCodes::OK);
-//RS }
-//RS 
-//RS fn list(mode: OutputMode) -> ! {
-//RS     let names = RemoteBuildBinding::list_host().unwrap_or_else(|error| fail(&error));
-//RS     if mode.json {
-//RS         let builders = StatusValue::array(names.iter().filter_map(|name| {
-//RS             RemoteBuildBinding::load_host(name).ok().map(|binding| {
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("name", binding.builder)
-//RS                         .with("root", binding.root.to_string_lossy().into_owned())
-//RS                         .with("trust_domain", binding.trust_domain)
-//RS                         .with("worker_id", binding.worker_id)
-//RS                         .with("platform", binding.platform)
-//RS                         .with("abi", binding.abi)
-//RS                         .with("cache_read", binding.cache_read)
-//RS                         .with("cache_write", binding.cache_write)
-//RS                         .with("execute", binding.execute)
-//RS                         .with("fallback_local", binding.fallback_local),
-//RS                 )
-//RS             })
-//RS         }));
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("remote.list", true)
-//RS                 .with_field("builders", builders)
-//RS                 .json()
-//RS         );
-//RS     } else if names.is_empty() {
-//RS         println!("no remote builders are bound");
-//RS     } else {
-//RS         for name in names {
-//RS             match RemoteBuildBinding::load_host(&name) {
-//RS                 Ok(binding) => println!(
-//RS                     "{}\t{}\t{}\t{}",
-//RS                     binding.builder,
-//RS                     binding.root.display(),
-//RS                     binding.trust_domain,
-//RS                     capabilities(&binding),
-//RS                 ),
-//RS                 Err(error) => eprintln!("{name}: {error}"),
-//RS             }
-//RS         }
-//RS     }
-//RS     std::process::exit(ExitCodes::OK);
-//RS }
-//RS 
-//RS fn remove(args: &[String]) -> ! {
-//RS     let Some(builder) = args.get(2).filter(|value| !value.starts_with('-')) else {
-//RS         fail("jet remote remove needs a builder name");
-//RS     };
-//RS     RemoteBuildBinding::remove_host(builder).unwrap_or_else(|error| fail(&error));
-//RS     println!("removed remote builder `{builder}`");
-//RS     std::process::exit(ExitCodes::OK);
-//RS }
-//RS 
-//RS fn capabilities(binding: &RemoteBuildBinding) -> String {
-//RS     [
-//RS         binding.cache_read.then_some("cache-read"),
-//RS         binding.cache_write.then_some("cache-write"),
-//RS         binding.execute.then_some("execute"),
-//RS     ]
-//RS     .into_iter()
-//RS     .flatten()
-//RS     .collect::<Vec<_>>()
-//RS     .join(",")
-//RS }
-//RS 
-//RS fn value_flag(args: &[String], name: &str) -> Option<String> {
-//RS     args.iter().enumerate().find_map(|(index, argument)| {
-//RS         argument
-//RS             .strip_prefix(&format!("{name}="))
-//RS             .map(str::to_string)
-//RS             .or_else(|| {
-//RS                 (argument == name)
-//RS                     .then(|| args.get(index + 1).cloned())
-//RS                     .flatten()
-//RS             })
-//RS     })
-//RS }
-//RS 
-//RS fn has_flag(args: &[String], name: &str) -> bool {
-//RS     args.iter()
-//RS         .any(|argument| argument == name || argument == &format!("{name}=true"))
-//RS }
-//RS 
-//RS 
-//RS fn fail(message: &str) -> ! {
-//RS     crate::cli_error!(@fix "E2104", message, "run `jet remote help`");
-//RS     std::process::exit(ExitCodes::USAGE);
-//RS }
-// END-PORT-PENDING 0706 Source/CmdRemote.rs:1-203
+// Rust: Source/CmdRemote.rs:1
+// Host-owned remote-builder bindings (D-JPK-REMOTE1).
+use crate.[OutputMode, cli_error_fix]
+use jet.[ExitCodes, CLI]
+use jet.Comptime.Build.RemoteBuildBinding
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue]
+use std.process
 
+// Rust: Source/CmdRemote.rs:8
+fn run_remote(args: &[String], mode: OutputMode) -> Never {
+    if args.get(1) == {
+        Val("bind") -> bind(args, mode)
+        Val("list") -> list(mode)
+        Val("remove") -> remove(args)
+        Val("help") | None -> {
+            println("jet remote — manage host-owned remote builders\n\n  jet remote bind <name> --root <path> --credential-file <path> --trust-domain <name> [--execute] [--cache-read] [--cache-write] [--fallback-local]\n  jet remote list\n  jet remote remove <name>")
+            process.exit(ExitCodes.OK)
+        }
+        Val(other) -> fail("unknown remote subcommand `{other}`")
+    }
+}
+// Rust: Source/CmdRemote.rs:23
+fn bind(args: &[String], mode: OutputMode) -> Never {
+    builder :: args.get(2).filter(value -> !value.starts_with('-')).unwrap_or_else(() -> fail("jet remote bind needs a builder name"))
+    root :: value_flag(args, "--root")
+    credential_file :: value_flag(args, "--credential-file")
+    trust_domain :: value_flag(args, "--trust-domain")
+    root_path :: root.unwrap_or_else(() -> fail("jet remote bind needs `--root <absolute-path>`"))
+    credential_path :: credential_file.unwrap_or_else(() -> fail("jet remote bind needs `--credential-file <path>`"))
+    trust :: trust_domain.unwrap_or_else(() -> fail("jet remote bind needs `--trust-domain <name>`"))
+    worker_id :: value_flag(args, "--worker-id") ?? "worker"
+    // GATE #4483: native platform defaults are selected-target facts, not host assumptions.
+    platform :: value_flag(args, "--platform") ?? "{core.sys.target.selected_os()}-{core.sys.target.selected_arch()}"
+    abi :: value_flag(args, "--abi") ?? "native"
+    timeout_ms :: value_flag(args, "--timeout-ms").map(value -> value.parse::<UInt64>().unwrap_or_else(_ -> fail("`--timeout-ms` must be a positive integer"))) ?? 30_000
+    if timeout_ms == 0 { fail("`--timeout-ms` must be a positive integer") }
+    cache_read :: has_flag(args, "--cache-read")
+    cache_write :: has_flag(args, "--cache-write")
+    execute :: has_flag(args, "--execute")
+    fallback_local :: has_flag(args, "--fallback-local")
+    known :: ["--root", "--credential-file", "--trust-domain", "--worker-id", "--platform", "--abi", "--timeout-ms",
+        "--cache-read", "--cache-write", "--execute", "--fallback-local", CLI.MACHINE_OUTPUT_FLAG]
+    for argument in args.iter().skip(3) {
+        head :: argument.split_once('=').map((head, _) -> head) ?? argument
+        if argument.starts_with('-') && !known.contains(head) { fail("unknown remote bind flag `{argument}`") }
+    }
+    // GATE #4494: canonical real host binding/credential persistence.
+    binding :: RemoteBuildBinding.bind_host(builder.clone(), root_path, credential_path, trust,
+        worker_id, platform, abi, cache_read, cache_write, execute, fallback_local, timeout_ms).unwrap_or_else(error -> fail(error))
+    if mode.json {
+        fields :: StatusFields.new().with("builder", binding.builder.clone()).with("root", binding.root.to_string_lossy().into_owned())
+            .with("trust_domain", binding.trust_domain.clone()).with("worker_id", binding.worker_id.clone())
+            .with("platform", binding.platform.clone()).with("abi", binding.abi.clone())
+        println(StatusEnvelope.new("remote.bind", true).with_fields(fields).json())
+    } else { println("bound remote builder `{binding.builder}`") }
+    process.exit(ExitCodes.OK)
+}
+// Rust: Source/CmdRemote.rs:115
+fn list(mode: OutputMode) -> Never {
+    names :: RemoteBuildBinding.list_host().unwrap_or_else(error -> fail(error))
+    if mode.json {
+        builders :: StatusValue.array(names.iter().filter_map(name -> RemoteBuildBinding.load_host(name).ok().map(binding ->
+            StatusValue.object(StatusFields.new().with("name", binding.builder).with("root", binding.root.to_string_lossy().into_owned())
+                .with("trust_domain", binding.trust_domain).with("worker_id", binding.worker_id).with("platform", binding.platform)
+                .with("abi", binding.abi).with("cache_read", binding.cache_read).with("cache_write", binding.cache_write)
+                .with("execute", binding.execute).with("fallback_local", binding.fallback_local)))))
+        println(StatusEnvelope.new("remote.list", true).with_field("builders", builders).json())
+    } else if names.is_empty() { println("no remote builders are bound") }
+    else {
+        for name in names {
+            if RemoteBuildBinding.load_host(name) == {
+                Ok(binding) -> println("{binding.builder}\t{binding.root.display()}\t{binding.trust_domain}\t{capabilities(binding)}")
+                Err(error) -> eprintln("{name}: {error}")
+            }
+        }
+    }
+    process.exit(ExitCodes.OK)
+}
+// Rust: Source/CmdRemote.rs:160
+fn remove(args: &[String]) -> Never {
+    builder :: args.get(2).filter(value -> !value.starts_with('-')).unwrap_or_else(() -> fail("jet remote remove needs a builder name"))
+    RemoteBuildBinding.remove_host(builder).unwrap_or_else(error -> fail(error))
+    println("removed remote builder `{builder}`")
+    process.exit(ExitCodes.OK)
+}
+// Rust: Source/CmdRemote.rs:169
+fn capabilities(binding: &RemoteBuildBinding) -> String {
+    [if binding.cache_read { Val("cache-read") } else { None },
+     if binding.cache_write { Val("cache-write") } else { None },
+     if binding.execute { Val("execute") } else { None }].into_iter().flatten().collect().join(",")
+}
+// Rust: Source/CmdRemote.rs:181
+fn value_flag(args: &[String], name: String) -> String? {
+    args.iter().enumerate().find_map((index, argument) ->
+        argument.strip_prefix("{name}=").map(value -> value.to_string())
+            .or_else(() -> if argument == name { args.get(index + 1).cloned() } else { None }))
+}
+// Rust: Source/CmdRemote.rs:194
+fn has_flag(args: &[String], name: String) -> Bool {
+    args.iter().any(argument -> argument == name || argument == "{name}=true")
+}
+// Rust: Source/CmdRemote.rs:200
+fn fail(message: String) -> Never {
+    cli_error_fix("E2104", message, "run `jet remote help`")
+    // GATE #4494: real process exit.
+    process.exit(ExitCodes.USAGE)
+}

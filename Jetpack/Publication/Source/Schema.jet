@@ -1,35 +1,25 @@
-// PORT-PENDING 0824 source-publish-schema-module-group: Source/Publish/Schema.rs:1-31
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Driver-level schema snapshot writer — loads entry bundle and writes snapshots.
-//RS //! Pure types live in `Sema::Schema` and are re-exported from `Publish/mod.rs`.
-//RS 
-//RS use crate::Sema::Schema::{save_snapshot, snapshot_from_struct};
-//RS 
-//RS /// Write schema snapshots for all `#PublishedSchema` structs in the entry bundle.
-//RS /// Called during `jet registry publish`. Returns the number of snapshots written.
-//RS pub fn write_schema_snapshots_for_entry(
-//RS     project_root: &std::path::Path,
-//RS     entry_file: &str,
-//RS     version: &str,
-//RS ) -> usize {
-//RS     let bundle = match crate::Loader::load_entry_with_overlay(entry_file, None, true) {
-//RS         Ok(b) => b,
-//RS         Err(_) => return 0,
-//RS     };
-//RS     let mut count = 0;
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             if let crate::AST::Item::Struct(s) = item {
-//RS                 if s.is_published_schema {
-//RS                     let snap = snapshot_from_struct(s, version);
-//RS                     if save_snapshot(project_root, &snap).is_ok() {
-//RS                         count += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     count
-//RS }
-// END-PORT-PENDING 0824 Source/Publish/Schema.rs:1-31
-
+// Rust: Source/Publish/Schema.rs:1
+// Driver-level snapshot writer; schema types stay at Sema.Schema.
+use jet.[Loader, AST]
+use jet.Sema.Schema.[save_snapshot, snapshot_from_struct]
+// Rust: Source/Publish/Schema.rs:8
+// Write snapshots for all #PublishedSchema structs in the entry bundle.
+// Called during registry publication; returns the count successfully written.
+pub fn write_schema_snapshots_for_entry(project_root: OSPath, entry_file: String, version: String) -> Int {
+    bundle :: if Loader.load_entry_with_overlay(entry_file, None, true) == {
+        Ok(bundle) -> bundle
+        Err(_) -> return 0
+    }
+    count := 0
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item is AST.Item.Struct(schema) {
+                if schema.is_published_schema {
+                    snap :: snapshot_from_struct(schema, version)
+                    if save_snapshot(project_root, snap).is_ok() -> count += 1
+                }
+            }
+        }
+    }
+    count
+}

@@ -1,0 +1,33 @@
+// No inline Rust tests in CmdInspect.rs:4041-5805. Pure metadata controls.
+#Test("capability_canonical_json_sorts_and_omits_only_root_digest") {
+    nested :: StatusValue.object(StatusFields.new().with("content_digest", "nested").with("z", true))
+    value :: StatusValue.object(StatusFields.new().with("z", 7).with("content_digest", "ignored").with("a", nested))
+    assert_eq(capability_canonical_json(value), Ok("{{\"a\":{{\"content_digest\":\"nested\",\"z\":true}},\"z\":7}}"))
+    assert_eq(capability_canonical_json(StatusValue.Float(1.5)), Err("canonical capability metadata cannot contain floating-point numbers"))
+}
+
+#Test("hardening_manifest_validates_content_and_snapshot_identity") {
+    hash :: "sha256:{\"0\".repeat(64)}"
+    snapshot :: StatusValue.object(StatusFields.new().with("algorithm", "sha256").with("hash", hash))
+    base :: StatusValue.object(StatusFields.new().with("schema", HARDENING_SURFACE_SCHEMA).with("schema_version", HARDENING_SURFACE_VERSION).with("source_snapshot", snapshot))
+    canonical :: capability_canonical_json(base) ?? panic(err)
+    digest :: "sha256:{jet.SHA256.sha256_hex(canonical.bytes())}"
+    manifest :: StatusValue.object(StatusFields.new().with("schema", HARDENING_SURFACE_SCHEMA).with("schema_version", HARDENING_SURFACE_VERSION).with("source_snapshot", snapshot).with("content_digest", digest))
+    assert(validate_hardening_manifest(manifest) == .Ok(_))
+    stale :: StatusValue.object(StatusFields.new().with("schema", HARDENING_SURFACE_SCHEMA).with("schema_version", HARDENING_SURFACE_VERSION).with("source_snapshot", snapshot).with("content_digest", hash))
+    assert_eq(validate_capability_content_digest(stale, "hardening manifest"), Err("hardening manifest content_digest does not match canonical content"))
+}
+
+#Test("release_candidate_evidence_requires_every_counted_row") {
+    evidence :: StatusValue.object(StatusFields.new().with("status", "passed"))
+    candidate :: StatusValue.object(StatusFields.new().with("status", "available"))
+    passed :: StatusValue.object(StatusFields.new().with("counted", true).with("disposition", "passed").with("evidence", evidence).with("candidate_identity", candidate))
+    excluded :: StatusValue.object(StatusFields.new().with("counted", true).with("disposition", "owner-ratified-not-applicable"))
+    good :: StatusValue.object(StatusFields.new().with("rows", StatusValue.array([StatusValue]{passed, excluded})))
+    assert(capability_relation_has_candidate_evidence(good))
+    stale_candidate :: StatusValue.object(StatusFields.new().with("status", "stale"))
+    stale :: StatusValue.object(StatusFields.new().with("counted", true).with("disposition", "passed").with("evidence", evidence).with("candidate_identity", stale_candidate))
+    bad :: StatusValue.object(StatusFields.new().with("rows", StatusValue.array([StatusValue]{passed, stale})))
+    assert(!capability_relation_has_candidate_evidence(bad))
+    assert(!capability_relation_has_candidate_evidence(StatusValue.object(StatusFields.new().with("rows", StatusValue.array([StatusValue]{})))))
+}

@@ -1,1587 +1,350 @@
-// PORT-PENDING 0708 source-cmdsemindex-module-group-slice-1: Source/CmdSemIndex.rs:1-17
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SEMINDEX1: `jet inspect semindex` — smoke CLI for the stable semantic-index JSON API.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::exit;
-//RS 
-//RS use jet::Diagnostics::{ColorChoice, ReportPath};
-//RS use jet::ExitCodes;
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS use jet_semindex::{
-//RS     open, EffectFact, SemIndexError, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-//RS     SemanticSymbolKind, SCHEMA_VERSION,
-//RS };
-//RS 
-//RS use crate::OutputMode;
-//RS use crate::absolutize;
-//RS 
-// END-PORT-PENDING 0708 Source/CmdSemIndex.rs:1-17
+// Rust: Source/CmdSemIndex.rs:1
+// D-SEMINDEX1: stable semantic-index query and presentation.
+use std.[env, process]
+use jet.[ExitCodes, CLI]
+use jet.Diagnostics.[ColorChoice, ReportPath]
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue]
+use jet_semindex.[open, EffectFact, SemIndexError, SemanticProvenance, SemanticSymbol,
+    SemanticSymbolIndex, SemanticSymbolKind, SCHEMA_VERSION, build_symbol_db]
+use crate.[OutputMode, absolutize, looks_like_jet_source, resolve_bare_entry, resolve_source_path,
+    cli_error_fix, CmdInspect]
+// Rust: Source/CmdSemIndex.rs:119
+struct FindOptions { effect: String?; example: String?; member: String?; positionals: [String] }
+// Rust: Source/CmdSemIndex.rs:127
+struct TypeShape { inputs: [String]; output: String }
+// Rust: Source/CmdSemIndex.rs:132
+enum FindMode {
+    Signature(TypeShape)
+    Effect { name: String, text: String }
+    Example { raw: String, shape: TypeShape? }
+    Text(String)
+}
+// Rust: Source/CmdSemIndex.rs:145
+struct FindMatch { name: String; signature: String; why: String }
+// Rust: Source/CmdSemIndex.rs:155
+fn run_find(args: &[String], json: Bool) -> Void {
+    options :: parse_find_options(args).unwrap_or_else(message -> {
+        cli_error_fix("E2104", message, "run `jet find --help` for the query forms")
+        process.exit(ExitCodes.USAGE)
+    })
+    if options.effect.is_some() && options.example.is_some() {
+        cli_error_fix("E2104", "`--effect` and `--example` cannot be combined", "use one find mode per command")
+        process.exit(ExitCodes.USAGE)
+    }
+    effect :: options.effect
+    example :: options.example
+    member :: options.member
+    positionals := ^options.positionals
+    target_index :: positionals.iter().rposition(value -> looks_like_jet_source(value))
+    target :: target_index.map(index -> positionals.remove(index))
+    text :: positionals.join(" ")
+    rendered_text :: text.clone()
+    if effect.is_none() && example.is_none() && text.is_empty() {
+        cli_error_fix("E2104", "`jet find` needs a query or an effect filter", "use `jet find \"String -> Path\"` or `jet find --effect IO`")
+        process.exit(ExitCodes.USAGE)
+    }
+    mode :: if (effect, example) == {
+        (Val(name), None) -> FindMode.Effect { name: ^name, text: ^text }
+        (None, Val(raw)) -> {
+            if raw.contains("=>") {
+                cli_error_fix("E2104", "find examples use `->`", "write the input/output example with `->`")
+                process.exit(ExitCodes.USAGE)
+            }
+            FindMode.Example { shape: example_shape(raw), raw: ^raw }
+        }
+        (None, None) -> {
+            if text.contains("=>") {
+                cli_error_fix("E2104", "find signatures use `->`", "write the input/output shape with `->`")
+                process.exit(ExitCodes.USAGE)
+            }
+            if text.contains("->") {
+                shape :: parse_type_shape(text).unwrap_or_else(() -> {
+                    cli_error_fix("E2104", "the find signature needs input and output types", "use `jet find \"String -> Path\"`")
+                    process.exit(ExitCodes.USAGE)
+                })
+                FindMode.Signature(^shape)
+            } else { FindMode.Text(^text) }
+        }
+        (Val(_), Val(_)) -> unreachable()
+    }
+    resolution_mode :: OutputMode { json: json, color: ColorChoice.Never, quiet: false }
+    // GATE #4494: actual cwd/path resolution and CLI process exit.
+    entry :: if target == {
+        Val(raw) if OSPath.from(raw).is_dir() ->
+            resolve_bare_entry("find", OSPath.from(raw), member, resolution_mode, false).map(entry -> entry.path)
+        Val(raw) -> Val(OSPath.from(resolve_source_path(raw)))
+        None -> {
+            cwd :: env.current_dir().unwrap_or_else(_ -> OSPath.from("."))
+            resolve_bare_entry("find", cwd, member, resolution_mode, false).map(entry -> entry.path)
+        }
+    }
+    (symbols, effects) :: if entry == {
+        Val(path) -> {
+            checked :: CmdInspect.check_projection_for_effects(path, "dev", &[:]).unwrap_or_else(diagnostics ->
+                CmdInspect.render_check_failure(path, diagnostics, json, false))
+            (build_symbol_db(checked.bundle, checked.facts).symbols, checked.index().effects().to_vec())
+        }
+        None -> (SemanticSymbolIndex.language(), [])
+    }
+    matches :: find_matches(symbols, effects, mode)
+    render_find(mode, rendered_text, matches, json)
+}
+// Rust: Source/CmdSemIndex.rs:251
+fn parse_find_options(args: &[String]) -> FindOptions Err! {
+    options := FindOptions { effect: None, example: None, member: None, positionals: [] }
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if arg == "--effect" || arg == "--example" {
+            value :: args.get(index + 1).filter(value -> !value.starts_with("--")).ok_or_else(() -> "`{arg}` needs a value")?
+            if arg == "--effect" { options.effect = Val(value.clone()) } else { options.example = Val(value.clone()) }
+            index += 2
+            continue
+        }
+        if arg.strip_prefix("--effect=") == {
+            Val(value) -> {
+                if value.is_empty() { return Err("`--effect` needs a value") }
+                options.effect = Val(value.to_string())
+            }
+            None -> {
+                if arg.strip_prefix("--example=") == {
+                    Val(value) -> {
+                        if value.is_empty() { return Err("`--example` needs a value") }
+                        options.example = Val(value.to_string())
+                    }
+                    None -> {
+                        if arg == "-p" {
+                            value :: args.get(index + 1).filter(value -> !value.starts_with('-')).ok_or_else(() -> "`-p` needs a workspace member")?
+                            options.member = Val(value.clone())
+                            index += 2
+                            continue
+                        } else if arg == CLI.MACHINE_OUTPUT_FLAG || arg == "--quiet" || arg == "--color" || arg.starts_with("--color=") {
+                            index += 1
+                            continue
+                        } else if !arg.starts_with('-') { options.positionals.push(arg.clone()) }
+                    }
+                }
+            }
+        }
+        index += 1
+    }
+    Ok(^options)
+}
+// Rust: Source/CmdSemIndex.rs:302
+fn find_matches(symbols: &SemanticSymbolIndex, effects: &[EffectFact], mode: &FindMode) -> [FindMatch] {
+    matches := []
+    for symbol in symbols.symbols() {
+        if symbol.kind != SemanticSymbolKind.Function && symbol.kind != SemanticSymbolKind.Member { continue }
+        candidate :: if mode == {
+            FindMode.Signature(shape) -> signature_shape(symbol.signature).filter(candidate -> shape_matches(shape, candidate))
+                .map(_ -> "signature matches the requested type shape")
+            FindMode.Effect { name, text } -> {
+                fact :: effect_fact(symbol, effects) ?? continue
+                if !effect_matches(name, fact) || !text_matches(symbol, text) { continue }
+                Val(effect_reason(name, fact))
+            }
+            FindMode.Example { raw, shape } -> {
+                if !is_pure_candidate(symbol, effects) { continue }
+                candidate_shape :: signature_shape(symbol.signature)
+                shape_match :: shape.zip(candidate_shape).is_some_and((wanted, candidate) -> shape_matches(wanted, candidate))
+                documented :: symbol.examples.iter().any(example -> normalize_text(example) == normalize_text(raw))
+                if !shape_match && !documented { continue }
+                Val(if shape_match { "pure candidate has the same input/output shape" }
+                    else { "pure candidate has a documented matching example" })
+            }
+            FindMode.Text(query) -> if text_matches(symbol, query) { Val("name or documentation matches the query") } else { None }
+        }
+        why :: candidate ?? continue
+        matches.push(FindMatch { name: symbol.qualified_name.clone(), signature: symbol.signature.clone(), why: ^why })
+    }
+    matches.sort_by((left, right) -> left.name.cmp(right.name).then(left.signature.cmp(right.signature)))
+    ^matches
+}
+// Rust: Source/CmdSemIndex.rs:368
+fn effect_fact(symbol: &SemanticSymbol, effects: &[EffectFact]) -> &EffectFact? {
+    if symbol.provenance == { SemanticProvenance.Source { .. } -> {}; _ -> return None }
+    key :: symbol.owner.map(owner -> "{owner}::{symbol.name}").unwrap_or_else(() -> symbol.name.clone())
+    effects.iter().find(fact -> fact.function == key)
+        .or_else(() -> effects.iter().find(fact -> fact.function == symbol.name))
+        .or_else(() -> effects.iter().find(fact -> fact.function.ends_with("::{key}")))
+        .or_else(() -> effects.iter().find(fact -> fact.function.ends_with("__{symbol.name}")))
+}
+// Rust: Source/CmdSemIndex.rs:392
+fn effect_matches(wanted: String, fact: &EffectFact) -> Bool {
+    wanted_root :: wanted.split('.').next() ?? wanted
+    fact.maximal || fact.inferred.iter().any(actual -> actual == wanted || actual.starts_with("{wanted}.") ||
+        wanted.starts_with("{actual}.") || (actual.split('.').next() ?? actual) == wanted_root)
+}
+// Rust: Source/CmdSemIndex.rs:403
+fn effect_reason(wanted: String, fact: &EffectFact) -> String {
+    if fact.maximal { return "holds {wanted} through an open effect set" }
+    actual :: fact.inferred.join(", ")
+    path :: fact.provenance.iter().find(proof -> proof.effect == wanted || proof.effect.starts_with("{wanted}.") ||
+        wanted.starts_with("{proof.effect}.") || (proof.effect.split('.').next() ?? proof.effect) == (wanted.split('.').next() ?? wanted))
+        .map(proof -> proof.call_path.join(" -> "))
+    if path == { Val(path) -> "holds {wanted} (inferred: {actual}; via {path})"; None -> "holds {wanted} (inferred: {actual})" }
+}
+// Rust: Source/CmdSemIndex.rs:425
+fn is_pure_candidate(symbol: &SemanticSymbol, effects: &[EffectFact]) -> Bool {
+    effect_fact(symbol, effects).is_none_or(fact -> !fact.maximal && fact.inferred.is_empty())
+}
+// Rust: Source/CmdSemIndex.rs:429
+fn text_matches(symbol: &SemanticSymbol, query: String) -> Bool {
+    examples :: symbol.examples.join(" ")
+    haystack :: "{symbol.name} {symbol.qualified_name} {symbol.summary} {examples}".to_ascii_lowercase()
+    query.split_whitespace().filter(term -> term.len() > 1).all(term -> haystack.contains(term.to_ascii_lowercase()))
+}
+// Rust: Source/CmdSemIndex.rs:444
+fn parse_type_shape(query: String) -> TypeShape? {
+    (raw_inputs, raw_output) :: query.split_once("->")?
+    trimmed := raw_inputs.trim() // #4303
+    inputs :: if trimmed.is_empty() || trimmed == "()" { [] }
+        else { split_top_level(raw_inputs, ',').into_iter().map(ty -> compact_type(ty)).filter(ty -> !ty.is_empty()).collect() }
+    output :: compact_type(raw_output)
+    if output.is_empty() { None } else { Val(TypeShape { inputs: ^inputs, output: ^output }) }
+}
+// Rust: Source/CmdSemIndex.rs:459
+fn signature_shape(signature: String) -> TypeShape? {
+    open :: signature.find('(')?
+    close :: signature.rfind(')')?
+    if close < open { return None }
+    inputs :: split_top_level(signature.get(open + 1..<close)?, ',').into_iter()
+        .filter(part -> { trimmed := part.trim(); trimmed != "" && trimmed != "/" && trimmed != "*" })
+        .map(part -> parameter_type(part)).collect_option()?
+    tail := signature.get(close + 1..)?.trim() // #4303
+    if tail.starts_with("-[") { tail = "" }
+    else if tail.strip_prefix("->") == { Val(rest) -> tail = rest.trim(); None -> {} }
+    if tail.split_once(" -[") == { Val((return_type, _)) -> tail = return_type.trim(); None -> {} }
+    output :: tail.split_whitespace().next() ?? "()"
+    Val(TypeShape { inputs: ^inputs, output: compact_type(output) })
+}
+// Rust: Source/CmdSemIndex.rs:486
+fn parameter_type(raw_part: String) -> String? {
+    part := raw_part.trim() // #4303
+    part = (part.strip_prefix("...") ?? part).trim_start_matches(['~', '&', '^'])
+    (_, raw_ty) :: part.split_once(':')?
+    ty := raw_ty.split_once(" {").map_or(raw_ty, (ty, _) -> ty).trim() // #4303
+    if ty.is_empty() { None } else { Val(compact_type(ty)) }
+}
+// Rust: Source/CmdSemIndex.rs:495
+fn example_shape(example: String) -> TypeShape? {
+    (raw_inputs, output) :: example.split_once("->")?
+    trimmed := raw_inputs.trim() // #4303
+    inputs :: if trimmed.is_empty() || trimmed == "()" { [] }
+        else { split_top_level(raw_inputs, ',').into_iter().map(value -> literal_type(value)).collect_option()? }
+    Val(TypeShape { inputs: ^inputs, output: literal_type(output)? })
+}
+// Rust: Source/CmdSemIndex.rs:511
+fn literal_type(raw_value: String) -> String? {
+    value := raw_value.trim() // #4303
+    if (value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')) { return Val("String") }
+    if value == "true" || value == "false" { return Val("Bool") }
+    if value.parse::<Int64>().is_ok() { return Val("Int") }
+    if value.parse::<Float64>().is_ok() { return Val("Float") }
+    if value.starts_with('[') && value.ends_with(']') {
+        inner := value.get(1..<value.len() - 1)?
+        if inner.trim().is_empty() { return Val("[T]") }
+        types :: split_top_level(inner, ',').into_iter().map(item -> literal_type(item)).collect_option()?
+        first :: types.first()?.clone()
+        return Val(if types.iter().all(ty -> ty == first) { "[{first}]" } else { "[T]" })
+    }
+    value.split_once('{').map((ty, _) -> compact_type(ty)).filter(ty -> !ty.is_empty())
+        .or_else(() -> if value == "()" || value == "None" { Val("T") } else { None })
+        .or_else(() -> if !value.is_empty() { Val("T") } else { None })
+}
+// Rust: Source/CmdSemIndex.rs:551
+fn shape_matches(wanted: &TypeShape, candidate: &TypeShape) -> Bool {
+    if wanted.inputs.len() != candidate.inputs.len() { return false }
+    bindings := [:]
+    wanted.inputs.iter().zip(candidate.inputs).all((wanted, candidate) -> type_matches(wanted, candidate, &bindings)) &&
+        type_matches(wanted.output, candidate.output, &bindings)
+}
+// Rust: Source/CmdSemIndex.rs:564
+fn type_matches(raw_wanted: String, raw_candidate: String, bindings: &[String:String]) -> Bool {
+    wanted :: compact_type(raw_wanted)
+    candidate :: compact_type(raw_candidate)
+    if is_type_variable(wanted) {
+        return if bindings.get(wanted) == { Val(bound) -> bound == candidate; None -> { bindings[wanted] = candidate; true } }
+    }
+    if wanted.starts_with('[') && wanted.ends_with(']') && candidate.starts_with('[') && candidate.ends_with(']') {
+        return type_matches(wanted.get(1..<wanted.len() - 1).unwrap(), candidate.get(1..<candidate.len() - 1).unwrap(), bindings)
+    }
+    if wanted.starts_with('(') && wanted.ends_with(')') && candidate.starts_with('(') && candidate.ends_with(')') {
+        wp :: split_top_level(wanted.get(1..<wanted.len() - 1).unwrap(), ',')
+        cp :: split_top_level(candidate.get(1..<candidate.len() - 1).unwrap(), ',')
+        return wp.len() == cp.len() && wp.iter().zip(cp).all((w, c) -> type_matches(w, c, bindings))
+    }
+    if (generic_parts(wanted), generic_parts(candidate)) == {
+        (Val((wh, wa)), Val((ch, ca))) -> return type_names_equal(wh, ch) && wa.len() == ca.len() &&
+            wa.iter().zip(ca).all((w, c) -> type_matches(w, c, bindings))
+        _ -> {}
+    }
+    type_names_equal(wanted, candidate)
+}
+// Rust: Source/CmdSemIndex.rs:613
+fn generic_parts(ty: String) -> (String, [String])? {
+    open :: ty.find('<')?
+    if !ty.ends_with('>') { return None }
+    Val((ty.get(0..<open)?, split_top_level(ty.get(open + 1..<ty.len() - 1)?, ',').into_iter().map(part -> compact_type(part)).collect()))
+}
+// Rust: Source/CmdSemIndex.rs:626
+fn is_type_variable(ty: String) -> Bool { ty.len() == 1 && ty.chars().next().is_some_and(ch -> ch.is_ascii_uppercase()) }
+// Rust: Source/CmdSemIndex.rs:630
+fn type_names_equal(left: String, right: String) -> Bool { left == right || left.rsplit(['.', ':']).next() == right.rsplit(['.', ':']).next() }
+// Rust: Source/CmdSemIndex.rs:634
+fn compact_type(ty: String) -> String { ty.chars().filter(ch -> !ch.is_whitespace()).collect() }
+// Rust: Source/CmdSemIndex.rs:638
+fn split_top_level(input: String, separator: Char) -> [String] {
+    parts := []
+    start := 0
+    round := 0
+    square := 0
+    angle := 0
+    for (index, ch) in input.char_indices() {
+        if ch == { '(' -> round += 1; ')' -> round -= 1; '[' -> square += 1; ']' -> square -= 1; '<' -> angle += 1; '>' -> angle -= 1; _ -> {} }
+        if ch == separator && round == 0 && square == 0 && angle == 0 {
+            part := input.get(start..<index).unwrap().trim() // #4303
+            parts.push(part.to_string())
+            start = index + ch.len_utf8()
+        }
+    }
+    last := input.get(start..).unwrap().trim() // #4303
+    parts.push(last.to_string())
+    ^parts
+}
+// Rust: Source/CmdSemIndex.rs:663
+fn normalize_text(value: String) -> String { value.split_whitespace().collect().join(" ") }
+// Rust: Source/CmdSemIndex.rs:667
+fn render_find(mode: &FindMode, query: String, matches: &[FindMatch], json: Bool) -> Void {
+    if json {
+        values :: StatusValue.array(matches.iter().map(item -> StatusValue.object(
+            StatusFields.new().with("name", item.name).with("signature", item.signature).with("why", item.why))))
+        fields :: StatusFields.new().with("query", query).with("matches", values)
+        println(StatusEnvelope.new("find", true).with_fields(fields).json())
+        return
+    }
+    heading :: if mode == {
+        FindMode.Signature(_) -> "signature {query}"
+        FindMode.Effect { name, text } if text.is_empty() -> "effect {name}"
+        FindMode.Effect { name, text } -> "effect {name} / {text}"
+        FindMode.Example { raw, .. } -> "example {raw}"
+        FindMode.Text(text) -> "text {text}"
+    }
+    println("find: {heading}")
+    if matches.is_empty() { println("  no matches"); return }
+    for (index, item) in matches.iter().enumerate() {
+        println("  {index + 1}. {item.signature}")
+        println("     why: {item.why}")
+    }
+}
 
-// PORT-PENDING 0708 source-cmdsemindex-module-group-slice-1: Source/CmdSemIndex.rs:118-704
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS 
-//RS #[derive(Default)]
-//RS struct FindOptions {
-//RS     effect: Option<String>,
-//RS     example: Option<String>,
-//RS     member: Option<String>,
-//RS     positionals: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct TypeShape {
-//RS     inputs: Vec<String>,
-//RS     output: String,
-//RS }
-//RS 
-//RS enum FindMode {
-//RS     Signature(TypeShape),
-//RS     Effect {
-//RS         name: String,
-//RS         text: String,
-//RS     },
-//RS     Example {
-//RS         raw: String,
-//RS         shape: Option<TypeShape>,
-//RS     },
-//RS     Text(String),
-//RS }
-//RS 
-//RS struct FindMatch {
-//RS     name: String,
-//RS     signature: String,
-//RS     why: String,
-//RS }
-//RS 
-//RS /// `jet find` searches the checked semantic index. The source check stays the
-//RS /// same front-end path as `jet inspect`; this command only changes the query
-//RS /// and presentation layer.
-//RS pub(crate) fn run_find(args: &[String], json: bool) {
-//RS     let options = match parse_find_options(args) {
-//RS         Ok(options) => options,
-//RS         Err(message) => {
-//RS             crate::cli_error!(@fix "E2104", message, "run `jet find --help` for the query forms");
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS     };
-//RS     if options.effect.is_some() && options.example.is_some() {
-//RS         crate::cli_error!(@fix "E2104", "`--effect` and `--example` cannot be combined", "use one find mode per command");
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS 
-//RS     let FindOptions {
-//RS         effect,
-//RS         example,
-//RS         member,
-//RS         positionals,
-//RS     } = options;
-//RS     let mut positionals = positionals;
-//RS     let target_index = positionals
-//RS         .iter()
-//RS         .rposition(|value| crate::looks_like_jet_source(value));
-//RS     let target = target_index.map(|index| positionals.remove(index));
-//RS     let text = positionals.join(" ");
-//RS     // `text` moves into the FindMode below, but the renderer also needs it.
-//RS     let rendered_text = text.clone();
-//RS     if effect.is_none() && example.is_none() && text.is_empty() {
-//RS         crate::cli_error!(@fix "E2104", "`jet find` needs a query or an effect filter", "use `jet find \"String -> Path\"` or `jet find --effect IO`");
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS 
-//RS     let mode = match (effect, example) {
-//RS         (Some(name), None) => FindMode::Effect { name, text },
-//RS         (None, Some(raw)) => {
-//RS             if raw.contains("=>") {
-//RS                 crate::cli_error!(@fix "E2104", "find examples use `->`", "write the input/output example with `->`");
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             FindMode::Example {
-//RS                 shape: example_shape(&raw),
-//RS                 raw,
-//RS             }
-//RS         }
-//RS         (None, None) => {
-//RS             if text.contains("=>") {
-//RS                 crate::cli_error!(@fix "E2104", "find signatures use `->`", "write the input/output shape with `->`");
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             if text.contains("->") {
-//RS                 let shape = parse_type_shape(&text).unwrap_or_else(|| {
-//RS                     crate::cli_error!(@fix "E2104", "the find signature needs input and output types", "use `jet find \"String -> Path\"`");
-//RS                     exit(ExitCodes::USAGE);
-//RS                 });
-//RS                 FindMode::Signature(shape)
-//RS             } else {
-//RS                 FindMode::Text(text)
-//RS             }
-//RS         }
-//RS         (Some(_), Some(_)) => unreachable!(),
-//RS     };
-//RS 
-//RS     let resolution_mode = OutputMode {
-//RS         json,
-//RS         color: ColorChoice::Never,
-//RS         quiet: false,
-//RS     };
-//RS     let entry = match target.as_deref() {
-//RS         Some(raw) if Path::new(raw).is_dir() => {
-//RS             crate::resolve_bare_entry("find", Path::new(raw), member.as_deref(), resolution_mode, false)
-//RS                 .map(|entry| entry.path)
-//RS         }
-//RS         Some(raw) => Some(PathBuf::from(crate::resolve_source_path(raw))),
-//RS         None => {
-//RS             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS             crate::resolve_bare_entry("find", &cwd, member.as_deref(), resolution_mode, false)
-//RS                 .map(|entry| entry.path)
-//RS         }
-//RS     };
-//RS 
-//RS     let (symbols, effects) = match entry {
-//RS         Some(path) => {
-//RS             let checked =
-//RS                 crate::CmdInspect::check_projection_for_effects(&path, "dev", &BTreeMap::new())
-//RS                     .unwrap_or_else(|diagnostics| {
-//RS                         crate::CmdInspect::render_check_failure(&path, &diagnostics, json, false);
-//RS                     });
-//RS             let symbols = jet_semindex::build_symbol_db(&checked.bundle, &checked.facts).symbols;
-//RS             (symbols, checked.index().effects().to_vec())
-//RS         }
-//RS         None => (SemanticSymbolIndex::language(), Vec::new()),
-//RS     };
-//RS     let matches = find_matches(&symbols, &effects, &mode);
-//RS     render_find(&mode, &rendered_text, &matches, json);
-//RS }
-//RS 
-//RS fn parse_find_options(args: &[String]) -> Result<FindOptions, String> {
-//RS     let mut options = FindOptions::default();
-//RS     let mut index = 0;
-//RS     while index < args.len() {
-//RS         let arg = &args[index];
-//RS         if arg == "--effect" || arg == "--example" {
-//RS             let value = args
-//RS                 .get(index + 1)
-//RS                 .filter(|value| !value.starts_with("--"))
-//RS                 .ok_or_else(|| format!("`{arg}` needs a value"))?;
-//RS             if arg == "--effect" {
-//RS                 options.effect = Some(value.clone());
-//RS             } else {
-//RS                 options.example = Some(value.clone());
-//RS             }
-//RS             index += 2;
-//RS             continue;
-//RS         }
-//RS         if let Some(value) = arg.strip_prefix("--effect=") {
-//RS             if value.is_empty() {
-//RS                 return Err("`--effect` needs a value".to_string());
-//RS             }
-//RS             options.effect = Some(value.to_string());
-//RS         } else if let Some(value) = arg.strip_prefix("--example=") {
-//RS             if value.is_empty() {
-//RS                 return Err("`--example` needs a value".to_string());
-//RS             }
-//RS             options.example = Some(value.to_string());
-//RS         } else if arg == "-p" {
-//RS             let value = args
-//RS                 .get(index + 1)
-//RS                 .filter(|value| !value.starts_with('-'))
-//RS                 .ok_or_else(|| "`-p` needs a workspace member".to_string())?;
-//RS             options.member = Some(value.clone());
-//RS             index += 2;
-//RS             continue;
-//RS         } else if arg == jet::CLI::MACHINE_OUTPUT_FLAG
-//RS             || arg == "--quiet"
-//RS             || arg == "--color"
-//RS             || arg.starts_with("--color=")
-//RS         {
-//RS             index += 1;
-//RS             continue;
-//RS         } else if !arg.starts_with('-') {
-//RS             options.positionals.push(arg.clone());
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     Ok(options)
-//RS }
-//RS 
-//RS fn find_matches(
-//RS     symbols: &SemanticSymbolIndex,
-//RS     effects: &[EffectFact],
-//RS     mode: &FindMode,
-//RS ) -> Vec<FindMatch> {
-//RS     let mut matches = Vec::new();
-//RS     for symbol in symbols.symbols() {
-//RS         if !matches!(
-//RS             &symbol.kind,
-//RS             SemanticSymbolKind::Function | SemanticSymbolKind::Member
-//RS         ) {
-//RS             continue;
-//RS         }
-//RS         let candidate = match mode {
-//RS             FindMode::Signature(shape) => signature_shape(&symbol.signature)
-//RS                 .filter(|candidate| shape_matches(shape, candidate))
-//RS                 .map(|_| "signature matches the requested type shape".to_string()),
-//RS             FindMode::Effect { name, text } => {
-//RS                 let Some(fact) = effect_fact(symbol, effects) else {
-//RS                     continue;
-//RS                 };
-//RS                 if !effect_matches(name, fact) || !text_matches(symbol, text) {
-//RS                     continue;
-//RS                 }
-//RS                 Some(effect_reason(name, fact))
-//RS             }
-//RS             FindMode::Example { raw, shape } => {
-//RS                 if !is_pure_candidate(symbol, effects) {
-//RS                     continue;
-//RS                 }
-//RS                 let candidate_shape = signature_shape(&symbol.signature);
-//RS                 let shape_match = shape
-//RS                     .as_ref()
-//RS                     .zip(candidate_shape.as_ref())
-//RS                     .is_some_and(|(wanted, candidate)| shape_matches(wanted, candidate));
-//RS                 let documented = symbol
-//RS                     .examples
-//RS                     .iter()
-//RS                     .any(|example| normalize_text(example) == normalize_text(raw));
-//RS                 if !shape_match && !documented {
-//RS                     continue;
-//RS                 }
-//RS                 Some(if shape_match {
-//RS                     "pure candidate has the same input/output shape".to_string()
-//RS                 } else {
-//RS                     "pure candidate has a documented matching example".to_string()
-//RS                 })
-//RS             }
-//RS             FindMode::Text(query) => text_matches(symbol, query)
-//RS                 .then(|| "name or documentation matches the query".to_string()),
-//RS         };
-//RS         let Some(why) = candidate else { continue };
-//RS         matches.push(FindMatch {
-//RS             name: symbol.qualified_name.clone(),
-//RS             signature: symbol.signature.clone(),
-//RS             why,
-//RS         });
-//RS     }
-//RS     matches.sort_by(|left, right| {
-//RS         left.name
-//RS             .cmp(&right.name)
-//RS             .then(left.signature.cmp(&right.signature))
-//RS     });
-//RS     matches
-//RS }
-//RS 
-//RS fn effect_fact<'a>(symbol: &SemanticSymbol, effects: &'a [EffectFact]) -> Option<&'a EffectFact> {
-//RS     if !matches!(&symbol.provenance, SemanticProvenance::Source { .. }) {
-//RS         return None;
-//RS     }
-//RS     let key = symbol
-//RS         .owner
-//RS         .as_ref()
-//RS         .map(|owner| format!("{owner}::{}", symbol.name))
-//RS         .unwrap_or_else(|| symbol.name.clone());
-//RS     effects
-//RS         .iter()
-//RS         .find(|fact| fact.function == key)
-//RS         .or_else(|| effects.iter().find(|fact| fact.function == symbol.name))
-//RS         .or_else(|| {
-//RS             let suffix = format!("::{key}");
-//RS             effects.iter().find(|fact| fact.function.ends_with(&suffix))
-//RS         })
-//RS         .or_else(|| {
-//RS             effects
-//RS                 .iter()
-//RS                 .find(|fact| fact.function.ends_with(&format!("__{}", symbol.name)))
-//RS         })
-//RS }
-//RS 
-//RS fn effect_matches(wanted: &str, fact: &EffectFact) -> bool {
-//RS     let wanted_root = wanted.split('.').next().unwrap_or(wanted);
-//RS     fact.maximal
-//RS         || fact.inferred.iter().any(|actual| {
-//RS             actual == wanted
-//RS                 || actual.starts_with(&format!("{wanted}."))
-//RS                 || wanted.starts_with(&format!("{actual}."))
-//RS                 || actual.split('.').next().unwrap_or(actual) == wanted_root
-//RS         })
-//RS }
-//RS 
-//RS fn effect_reason(wanted: &str, fact: &EffectFact) -> String {
-//RS     if fact.maximal {
-//RS         return format!("holds {wanted} through an open effect set");
-//RS     }
-//RS     let actual = fact.inferred.join(", ");
-//RS     let path = fact
-//RS         .provenance
-//RS         .iter()
-//RS         .find(|proof| {
-//RS             proof.effect == wanted
-//RS                 || proof.effect.starts_with(&format!("{wanted}."))
-//RS                 || wanted.starts_with(&format!("{}.", proof.effect))
-//RS                 || proof.effect.split('.').next().unwrap_or(&proof.effect)
-//RS                     == wanted.split('.').next().unwrap_or(wanted)
-//RS         })
-//RS         .map(|proof| proof.call_path.join(" -> "));
-//RS     match path {
-//RS         Some(path) => format!("holds {wanted} (inferred: {actual}; via {path})"),
-//RS         None => format!("holds {wanted} (inferred: {actual})"),
-//RS     }
-//RS }
-//RS 
-//RS fn is_pure_candidate(symbol: &SemanticSymbol, effects: &[EffectFact]) -> bool {
-//RS     effect_fact(symbol, effects).is_none_or(|fact| !fact.maximal && fact.inferred.is_empty())
-//RS }
-//RS 
-//RS fn text_matches(symbol: &SemanticSymbol, query: &str) -> bool {
-//RS     let haystack = format!(
-//RS         "{} {} {} {}",
-//RS         symbol.name,
-//RS         symbol.qualified_name,
-//RS         symbol.summary,
-//RS         symbol.examples.join(" "),
-//RS     )
-//RS     .to_ascii_lowercase();
-//RS     query
-//RS         .split_whitespace()
-//RS         .filter(|term| term.len() > 1)
-//RS         .all(|term| haystack.contains(&term.to_ascii_lowercase()))
-//RS }
-//RS 
-//RS fn parse_type_shape(query: &str) -> Option<TypeShape> {
-//RS     let (inputs, output) = query.split_once("->")?;
-//RS     let inputs = if inputs.trim().is_empty() || inputs.trim() == "()" {
-//RS         Vec::new()
-//RS     } else {
-//RS         split_top_level(inputs, ',')
-//RS             .into_iter()
-//RS             .map(|ty| compact_type(&ty))
-//RS             .filter(|ty| !ty.is_empty())
-//RS             .collect()
-//RS     };
-//RS     let output = compact_type(output);
-//RS     (!output.is_empty()).then_some(TypeShape { inputs, output })
-//RS }
-//RS 
-//RS fn signature_shape(signature: &str) -> Option<TypeShape> {
-//RS     let open = signature.find('(')?;
-//RS     let close = signature.rfind(')')?;
-//RS     if close < open {
-//RS         return None;
-//RS     }
-//RS     let inputs = split_top_level(&signature[open + 1..close], ',')
-//RS         .into_iter()
-//RS         .filter(|part| !matches!(part.trim(), "" | "/" | "*"))
-//RS         .map(|part| parameter_type(&part))
-//RS         .collect::<Option<Vec<_>>>()?;
-//RS     let mut tail = signature[close + 1..].trim();
-//RS     if tail.starts_with("-[") {
-//RS         tail = "";
-//RS     } else if let Some(rest) = tail.strip_prefix("->") {
-//RS         tail = rest.trim();
-//RS     }
-//RS     if let Some((return_type, _)) = tail.split_once(" -[") {
-//RS         tail = return_type.trim();
-//RS     }
-//RS     let output = tail.split_whitespace().next().unwrap_or("()");
-//RS     Some(TypeShape {
-//RS         inputs,
-//RS         output: compact_type(output),
-//RS     })
-//RS }
-//RS 
-//RS fn parameter_type(part: &str) -> Option<String> {
-//RS     let part = part.trim();
-//RS     let part = part.strip_prefix("...").unwrap_or(part);
-//RS     let part = part.trim_start_matches(['~', '&', '^']);
-//RS     let (_, ty) = part.split_once(':')?;
-//RS     let ty = ty.split_once(" {").map_or(ty, |(ty, _)| ty).trim();
-//RS     (!ty.is_empty()).then(|| compact_type(ty))
-//RS }
-//RS 
-//RS fn example_shape(example: &str) -> Option<TypeShape> {
-//RS     let (inputs, output) = example.split_once("->")?;
-//RS     let inputs = if inputs.trim().is_empty() || inputs.trim() == "()" {
-//RS         Vec::new()
-//RS     } else {
-//RS         split_top_level(inputs, ',')
-//RS             .into_iter()
-//RS             .map(|value| literal_type(&value))
-//RS             .collect::<Option<Vec<_>>>()?
-//RS     };
-//RS     Some(TypeShape {
-//RS         inputs,
-//RS         output: literal_type(output)?,
-//RS     })
-//RS }
-//RS 
-//RS fn literal_type(value: &str) -> Option<String> {
-//RS     let value = value.trim();
-//RS     if (value.starts_with('"') && value.ends_with('"'))
-//RS         || (value.starts_with('\'') && value.ends_with('\''))
-//RS     {
-//RS         return Some("String".to_string());
-//RS     }
-//RS     if matches!(value, "true" | "false") {
-//RS         return Some("Bool".to_string());
-//RS     }
-//RS     if value.parse::<i64>().is_ok() {
-//RS         return Some("Int".to_string());
-//RS     }
-//RS     if value.parse::<f64>().is_ok() {
-//RS         return Some("Float".to_string());
-//RS     }
-//RS     if value.starts_with('[') && value.ends_with(']') {
-//RS         let inner = &value[1..value.len() - 1];
-//RS         if inner.trim().is_empty() {
-//RS             return Some("[T]".to_string());
-//RS         }
-//RS         let types = split_top_level(inner, ',')
-//RS             .into_iter()
-//RS             .map(|item| literal_type(&item))
-//RS             .collect::<Option<Vec<_>>>()?;
-//RS         let first = types.first()?.clone();
-//RS         return Some(if types.iter().all(|ty| ty == &first) {
-//RS             format!("[{first}]")
-//RS         } else {
-//RS             "[T]".to_string()
-//RS         });
-//RS     }
-//RS     value
-//RS         .split_once('{')
-//RS         .map(|(ty, _)| compact_type(ty))
-//RS         .filter(|ty| !ty.is_empty())
-//RS         .or_else(|| (value == "()" || value == "None").then(|| "T".to_string()))
-//RS         .or_else(|| (!value.is_empty()).then(|| "T".to_string()))
-//RS }
-//RS 
-//RS fn shape_matches(wanted: &TypeShape, candidate: &TypeShape) -> bool {
-//RS     if wanted.inputs.len() != candidate.inputs.len() {
-//RS         return false;
-//RS     }
-//RS     let mut bindings = BTreeMap::new();
-//RS     wanted
-//RS         .inputs
-//RS         .iter()
-//RS         .zip(&candidate.inputs)
-//RS         .all(|(wanted, candidate)| type_matches(wanted, candidate, &mut bindings))
-//RS         && type_matches(&wanted.output, &candidate.output, &mut bindings)
-//RS }
-//RS 
-//RS fn type_matches(wanted: &str, candidate: &str, bindings: &mut BTreeMap<String, String>) -> bool {
-//RS     let wanted = compact_type(wanted);
-//RS     let candidate = compact_type(candidate);
-//RS     if is_type_variable(&wanted) {
-//RS         return match bindings.get(&wanted) {
-//RS             Some(bound) => bound == &candidate,
-//RS             None => {
-//RS                 bindings.insert(wanted, candidate);
-//RS                 true
-//RS             }
-//RS         };
-//RS     }
-//RS     if wanted.starts_with('[')
-//RS         && wanted.ends_with(']')
-//RS         && candidate.starts_with('[')
-//RS         && candidate.ends_with(']')
-//RS     {
-//RS         return type_matches(
-//RS             &wanted[1..wanted.len() - 1],
-//RS             &candidate[1..candidate.len() - 1],
-//RS             bindings,
-//RS         );
-//RS     }
-//RS     if wanted.starts_with('(')
-//RS         && wanted.ends_with(')')
-//RS         && candidate.starts_with('(')
-//RS         && candidate.ends_with(')')
-//RS     {
-//RS         let wanted_parts = split_top_level(&wanted[1..wanted.len() - 1], ',');
-//RS         let candidate_parts = split_top_level(&candidate[1..candidate.len() - 1], ',');
-//RS         return wanted_parts.len() == candidate_parts.len()
-//RS             && wanted_parts
-//RS                 .iter()
-//RS                 .zip(candidate_parts)
-//RS                 .all(|(wanted, candidate)| type_matches(wanted, &candidate, bindings));
-//RS     }
-//RS     if let (Some((wanted_head, wanted_args)), Some((candidate_head, candidate_args))) =
-//RS         (generic_parts(&wanted), generic_parts(&candidate))
-//RS     {
-//RS         return type_names_equal(wanted_head, candidate_head)
-//RS             && wanted_args.len() == candidate_args.len()
-//RS             && wanted_args
-//RS                 .iter()
-//RS                 .zip(candidate_args)
-//RS                 .all(|(wanted, candidate)| type_matches(wanted, &candidate, bindings));
-//RS     }
-//RS     type_names_equal(&wanted, &candidate)
-//RS }
-//RS 
-//RS fn generic_parts(ty: &str) -> Option<(&str, Vec<String>)> {
-//RS     let open = ty.find('<')?;
-//RS     ty.ends_with('>').then(|| {
-//RS         (
-//RS             &ty[..open],
-//RS             split_top_level(&ty[open + 1..ty.len() - 1], ',')
-//RS                 .into_iter()
-//RS                 .map(|part| compact_type(&part))
-//RS                 .collect(),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn is_type_variable(ty: &str) -> bool {
-//RS     ty.len() == 1 && ty.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
-//RS }
-//RS 
-//RS fn type_names_equal(left: &str, right: &str) -> bool {
-//RS     left == right || left.rsplit(['.', ':']).next() == right.rsplit(['.', ':']).next()
-//RS }
-//RS 
-//RS fn compact_type(ty: &str) -> String {
-//RS     ty.chars().filter(|ch| !ch.is_whitespace()).collect()
-//RS }
-//RS 
-//RS fn split_top_level(input: &str, separator: char) -> Vec<String> {
-//RS     let mut parts = Vec::new();
-//RS     let mut start = 0;
-//RS     let mut round = 0;
-//RS     let mut square = 0;
-//RS     let mut angle = 0;
-//RS     for (index, ch) in input.char_indices() {
-//RS         match ch {
-//RS             '(' => round += 1,
-//RS             ')' => round -= 1,
-//RS             '[' => square += 1,
-//RS             ']' => square -= 1,
-//RS             '<' => angle += 1,
-//RS             '>' => angle -= 1,
-//RS             _ => {}
-//RS         }
-//RS         if ch == separator && round == 0 && square == 0 && angle == 0 {
-//RS             parts.push(input[start..index].trim().to_string());
-//RS             start = index + ch.len_utf8();
-//RS         }
-//RS     }
-//RS     parts.push(input[start..].trim().to_string());
-//RS     parts
-//RS }
-//RS 
-//RS fn normalize_text(value: &str) -> String {
-//RS     value.split_whitespace().collect::<Vec<_>>().join(" ")
-//RS }
-//RS 
-//RS fn render_find(mode: &FindMode, query: &str, matches: &[FindMatch], json: bool) {
-//RS     if json {
-//RS         let matches = StatusValue::array(matches.iter().map(|item| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("name", item.name.as_str())
-//RS                     .with("signature", item.signature.as_str())
-//RS                     .with("why", item.why.as_str()),
-//RS             )
-//RS         }));
-//RS         let fields = StatusFields::new()
-//RS             .with("query", query)
-//RS             .with("matches", matches);
-//RS         println!(
-//RS             "{}",
-//RS             StatusEnvelope::new("find", true)
-//RS                 .with_fields(fields)
-//RS                 .json()
-//RS         );
-//RS         return;
-//RS     }
-//RS     let heading = match mode {
-//RS         FindMode::Signature(_) => format!("signature {query}"),
-//RS         FindMode::Effect { name, text } if text.is_empty() => format!("effect {name}"),
-//RS         FindMode::Effect { name, text } => format!("effect {name} / {text}"),
-//RS         FindMode::Example { raw, .. } => format!("example {raw}"),
-//RS         FindMode::Text(text) => format!("text {text}"),
-//RS     };
-//RS     println!("find: {heading}");
-//RS     if matches.is_empty() {
-//RS         println!("  no matches");
-//RS         return;
-//RS     }
-//RS     for (index, item) in matches.iter().enumerate() {
-//RS         println!("  {}. {}", index + 1, item.signature);
-//RS         println!("     why: {}", item.why);
-//RS     }
-//RS }
-// END-PORT-PENDING 0708 Source/CmdSemIndex.rs:118-704
-
-// PORT-PENDING 0708 source-cmdsemindex-module-group-slice-1: Source/CmdCodemod/JSON.rs:1-190
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::collections::BTreeMap;
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum Value {
-//RS     Null,
-//RS     Bool(bool),
-//RS     Number(u64),
-//RS     String(String),
-//RS     Array(Vec<Value>),
-//RS     Object(BTreeMap<String, Value>),
-//RS }
-//RS 
-//RS pub fn parse(input: &str) -> Result<Value, String> {
-//RS     let mut p = Parser {
-//RS         bytes: input.as_bytes(),
-//RS         at: 0,
-//RS     };
-//RS     let value = p.value()?;
-//RS     p.ws();
-//RS     if p.at != p.bytes.len() {
-//RS         return Err(format!("unexpected data at byte {}", p.at));
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS struct Parser<'a> {
-//RS     bytes: &'a [u8],
-//RS     at: usize,
-//RS }
-//RS impl Parser<'_> {
-//RS     fn ws(&mut self) {
-//RS         while self.at < self.bytes.len() && self.bytes[self.at].is_ascii_whitespace() {
-//RS             self.at += 1;
-//RS         }
-//RS     }
-//RS     fn value(&mut self) -> Result<Value, String> {
-//RS         self.ws();
-//RS         match self.bytes.get(self.at).copied() {
-//RS             Some(b'{') => self.object(),
-//RS             Some(b'[') => self.array(),
-//RS             Some(b'"') => self.string().map(Value::String),
-//RS             Some(b't') => {
-//RS                 self.word(b"true")?;
-//RS                 Ok(Value::Bool(true))
-//RS             }
-//RS             Some(b'f') => {
-//RS                 self.word(b"false")?;
-//RS                 Ok(Value::Bool(false))
-//RS             }
-//RS             Some(b'n') => {
-//RS                 self.word(b"null")?;
-//RS                 Ok(Value::Null)
-//RS             }
-//RS             Some(b'0'..=b'9') => self.number().map(Value::Number),
-//RS             _ => Err(format!("expected JSON value at byte {}", self.at)),
-//RS         }
-//RS     }
-//RS     fn word(&mut self, word: &[u8]) -> Result<(), String> {
-//RS         if self.bytes.get(self.at..self.at + word.len()) == Some(word) {
-//RS             self.at += word.len();
-//RS             Ok(())
-//RS         } else {
-//RS             Err(format!("expected JSON value at byte {}", self.at))
-//RS         }
-//RS     }
-//RS     fn number(&mut self) -> Result<u64, String> {
-//RS         let start = self.at;
-//RS         while self.bytes.get(self.at).is_some_and(u8::is_ascii_digit) {
-//RS             self.at += 1;
-//RS         }
-//RS         std::str::from_utf8(&self.bytes[start..self.at])
-//RS             .ok()
-//RS             .and_then(|s| s.parse().ok())
-//RS             .ok_or_else(|| format!("invalid integer at byte {start}"))
-//RS     }
-//RS     fn string(&mut self) -> Result<String, String> {
-//RS         self.at += 1;
-//RS         let mut out = String::new();
-//RS         while let Some(&b) = self.bytes.get(self.at) {
-//RS             self.at += 1;
-//RS             match b {
-//RS                 b'"' => return Ok(out),
-//RS                 b'\\' => {
-//RS                     let esc = *self.bytes.get(self.at).ok_or("unfinished JSON escape")?;
-//RS                     self.at += 1;
-//RS                     match esc {
-//RS                         b'"' => out.push('"'),
-//RS                         b'\\' => out.push('\\'),
-//RS                         b'/' => out.push('/'),
-//RS                         b'b' => out.push('\u{8}'),
-//RS                         b'f' => out.push('\u{c}'),
-//RS                         b'n' => out.push('\n'),
-//RS                         b'r' => out.push('\r'),
-//RS                         b't' => out.push('\t'),
-//RS                         b'u' => {
-//RS                             let raw = self
-//RS                                 .bytes
-//RS                                 .get(self.at..self.at + 4)
-//RS                                 .ok_or("unfinished unicode escape")?;
-//RS                             let hex = std::str::from_utf8(raw).map_err(|_| "bad unicode escape")?;
-//RS                             let n =
-//RS                                 u16::from_str_radix(hex, 16).map_err(|_| "bad unicode escape")?;
-//RS                             self.at += 4;
-//RS                             let c = char::from_u32(n as u32).ok_or("bad unicode scalar")?;
-//RS                             out.push(c);
-//RS                         }
-//RS                         _ => return Err(format!("unknown JSON escape at byte {}", self.at - 1)),
-//RS                     }
-//RS                 }
-//RS                 0..=31 => return Err("control byte in JSON string".into()),
-//RS                 _ if b < 128 => out.push(b as char),
-//RS                 _ => {
-//RS                     self.at -= 1;
-//RS                     let rest =
-//RS                         std::str::from_utf8(&self.bytes[self.at..]).map_err(|_| "invalid UTF-8")?;
-//RS                     let c = rest.chars().next().ok_or("invalid UTF-8")?;
-//RS                     out.push(c);
-//RS                     self.at += c.len_utf8();
-//RS                 }
-//RS             }
-//RS         }
-//RS         Err("unterminated JSON string".into())
-//RS     }
-//RS     fn array(&mut self) -> Result<Value, String> {
-//RS         self.at += 1;
-//RS         let mut out = Vec::new();
-//RS         self.ws();
-//RS         if self.bytes.get(self.at) == Some(&b']') {
-//RS             self.at += 1;
-//RS             return Ok(Value::Array(out));
-//RS         }
-//RS         loop {
-//RS             out.push(self.value()?);
-//RS             self.ws();
-//RS             match self.bytes.get(self.at) {
-//RS                 Some(b',') => self.at += 1,
-//RS                 Some(b']') => {
-//RS                     self.at += 1;
-//RS                     break;
-//RS                 }
-//RS                 _ => return Err(format!("expected `,` or `]` at byte {}", self.at)),
-//RS             }
-//RS         }
-//RS         Ok(Value::Array(out))
-//RS     }
-//RS     fn object(&mut self) -> Result<Value, String> {
-//RS         self.at += 1;
-//RS         let mut out = BTreeMap::new();
-//RS         self.ws();
-//RS         if self.bytes.get(self.at) == Some(&b'}') {
-//RS             self.at += 1;
-//RS             return Ok(Value::Object(out));
-//RS         }
-//RS         loop {
-//RS             self.ws();
-//RS             if self.bytes.get(self.at) != Some(&b'"') {
-//RS                 return Err(format!("expected object key at byte {}", self.at));
-//RS             }
-//RS             let key = self.string()?;
-//RS             self.ws();
-//RS             if self.bytes.get(self.at) != Some(&b':') {
-//RS                 return Err(format!("expected `:` at byte {}", self.at));
-//RS             }
-//RS             self.at += 1;
-//RS             if out.insert(key.clone(), self.value()?).is_some() {
-//RS                 return Err(format!("duplicate field `{key}`"));
-//RS             }
-//RS             self.ws();
-//RS             match self.bytes.get(self.at) {
-//RS                 Some(b',') => self.at += 1,
-//RS                 Some(b'}') => {
-//RS                     self.at += 1;
-//RS                     break;
-//RS                 }
-//RS                 _ => return Err(format!("expected `,` or `}}` at byte {}", self.at)),
-//RS             }
-//RS         }
-//RS         Ok(Value::Object(out))
-//RS     }
-//RS }
-//RS 
-//RS impl Value {
-//RS     pub fn object(self) -> Result<BTreeMap<String, Value>, String> {
-//RS         if let Value::Object(v) = self {
-//RS             Ok(v)
-//RS         } else {
-//RS             Err("expected JSON object".into())
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0708 Source/CmdCodemod/JSON.rs:1-190
-
-// PORT-PENDING 0708 source-cmdsemindex-module-group-slice-1: Source/CmdCodemod/Transaction.rs:2409-3185
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS struct Journal {
-//RS     records: Vec<Record>,
-//RS     log_path: PathBuf,
-//RS     log: Vec<u8>,
-//RS }
-//RS fn parse_journal(raw: &str) -> Journal {
-//RS     let root = super::JSON::parse(raw)
-//RS         .and_then(|v| v.object())
-//RS         .unwrap_or_else(|e| fail(&format!("invalid recovery journal: {e}")));
-//RS     let files = match root.get("files") {
-//RS         Some(super::JSON::Value::Array(v)) => v,
-//RS         _ => fail("invalid recovery journal files"),
-//RS     };
-//RS     let string = |key| match root.get(key) {
-//RS         Some(super::JSON::Value::String(value)) => value.clone(),
-//RS         _ => fail(&format!("recovery journal missing `{key}`")),
-//RS     };
-//RS     let records = files
-//RS         .iter()
-//RS         .map(|v| {
-//RS             let o = match v {
-//RS                 super::JSON::Value::Object(o) => o,
-//RS                 _ => fail("invalid recovery journal record"),
-//RS             };
-//RS             let s = |k| match o.get(k) {
-//RS                 Some(super::JSON::Value::String(s)) => s.clone(),
-//RS                 _ => fail(&format!("recovery journal missing `{k}`")),
-//RS             };
-//RS             let identity = |key| match o.get(key) {
-//RS                 Some(super::JSON::Value::Array(values)) if values.len() == 2 => {
-//RS                     let number = |value: &super::JSON::Value| match value {
-//RS                         super::JSON::Value::Number(value) => *value,
-//RS                         _ => fail(&format!("recovery journal `{key}` identity is invalid")),
-//RS                     };
-//RS                     (number(&values[0]), number(&values[1]))
-//RS                 }
-//RS                 _ => fail(&format!("recovery journal missing `{key}` identity")),
-//RS             };
-//RS             Record {
-//RS                 path: PathBuf::from(s("path")),
-//RS                 temp: PathBuf::from(s("temp")),
-//RS                 before: unhex(&s("before")),
-//RS                 after: unhex(&s("after")),
-//RS                 destination_id: identity("destination_id"),
-//RS                 temp_id: identity("temp_id"),
-//RS                 #[cfg(unix)]
-//RS                 handles: None,
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     Journal {
-//RS         records,
-//RS         log_path: PathBuf::from(string("log_path")),
-//RS         log: unhex(&string("log")),
-//RS     }
-//RS }
-//RS #[cfg(not(unix))]
-//RS fn write_new_sync(path: &Path, bytes: &[u8]) {
-//RS     let mut f = OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(path)
-//RS         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
-//RS     f.write_all(bytes)
-//RS         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
-//RS     f.sync_all()
-//RS         .unwrap_or_else(|e| fail(&format!("could not sync `{}`: {e}", path.display())));
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn write_new_at(
-//RS     dir: &File,
-//RS     file_name: &std::ffi::OsStr,
-//RS     bytes: &[u8],
-//RS ) -> std::io::Result<(u64, u64)> {
-//RS     use std::ffi::CString;
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::MetadataExt;
-//RS     const O_WRONLY: i32 = 1;
-//RS     const O_CREAT: i32 = 0o100;
-//RS     const O_EXCL: i32 = 0o200;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS     }
-//RS     let name = CString::new(file_name.as_bytes()).map_err(|_| {
-//RS         std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name")
-//RS     })?;
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             dir.as_raw_fd(),
-//RS             name.as_ptr(),
-//RS             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS             0o600,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     let mut file = unsafe { File::from_raw_fd(fd) };
-//RS     file.write_all(bytes)?;
-//RS     file.sync_all()?;
-//RS     let metadata = file.metadata()?;
-//RS     if !metadata.is_file() || metadata.nlink() != 1 {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "created codemod file is linked or not regular",
-//RS         ));
-//RS     }
-//RS     dir.sync_all()?;
-//RS     Ok((metadata.dev(), metadata.ino()))
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn unlink_at_checked(
-//RS     dir: &File,
-//RS     file_name: &std::ffi::OsStr,
-//RS     expected: (u64, u64),
-//RS ) -> std::io::Result<()> {
-//RS     use std::ffi::CString;
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::MetadataExt;
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS         fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
-//RS     }
-//RS     let name = CString::new(file_name.as_bytes()).map_err(|_| {
-//RS         std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name")
-//RS     })?;
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             dir.as_raw_fd(),
-//RS             name.as_ptr(),
-//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS             0,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     let file = unsafe { File::from_raw_fd(fd) };
-//RS     let metadata = file.metadata()?;
-//RS     if (metadata.dev(), metadata.ino()) != expected || metadata.nlink() != 1 {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "file identity changed before handle-relative removal",
-//RS         ));
-//RS     }
-//RS     if unsafe { unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     dir.sync_all()
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn write_new_at(
-//RS     _dir: &File,
-//RS     _file_name: &std::ffi::OsStr,
-//RS     _bytes: &[u8],
-//RS ) -> std::io::Result<(u64, u64)> {
-//RS     Err(std::io::Error::new(
-//RS         std::io::ErrorKind::Unsupported,
-//RS         "handle-relative create unavailable",
-//RS     ))
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn unlink_at_checked(
-//RS     _dir: &File,
-//RS     _file_name: &std::ffi::OsStr,
-//RS     _expected: (u64, u64),
-//RS ) -> std::io::Result<()> {
-//RS     Err(std::io::Error::new(
-//RS         std::io::ErrorKind::Unsupported,
-//RS         "handle-relative removal unavailable",
-//RS     ))
-//RS }
-//RS #[cfg(unix)]
-//RS fn replace_journal_generation(
-//RS     lock: &Lock,
-//RS     tx: &str,
-//RS     generation: usize,
-//RS     bytes: &[u8],
-//RS     expected: Option<(u64, u64)>,
-//RS ) -> (u64, u64) {
-//RS     use std::ffi::{CString, OsStr};
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::MetadataExt;
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_WRONLY: i32 = 1;
-//RS     const O_CREAT: i32 = 0o100;
-//RS     const O_EXCL: i32 = 0o200;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS         fn linkat(
-//RS             olddirfd: i32,
-//RS             oldpath: *const i8,
-//RS             newdirfd: i32,
-//RS             newpath: *const i8,
-//RS             flags: i32,
-//RS         ) -> i32;
-//RS         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
-//RS         fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
-//RS     }
-//RS     fn name(value: &OsStr) -> std::io::Result<CString> {
-//RS         CString::new(value.as_bytes()).map_err(|_| {
-//RS             std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in journal name")
-//RS         })
-//RS     }
-//RS     fn open(dir: &File, name: &CString) -> std::io::Result<File> {
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 dir.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         Ok(unsafe { File::from_raw_fd(fd) })
-//RS     }
-//RS     let staged_name = name(OsStr::new(&format!(
-//RS         ".transaction-{tx}-{generation}.journal.tmp"
-//RS     )))
-//RS     .unwrap_or_else(|e| fail(&format!("invalid journal stage name: {e}")));
-//RS     let journal_name = name(OsStr::new("transaction.journal")).unwrap();
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             lock._file.as_raw_fd(),
-//RS             staged_name.as_ptr(),
-//RS             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS             0o600,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         fail(&format!(
-//RS             "could not create journal generation: {}",
-//RS             std::io::Error::last_os_error()
-//RS         ));
-//RS     }
-//RS     let mut staged = unsafe { File::from_raw_fd(fd) };
-//RS     staged
-//RS         .write_all(bytes)
-//RS         .unwrap_or_else(|e| fail(&format!("could not write journal generation: {e}")));
-//RS     staged
-//RS         .sync_all()
-//RS         .unwrap_or_else(|e| fail(&format!("could not sync journal generation: {e}")));
-//RS     let staged_meta = staged
-//RS         .metadata()
-//RS         .unwrap_or_else(|e| fail(&format!("could not identify journal generation: {e}")));
-//RS     if !staged_meta.is_file() || staged_meta.nlink() != 1 {
-//RS         fail("journal generation is linked or not regular")
-//RS     }
-//RS     let staged_id = (staged_meta.dev(), staged_meta.ino());
-//RS     if let Some(expected) = expected {
-//RS         let current = open(&lock._file, &journal_name)
-//RS             .unwrap_or_else(|e| fail(&format!("could not reopen current journal: {e}")));
-//RS         let metadata = current
-//RS             .metadata()
-//RS             .unwrap_or_else(|e| fail(&format!("could not identify current journal: {e}")));
-//RS         if (metadata.dev(), metadata.ino()) != expected || metadata.nlink() != 1 {
-//RS             fail("recovery journal identity changed before generation publish")
-//RS         }
-//RS         if unsafe {
-//RS             renameat(
-//RS                 lock._file.as_raw_fd(),
-//RS                 staged_name.as_ptr(),
-//RS                 lock._file.as_raw_fd(),
-//RS                 journal_name.as_ptr(),
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             fail(&format!(
-//RS                 "could not publish recovery journal generation: {}",
-//RS                 std::io::Error::last_os_error()
-//RS             ));
-//RS         }
-//RS     } else {
-//RS         if unsafe {
-//RS             linkat(
-//RS                 lock._file.as_raw_fd(),
-//RS                 staged_name.as_ptr(),
-//RS                 lock._file.as_raw_fd(),
-//RS                 journal_name.as_ptr(),
-//RS                 0,
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             fail(&format!(
-//RS                 "could not publish first recovery journal: {}",
-//RS                 std::io::Error::last_os_error()
-//RS             ));
-//RS         }
-//RS         if unsafe { unlinkat(lock._file.as_raw_fd(), staged_name.as_ptr(), 0) } != 0 {
-//RS             fail(&format!(
-//RS                 "could not remove linked journal stage: {}",
-//RS                 std::io::Error::last_os_error()
-//RS             ));
-//RS         }
-//RS     }
-//RS     let published = open(&lock._file, &journal_name)
-//RS         .unwrap_or_else(|e| fail(&format!("could not reopen published journal: {e}")));
-//RS     let metadata = published
-//RS         .metadata()
-//RS         .unwrap_or_else(|e| fail(&format!("could not identify published journal: {e}")));
-//RS     if (metadata.dev(), metadata.ino()) != staged_id || metadata.nlink() != 1 {
-//RS         fail("published recovery journal identity does not match staged generation")
-//RS     }
-//RS     lock._file
-//RS         .sync_all()
-//RS         .unwrap_or_else(|e| fail(&format!("could not sync codemod directory: {e}")));
-//RS     staged_id
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn replace_journal_generation(
-//RS     _lock: &Lock,
-//RS     _tx: &str,
-//RS     _generation: usize,
-//RS     _bytes: &[u8],
-//RS     _expected: Option<(u64, u64)>,
-//RS ) -> (u64, u64) {
-//RS     fail("handle-relative journal publication is unavailable on this platform")
-//RS }
-//RS #[cfg(unix)]
-//RS fn secure_replace(
-//RS     project: &Path,
-//RS     temp: &Path,
-//RS     path: &Path,
-//RS     expected: &[u8],
-//RS ) -> std::io::Result<()> {
-//RS     use std::ffi::{CString, OsStr};
-//RS     use std::io::Read;
-//RS     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::OpenOptionsExt;
-//RS 
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_DIRECTORY: i32 = 0o200000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
-//RS     }
-//RS     fn name(value: &OsStr) -> std::io::Result<CString> {
-//RS         CString::new(value.as_bytes()).map_err(|_| {
-//RS             std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path")
-//RS         })
-//RS     }
-//RS 
-//RS     let destination_identity = path_identity(path)?;
-//RS     let temp_identity = path_identity(temp)?;
-//RS     if destination_identity == temp_identity {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "temp aliases destination",
-//RS         ));
-//RS     }
-//RS 
-//RS     if temp.parent() != path.parent() {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::InvalidInput,
-//RS             "codemod temp is not beside destination",
-//RS         ));
-//RS     }
-//RS     let relative = path.strip_prefix(project).map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "destination escapes project",
-//RS         )
-//RS     })?;
-//RS     let root = OpenOptions::new()
-//RS         .read(true)
-//RS         .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS         .open(project)?;
-//RS     let mut held = Vec::<OwnedFd>::new();
-//RS     let mut dirfd = root.as_raw_fd();
-//RS     for component in relative.parent().into_iter().flat_map(Path::components) {
-//RS         let std::path::Component::Normal(part) = component else {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidInput,
-//RS                 "non-normal codemod path",
-//RS             ));
-//RS         };
-//RS         let part = name(part)?;
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 dirfd,
-//RS                 part.as_ptr(),
-//RS                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         held.push(unsafe { OwnedFd::from_raw_fd(fd) });
-//RS         dirfd = held.last().unwrap().as_raw_fd();
-//RS     }
-//RS     let final_name = name(relative.file_name().ok_or_else(|| {
-//RS         std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
-//RS     })?)?;
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             dirfd,
-//RS             final_name.as_ptr(),
-//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS             0,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     let mut destination = unsafe { File::from_raw_fd(fd) };
-//RS     use std::os::unix::fs::MetadataExt;
-//RS     if !destination.metadata()?.is_file() || destination.metadata()?.nlink() != 1 {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "destination is not regular file",
-//RS         ));
-//RS     }
-//RS     let mut current = Vec::new();
-//RS     destination.read_to_end(&mut current)?;
-//RS     if current != expected {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "destination drifted before handle-relative rename",
-//RS         ));
-//RS     }
-//RS     let temp_name = name(temp.file_name().ok_or_else(|| {
-//RS         std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
-//RS     })?)?;
-//RS     let temp_check = unsafe {
-//RS         openat(
-//RS             dirfd,
-//RS             temp_name.as_ptr(),
-//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS             0,
-//RS         )
-//RS     };
-//RS     if temp_check < 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     let temp_check = unsafe { File::from_raw_fd(temp_check) };
-//RS     if temp_check.metadata()?.nlink() != 1 {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "temp has multiple links",
-//RS         ));
-//RS     }
-//RS     if unsafe { renameat(dirfd, temp_name.as_ptr(), dirfd, final_name.as_ptr()) } != 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn secure_replace(
-//RS     project: &Path,
-//RS     temp: &Path,
-//RS     path: &Path,
-//RS     expected: &[u8],
-//RS ) -> std::io::Result<()> {
-//RS     use std::ffi::c_void;
-//RS     use std::io::Read;
-//RS     use std::os::windows::ffi::OsStrExt;
-//RS     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-//RS 
-//RS     type Handle = *mut c_void;
-//RS     if path_identity(path)? == path_identity(temp)? {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "temp aliases destination",
-//RS         ));
-//RS     }
-//RS     const GENERIC_READ: u32 = 0x8000_0000;
-//RS     const GENERIC_WRITE: u32 = 0x4000_0000;
-//RS     const DELETE: u32 = 0x0001_0000;
-//RS     const SHARE_ALL: u32 = 0x0000_0007;
-//RS     const OPEN_EXISTING: u32 = 3;
-//RS     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-//RS     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-//RS     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-//RS     const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
-//RS     const FILE_RENAME_INFO_CLASS: i32 = 3;
-//RS     const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
-//RS     #[repr(C)]
-//RS     struct FileAttributeTagInfo {
-//RS         attributes: u32,
-//RS         reparse_tag: u32,
-//RS     }
-//RS     #[repr(C)]
-//RS     struct FileRenameInfo {
-//RS         replace_if_exists: i32,
-//RS         root_directory: Handle,
-//RS         file_name_length: u32,
-//RS         file_name: [u16; 1],
-//RS     }
-//RS     extern "system" {
-//RS         fn CreateFileW(
-//RS             name: *const u16,
-//RS             access: u32,
-//RS             share: u32,
-//RS             security: *mut c_void,
-//RS             creation: u32,
-//RS             flags: u32,
-//RS             template: Handle,
-//RS         ) -> Handle;
-//RS         fn GetFileInformationByHandleEx(
-//RS             file: Handle,
-//RS             class: i32,
-//RS             info: *mut c_void,
-//RS             size: u32,
-//RS         ) -> i32;
-//RS         fn SetFileInformationByHandle(
-//RS             file: Handle,
-//RS             class: i32,
-//RS             info: *mut c_void,
-//RS             size: u32,
-//RS         ) -> i32;
-//RS         fn GetFinalPathNameByHandleW(
-//RS             file: Handle,
-//RS             path: *mut u16,
-//RS             path_len: u32,
-//RS             flags: u32,
-//RS         ) -> u32;
-//RS         fn FlushFileBuffers(file: Handle) -> i32;
-//RS     }
-//RS     fn wide(path: &std::ffi::OsStr) -> Vec<u16> {
-//RS         path.encode_wide().chain(std::iter::once(0)).collect()
-//RS     }
-//RS     fn open_handle(path: &Path, access: u32, directory: bool) -> std::io::Result<OwnedHandle> {
-//RS         let name = wide(path.as_os_str());
-//RS         let mut flags = FILE_FLAG_OPEN_REPARSE_POINT;
-//RS         if directory {
-//RS             flags |= FILE_FLAG_BACKUP_SEMANTICS;
-//RS         }
-//RS         let raw = unsafe {
-//RS             CreateFileW(
-//RS                 name.as_ptr(),
-//RS                 access,
-//RS                 SHARE_ALL,
-//RS                 std::ptr::null_mut(),
-//RS                 OPEN_EXISTING,
-//RS                 flags,
-//RS                 std::ptr::null_mut(),
-//RS             )
-//RS         };
-//RS         if raw == INVALID_HANDLE_VALUE {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         let owned = unsafe { OwnedHandle::from_raw_handle(raw) };
-//RS         let mut tag = FileAttributeTagInfo {
-//RS             attributes: 0,
-//RS             reparse_tag: 0,
-//RS         };
-//RS         if unsafe {
-//RS             GetFileInformationByHandleEx(
-//RS                 owned.as_raw_handle(),
-//RS                 FILE_ATTRIBUTE_TAG_INFO_CLASS,
-//RS                 (&mut tag as *mut FileAttributeTagInfo).cast(),
-//RS                 std::mem::size_of::<FileAttributeTagInfo>() as u32,
-//RS             )
-//RS         } == 0
-//RS         {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         if tag.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "codemod path contains a Windows reparse point",
-//RS             ));
-//RS         }
-//RS         Ok(owned)
-//RS     }
-//RS     fn final_path(handle: Handle) -> std::io::Result<String> {
-//RS         let needed = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, 0) };
-//RS         if needed == 0 {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         let mut buffer = vec![0u16; needed as usize];
-//RS         let written = unsafe {
-//RS             GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0)
-//RS         };
-//RS         if written == 0 || written as usize >= buffer.len() {
-//RS             return Err(std::io::Error::last_os_error());
-//RS         }
-//RS         buffer.truncate(written as usize);
-//RS         Ok(String::from_utf16_lossy(&buffer).to_lowercase())
-//RS     }
-//RS 
-//RS     let relative = path.strip_prefix(project).map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "destination escapes project",
-//RS         )
-//RS     })?;
-//RS     let mut current_path = project.to_path_buf();
-//RS     for component in relative.parent().into_iter().flat_map(Path::components) {
-//RS         let std::path::Component::Normal(part) = component else {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidInput,
-//RS                 "non-normal codemod path",
-//RS             ));
-//RS         };
-//RS         current_path.push(part);
-//RS         let meta = fs::symlink_metadata(&current_path)?;
-//RS         if meta.file_type().is_symlink() || !meta.is_dir() {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "codemod parent is not a real directory",
-//RS             ));
-//RS         }
-//RS     }
-//RS     let project_handle = open_handle(project, GENERIC_READ | GENERIC_WRITE, true)?;
-//RS     let parent = open_handle(
-//RS         path.parent().unwrap_or(project),
-//RS         GENERIC_READ | GENERIC_WRITE,
-//RS         true,
-//RS     )?;
-//RS     let destination = open_handle(path, GENERIC_READ, false)?;
-//RS     let project_final = final_path(project_handle.as_raw_handle())?;
-//RS     let parent_final = final_path(parent.as_raw_handle())?;
-//RS     let destination_final = final_path(destination.as_raw_handle())?;
-//RS     let project_prefix = format!("{}\\", project_final.trim_end_matches(['\\', '/']));
-//RS     if parent_final != project_final && !parent_final.starts_with(&project_prefix) {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "opened destination parent escapes project handle",
-//RS         ));
-//RS     }
-//RS     let destination_parent = destination_final
-//RS         .rsplit_once(['\\', '/'])
-//RS         .map(|(parent, _)| parent)
-//RS         .unwrap_or("");
-//RS     if destination_parent.trim_end_matches(['\\', '/'])
-//RS         != parent_final.trim_end_matches(['\\', '/'])
-//RS     {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "destination does not belong to opened parent directory",
-//RS         ));
-//RS     }
-//RS     let mut destination = File::from(destination);
-//RS     let mut current = Vec::new();
-//RS     destination.read_to_end(&mut current)?;
-//RS     if current != expected {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "destination drifted before rename",
-//RS         ));
-//RS     }
-//RS     let temp = open_handle(temp, GENERIC_READ | DELETE, false)?;
-//RS     let temp_final = final_path(temp.as_raw_handle())?;
-//RS     let temp_parent = temp_final
-//RS         .rsplit_once(['\\', '/'])
-//RS         .map(|(parent, _)| parent)
-//RS         .unwrap_or("");
-//RS     if temp_parent.trim_end_matches(['\\', '/']) != parent_final.trim_end_matches(['\\', '/'])
-//RS         || (temp_parent != project_final && !temp_parent.starts_with(&project_prefix))
-//RS     {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "opened temp does not belong to opened project parent directory",
-//RS         ));
-//RS     }
-//RS     let file_name = path
-//RS         .file_name()
-//RS         .ok_or_else(|| {
-//RS             std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
-//RS         })?
-//RS         .encode_wide()
-//RS         .collect::<Vec<_>>();
-//RS     let bytes = file_name.len() * std::mem::size_of::<u16>();
-//RS     let size = std::mem::size_of::<FileRenameInfo>() + bytes.saturating_sub(2);
-//RS     let mut buffer = vec![0u64; size.div_ceil(std::mem::size_of::<u64>())];
-//RS     let info = buffer.as_mut_ptr().cast::<FileRenameInfo>();
-//RS     unsafe {
-//RS         (*info).replace_if_exists = 1;
-//RS         (*info).root_directory = parent.as_raw_handle();
-//RS         (*info).file_name_length = bytes as u32;
-//RS         std::ptr::copy_nonoverlapping(
-//RS             file_name.as_ptr(),
-//RS             (*info).file_name.as_mut_ptr(),
-//RS             file_name.len(),
-//RS         );
-//RS     }
-//RS     if unsafe {
-//RS         SetFileInformationByHandle(
-//RS             temp.as_raw_handle(),
-//RS             FILE_RENAME_INFO_CLASS,
-//RS             buffer.as_mut_ptr().cast(),
-//RS             size as u32,
-//RS         )
-//RS     } == 0
-//RS     {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     if unsafe { FlushFileBuffers(parent.as_raw_handle()) } == 0 {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     if parent_final != project_final
-//RS         && unsafe { FlushFileBuffers(project_handle.as_raw_handle()) } == 0
-//RS     {
-//RS         return Err(std::io::Error::last_os_error());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(all(not(unix), not(windows)))]
-//RS fn secure_replace(
-//RS     project: &Path,
-//RS     temp: &Path,
-//RS     path: &Path,
-//RS     expected: &[u8],
-//RS ) -> std::io::Result<()> {
-//RS     let relative = path.strip_prefix(project).map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "destination escapes project",
-//RS         )
-//RS     })?;
-//RS     let mut current_path = project.to_path_buf();
-//RS     for component in relative.parent().into_iter().flat_map(Path::components) {
-//RS         let std::path::Component::Normal(part) = component else {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidInput,
-//RS                 "non-normal codemod path",
-//RS             ));
-//RS         };
-//RS         current_path.push(part);
-//RS         let meta = fs::symlink_metadata(&current_path)?;
-//RS         if meta.file_type().is_symlink() || !meta.is_dir() {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "codemod parent is not a real directory",
-//RS             ));
-//RS         }
-//RS     }
-//RS     if fs::read(path)? != expected {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "destination drifted before rename",
-//RS         ));
-//RS     }
-//RS     fs::rename(temp, path)
-//RS }
-//RS fn now_nanos() -> u128 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_nanos()
-//RS }
-//RS fn unhex(s: &str) -> Vec<u8> {
-//RS     if s.len() % 2 != 0 {
-//RS         fail("invalid recovery journal byte encoding");
-//RS     }
-//RS     (0..s.len())
-//RS         .step_by(2)
-//RS         .map(|i| {
-//RS             u8::from_str_radix(&s[i..i + 2], 16)
-//RS                 .unwrap_or_else(|_| fail("invalid recovery journal byte encoding"))
-//RS         })
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0708 Source/CmdCodemod/Transaction.rs:2409-3185
-
+// Rust: Source/CmdCodemod/JSON.rs:1-190
+// Canonical Change/Json.jet retained: Value -> JetCLICodemodJSONValue (:7);
+// Parser -> JetCLICodemodJSONParser (:29); parse :13 -> jet_cli_codemod_json_parse (:45);
+// ws :31 -> jet_cli_codemod_json_ws (:54); value :36 -> jet_cli_codemod_json_value (:63);
+// word :58 -> jet_cli_codemod_json_word (:86); number :66 -> jet_cli_codemod_json_number (:97);
+// string :76 -> jet_cli_codemod_json_string (:163); array :124 -> jet_cli_codemod_json_array (:202);
+// object :146 -> jet_cli_codemod_json_object (:229); Value.object :183 -> jet_cli_codemod_json_object_fields (:266).
+// Rust: Source/CmdCodemod/Transaction.rs:2409-3185
+// Translation extends canonical Change/Transaction in Change/TransactionPaths02.jet;
+// all journal, handle-relative publication and platform replacement bodies live there.

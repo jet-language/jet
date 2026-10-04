@@ -1,1350 +1,649 @@
-// PORT-PENDING 0705 source-cmdprove-slice-3619: Source/CmdProve.rs:3619-4964
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn reject_symlink_ancestors(path: &Path) -> Result<(), String> {
-//RS     let mut current = if path.is_absolute() {
-//RS         PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .map_err(|error| format!("couldn't resolve proof target parent: {error}"))?
-//RS     };
-//RS     for component in path.components() {
-//RS         match component {
-//RS             std::path::Component::RootDir => {
-//RS                 current = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
-//RS             }
-//RS             std::path::Component::CurDir => {}
-//RS             std::path::Component::ParentDir => {
-//RS                 current.pop();
-//RS             }
-//RS             std::path::Component::Normal(name) => current.push(name),
-//RS             std::path::Component::Prefix(_) => {
-//RS                 return Err(format!(
-//RS                     "proof target {} has an unsupported path prefix",
-//RS                     path.display()
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let metadata = fs::symlink_metadata(&current).map_err(|error| {
-//RS             format!(
-//RS                 "couldn't inspect proof target ancestor {}: {error}",
-//RS                 current.display()
-//RS             )
-//RS         })?;
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!(
-//RS                 "proof target {} must not pass through symlink {}",
-//RS                 path.display(),
-//RS                 current.display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn append_proof_field(bytes: &mut Vec<u8>, label: &str, value: &[u8]) {
-//RS     bytes.extend_from_slice(&(label.len() as u64).to_be_bytes());
-//RS     bytes.extend_from_slice(label.as_bytes());
-//RS     bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
-//RS     bytes.extend_from_slice(value);
-//RS }
-//RS 
-//RS fn proof_digest(schema: &str, fields: &[(String, Vec<u8>)]) -> String {
-//RS     let mut bytes = Vec::new();
-//RS     append_proof_field(&mut bytes, "schema", schema.as_bytes());
-//RS     for (label, value) in fields {
-//RS         append_proof_field(&mut bytes, label, value);
-//RS     }
-//RS     jet::SHA256::sha256_hex(&bytes)
-//RS }
-//RS 
-//RS fn proof_digest_or_none(schema: &str, fields: &[(String, Vec<u8>)]) -> String {
-//RS     if fields.is_empty() {
-//RS         proof_digest(schema, &[("none".to_string(), b"<none>".to_vec())])
-//RS     } else {
-//RS         proof_digest(schema, fields)
-//RS     }
-//RS }
-//RS 
-//RS fn is_lock_identity_path(path: &str) -> bool {
-//RS     path == ".jet/lock"
-//RS         || path.ends_with("/.jet/lock")
-//RS         || matches!(path.rsplit('/').next(), Some("jet.lock" | "jet.lock.json"))
-//RS }
-//RS 
-//RS fn is_build_identity_path(path: &str) -> bool {
-//RS     matches!(path.rsplit('/').next(), Some("package.jet" | "build.jet"))
-//RS }
-//RS 
-//RS /// Return the content-derived compiler identity emitted by `build.rs`.
-//RS ///
-//RS /// `build.rs` hashes `jet.compiler.v2`, verbose rustc identity and build
-//RS /// facts, then every byte and relative path under the Cargo files, `Source`,
-//RS /// Jet crates, reference docs, examples, and the compatibility oracle.
-//RS pub(crate) fn proof_compiler_digest() -> String {
-//RS     env!("JET_COMPILER_BUILD_ID").to_string()
-//RS }
-//RS 
-//RS fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, String> {
-//RS     // `JET_COMPILER_BUILD_ID` is the content-derived compiler identity from
-//RS     // `build.rs`; do not hash the running debug executable through a bounded
-//RS     // tree-input reader.
-//RS     let compiler_digest = proof_compiler_digest();
-//RS 
-//RS     let rustc_identity = match Command::new("rustc").args(["-vV"]).output() {
-//RS         Ok(rustc) if rustc.status.success() => String::from_utf8(rustc.stdout)
-//RS             .map_err(|_| "rustc identity is not UTF-8".to_string())?,
-//RS         Ok(_) => return Err("cannot identify rustc: `rustc -vV` failed".to_string()),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             "<unavailable: rustc executable not installed>".to_string()
-//RS         }
-//RS         Err(error) => return Err(format!("cannot identify rustc: {error}")),
-//RS     };
-//RS     let fields = vec![
-//RS         ("compiler".to_string(), compiler_digest.as_bytes().to_vec()),
-//RS         (
-//RS             "jet_version".to_string(),
-//RS             env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
-//RS         ),
-//RS         (
-//RS             "compiler_build_id".to_string(),
-//RS             env!("JET_COMPILER_BUILD_ID").as_bytes().to_vec(),
-//RS         ),
-//RS         (
-//RS             "runner_id".to_string(),
-//RS             option_env!("JET_RUNNER_BUILD_ID")
-//RS                 .unwrap_or("unversioned")
-//RS                 .as_bytes()
-//RS                 .to_vec(),
-//RS         ),
-//RS         (
-//RS             "stdlib_id".to_string(),
-//RS             option_env!("JET_STDLIB_BUILD_ID")
-//RS                 .unwrap_or("unversioned")
-//RS                 .as_bytes()
-//RS                 .to_vec(),
-//RS         ),
-//RS         (
-//RS             "target".to_string(),
-//RS             host_target_triple().as_bytes().to_vec(),
-//RS         ),
-//RS         ("profile".to_string(), b"dev".to_vec()),
-//RS         ("rustc".to_string(), rustc_identity.into_bytes()),
-//RS         ("build_inputs".to_string(), build_inputs.as_bytes().to_vec()),
-//RS         ("lock".to_string(), lock_digest.as_bytes().to_vec()),
-//RS     ];
-//RS     Ok(proof_digest("jet-proof-build-v2", &fields))
-//RS }
-//RS 
-//RS fn load_checked_proof_bundle(
-//RS     entry: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
-//RS     let (diagnostics, bundle, facts) =
-//RS         jet::Driver::check_file_with_effect_facts_for_run(entry, profile, setting_overrides);
-//RS     if diagnostics
-//RS         .iter()
-//RS         .any(|diagnostic| matches!(diagnostic.severity, Severity::Error))
-//RS     {
-//RS         None
-//RS     } else {
-//RS         bundle.map(|bundle| (bundle, facts))
-//RS     }
-//RS }
-//RS 
-//RS fn proof_core_abi(bundle: Option<&jet::AST::ProgramBundle>, source_digest: &str) -> String {
-//RS     let emission = bundle
-//RS         .map(|bundle| jet::Codegen::corelib_emission_fingerprint(bundle, false))
-//RS         .unwrap_or_else(|| "unavailable".to_string());
-//RS     proof_digest(
-//RS         "jet-proof-core-abi-v2",
-//RS         &[
-//RS             ("emission".to_string(), emission.into_bytes()),
-//RS             ("source".to_string(), source_digest.as_bytes().to_vec()),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn unavailable_mir_identity(
-//RS     source_digest: &str,
-//RS     core_abi: &str,
-//RS     members: &[Member],
-//RS ) -> jet_foundation::MIR::MirProgramIdentity {
-//RS     let mut fields = vec![
-//RS         ("source".to_string(), source_digest.as_bytes().to_vec()),
-//RS         ("core_abi".to_string(), core_abi.as_bytes().to_vec()),
-//RS     ];
-//RS     for member in members {
-//RS         fields.push((member.path.clone(), member.sha256.as_bytes().to_vec()));
-//RS     }
-//RS     fields.push(("mir".to_string(), b"unavailable".to_vec()));
-//RS     let unavailable = proof_digest("jet-proof-mir-unavailable-v1", &fields);
-//RS     let mut source_map = members
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(
-//RS             |(index, member)| jet_foundation::MIR::MirSourceMapIdentity {
-//RS                 id: index as u64 + 1,
-//RS                 path: member.path.clone(),
-//RS                 digest: member.sha256.clone(),
-//RS             },
-//RS         )
-//RS         .collect::<Vec<_>>();
-//RS     source_map.sort_by(|left, right| left.id.cmp(&right.id));
-//RS     jet_foundation::MIR::MirProgramIdentity::unavailable(unavailable, source_map)
-//RS }
-//RS 
-//RS fn proof_mir_identity(
-//RS     checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)>,
-//RS     source_digest: &str,
-//RS     core_abi: &str,
-//RS     members: &[Member],
-//RS ) -> jet_foundation::MIR::MirProgramIdentity {
-//RS     if let Some((bundle, _facts)) = checked {
-//RS         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
-//RS             bundle,
-//RS             jet_foundation::MIR::MirArtifactRequest::new(
-//RS                 jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS                 jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS             ),
-//RS         );
-//RS         let identity = mir.artifact_identity(artifact).unwrap_or_else(|error| {
-//RS             jet_foundation::ice!(None, "canonical MIR identity failed: {error}")
-//RS         });
-//RS         return std::sync::Arc::unwrap_or_clone(identity.program_identity);
-//RS     }
-//RS     unavailable_mir_identity(source_digest, core_abi, members)
-//RS }
-//RS 
-//RS pub(crate) fn proof_mir_identity_for_file(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<jet_foundation::MIR::MirProgramIdentity, String> {
-//RS     let bytes = fs::read(file).map_err(|error| format!("could not read `{file}`: {error}"))?;
-//RS     let member = Member {
-//RS         path: normalized(Path::new(file)),
-//RS         sha256: jet::SHA256::sha256_hex(&bytes),
-//RS         bytes,
-//RS     };
-//RS     let checked = load_checked_proof_bundle(file, profile, setting_overrides)
-//RS         .ok_or_else(|| format!("could not check `{file}` for MIR artifact identity"))?;
-//RS     let source_digest = jet::SHA256::sha256_hex(member.bytes.as_slice());
-//RS     let core_abi = proof_core_abi(Some(&checked.0), &source_digest);
-//RS     Ok(proof_mir_identity(
-//RS         Some(&checked),
-//RS         &source_digest,
-//RS         &core_abi,
-//RS         &[member],
-//RS     ))
-//RS }
-//RS 
-//RS fn has_proof_manifest(dir: &Path, name: &str) -> Result<bool, String> {
-//RS     let path = dir.join(name);
-//RS     match fs::symlink_metadata(&path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS             Err(format!("proof manifest `{}` is a symlink", path.display()))
-//RS         }
-//RS         Ok(metadata) => Ok(metadata.is_file()),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-//RS         Err(error) => Err(format!(
-//RS             "couldn't inspect proof manifest `{}`: {error}",
-//RS             path.display()
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-//RS     let entries =
-//RS         fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
-//RS     for entry in entries {
-//RS         let path = entry
-//RS             .map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?
-//RS             .path();
-//RS         let metadata = fs::symlink_metadata(&path)
-//RS             .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!(
-//RS                 "proof target contains symlink `{}`",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         if path.file_name().and_then(|name| name.to_str()).is_none() {
-//RS             return Err(format!(
-//RS                 "proof target contains a non-UTF-8 path `{}`",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-//RS             if name == "build" || name.starts_with('.') {
-//RS                 continue;
-//RS             }
-//RS             collect_jet_files(&path, out)?;
-//RS         } else if metadata.is_file()
-//RS             && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
-//RS         {
-//RS             let name = path
-//RS                 .file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("");
-//RS             if name != jet::Syntax::PACKAGE_FILE
-//RS                 && name != jet::Syntax::PAYLOAD_FILE
-//RS                 && name != "build.jet"
-//RS             {
-//RS                 out.push(path);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-//RS     let entries =
-//RS         fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
-//RS     for entry in entries {
-//RS         let path = entry
-//RS             .map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?
-//RS             .path();
-//RS         let metadata = fs::symlink_metadata(&path)
-//RS             .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
-//RS         if metadata.file_type().is_symlink() {
-//RS             return Err(format!(
-//RS                 "proof target contains symlink `{}`",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         if path.file_name().and_then(|name| name.to_str()).is_none() {
-//RS             return Err(format!(
-//RS                 "proof target contains a non-UTF-8 path `{}`",
-//RS                 path.display()
-//RS             ));
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             let name = path
-//RS                 .file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("");
-//RS             let parent_is_jet = path
-//RS                 .parent()
-//RS                 .and_then(|parent| parent.file_name())
-//RS                 .and_then(|name| name.to_str())
-//RS                 == Some(".jet");
-//RS             if name == ".git" || (parent_is_jet && name == "cache") {
-//RS                 continue;
-//RS             }
-//RS             collect_identity_files(&path, out)?;
-//RS             continue;
-//RS         }
-//RS         if !metadata.is_file() {
-//RS             continue;
-//RS         }
-//RS         let name = path
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .unwrap_or("");
-//RS         let parent_is_jet = path
-//RS             .parent()
-//RS             .and_then(|parent| parent.file_name())
-//RS             .and_then(|name| name.to_str())
-//RS             == Some(".jet");
-//RS         let under_generated = path
-//RS             .components()
-//RS             .collect::<Vec<_>>()
-//RS             .windows(2)
-//RS             .any(|components| {
-//RS                 components[0].as_os_str() == ".jet" && components[1].as_os_str() == "generated"
-//RS             });
-//RS         if matches!(
-//RS             name,
-//RS             "package.jet" | "jet.lock" | "jet.lock.json" | "build.jet"
-//RS         ) || (parent_is_jet && name == "lock")
-//RS             || under_generated
-//RS         {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn normalized(path: &Path) -> String {
-//RS     let path = if path.is_absolute() {
-//RS         path.strip_prefix(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-//RS             .unwrap_or(path)
-//RS     } else {
-//RS         path
-//RS     };
-//RS     path.components()
-//RS         .map(|part| part.as_os_str().to_string_lossy())
-//RS         .collect::<Vec<_>>()
-//RS         .join("/")
-//RS }
-//RS 
-//RS fn budget_projection(target: &Target) -> jet::BudgetView::BudgetProjection {
-//RS     let target_path = Path::new(&target.root);
-//RS     let search = if target_path.is_file() {
-//RS         target_path
-//RS             .parent()
-//RS             .and_then(Path::parent)
-//RS             .unwrap_or(Path::new("."))
-//RS     } else {
-//RS         target_path
-//RS     };
-//RS     let root = jet::Loader::find_manifest_root(search).unwrap_or_else(|| search.to_path_buf());
-//RS     let sources = target
-//RS         .members
-//RS         .iter()
-//RS         .map(|member| {
-//RS             let path = Path::new(&member.path);
-//RS             let path = path
-//RS                 .strip_prefix(&root)
-//RS                 .unwrap_or(path)
-//RS                 .to_string_lossy()
-//RS                 .replace('\\', "/");
-//RS             (
-//RS                 path.trim_start_matches("./").to_string(),
-//RS                 member.sha256.clone(),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     jet::BudgetView::read_compatible(&root, &sources)
-//RS }
-//RS 
-//RS fn diagnostic_span(source: &str, diagnostic: &Diagnostic) -> String {
-//RS     let Some(span) = diagnostic.span else {
-//RS         return "0:0-0:0".into();
-//RS     };
-//RS     let (sl, sc) = span_line_col(source, span.start);
-//RS     let (el, ec) = span_line_col(source, span.end);
-//RS     format!("{sl}:{sc}-{el}:{ec}")
-//RS }
-//RS 
-//RS fn evidence_id(target: &Target, kind: &str, origin: &str, span: &str, claim: &str) -> String {
-//RS     let claim_sha = jet::SHA256::sha256_hex(claim.as_bytes());
-//RS     let mut preimage = Vec::new();
-//RS     for field in [target.input_sha256.as_str(), kind, origin, span, &claim_sha] {
-//RS         preimage.extend_from_slice(&(field.len() as u64).to_be_bytes());
-//RS         preimage.extend_from_slice(field.as_bytes());
-//RS     }
-//RS     jet::SHA256::sha256_hex(&preimage)
-//RS }
-//RS 
-//RS fn claim_grade(
-//RS     proved: usize,
-//RS     failed: usize,
-//RS     tests: &[TestItem],
-//RS     solver: &[crate::ProveSolver::SolverEvidence],
-//RS ) -> String {
-//RS     // A failed producer records the attempted rung and count, but it does
-//RS     // not establish a claim. Keep the failure visible in the evidence rows
-//RS     // while lowering the achieved grade so a package floor cannot pass on a
-//RS     // counterexample.
-//RS     if failed > 0 || tests.iter().any(|item| item.state == 1) {
-//RS         return "unchecked".to_string();
-//RS     }
-//RS     if solver.iter().any(|item| {
-//RS         matches!(
-//RS             item.outcome,
-//RS             crate::ProveSolver::SolverOutcome::Proved { .. }
-//RS         )
-//RS     }) {
-//RS         return "proved".to_string();
-//RS     }
-//RS     let generated: u64 = tests
-//RS         .iter()
-//RS         .filter(|item| item.generated && item.state == 0)
-//RS         .map(|item| item.generated_count)
-//RS         .sum();
-//RS     if generated > 0 {
-//RS         return format!("generated({generated})");
-//RS     }
-//RS     let examples = tests
-//RS         .iter()
-//RS         .filter(|item| matches!(item.kind, 0 | 2 | 4) && item.state == 0)
-//RS         .count();
-//RS     if examples > 0 {
-//RS         return format!("examples({examples})");
-//RS     }
-//RS     if failed == 0 && proved > 0 {
-//RS         "checked".to_string()
-//RS     } else {
-//RS         "unchecked".to_string()
-//RS     }
-//RS }
-//RS fn claims_floor_for_target(target: &Target) -> Option<jet::Package::ClaimsGrade> {
-//RS     let root = Path::new(&target.root);
-//RS     let entry = if root.is_dir() {
-//RS         PathBuf::from(target.members.first()?.path.as_str())
-//RS     } else {
-//RS         root.to_path_buf()
-//RS     };
-//RS     jet::Loader::package_facts_for_entry(&entry)
-//RS         .ok()
-//RS         .flatten()
-//RS         .and_then(|facts| facts.policy.claims_min)
-//RS }
-//RS fn grade_meets_floor(actual: &str, floor: jet::Package::ClaimsGrade) -> bool {
-//RS     jet::Package::ClaimsGrade::parse(actual).is_some_and(|grade| grade.meets(floor))
-//RS }
-//RS 
-//RS fn render_report(
-//RS     target: &Target,
-//RS     items: &[FrontEndItem],
-//RS     warnings: &[FrontEndWarning],
-//RS     tests: &[TestItem],
-//RS     budgets: &jet::BudgetView::BudgetProjection,
-//RS     solver: &[crate::ProveSolver::SolverEvidence],
-//RS     _lenses: &[String],
-//RS     declarations: &[ContractDeclaration],
-//RS     replay_time_ms: Option<i64>,
-//RS     proved: usize,
-//RS     failed: usize,
-//RS     claims_grade: &str,
-//RS     claims_floor: Option<jet::Package::ClaimsGrade>,
-//RS     exit_code: i32,
-//RS ) -> String {
-//RS     let members = target
-//RS         .identity_members
-//RS         .iter()
-//RS         .map(|(path, sha256)| format!("{{\"path\":{},\"sha256\":{}}}", json(path), json(sha256)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let mut diagnostics = items
-//RS         .iter()
-//RS         .filter_map(|item| {
-//RS             item.diagnostic
-//RS                 .as_ref()
-//RS                 .map(|d| diagnostic_json(&item.path, &item.source, d))
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let mut diagnostic_index = 0usize;
-//RS     let mut evidence_rows = items.iter().map(|item| {
-//RS         let (outcome, indexes) = if item.diagnostic.is_some() { let i = diagnostic_index; diagnostic_index += 1; ("failed", format!("[{i}]")) } else { ("proved", "[]".into()) };
-//RS         format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"{}\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":{},\"line\":{},\"path\":{}}},\"state\":\"checked\"}}", item.facet, json(&item.id), item.column, item.line, json(&item.path))
-//RS     }).collect::<Vec<_>>();
-//RS     if let Some(floor) = claims_floor {
-//RS         let floor_name = floor.render();
-//RS         let diagnostic = Diagnostic::error(
-//RS             "E2942",
-//RS             format!("claim grade `{claims_grade}` is below package floor `{floor_name}`"),
-//RS             format!("package policy requires at least `{floor_name}` evidence"),
-//RS             "raise the claim with `jet prove --lens solver` or the required generated/property evidence"
-//RS                 .to_string(),
-//RS             None,
-//RS         );
-//RS         let diagnostic_index = diagnostics.len();
-//RS         diagnostics.push(diagnostic_json(&target.root, "", &diagnostic));
-//RS         let claim = format!("claim grade `{claims_grade}` below floor `{floor_name}`");
-//RS         let id = evidence_id(target, "claims_policy", &target.root, "1:1-1:1", &claim);
-//RS         evidence_rows.push(format!(
-//RS             "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"claims\",\"id\":{},\"kind\":\"policy\",\"outcome\":\"failed\",\"producer\":\"jet-policy\",\"property\":null,\"reason\":\"claims_floor\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"unchecked\"}}",
-//RS             json(&id),
-//RS             json(&target.root)
-//RS         ));
-//RS     }
-//RS 
-//RS     let mut used_contract_records = BTreeSet::new();
-//RS     for declaration in declarations {
-//RS         let matching = matching_contract_record(declaration, tests, &used_contract_records);
-//RS         let (id, attachment, state, outcome, reason, observation, diagnostic_indexes) =
-//RS             if let Some((index, item)) = matching {
-//RS                 used_contract_records.insert(index);
-//RS                 let (state, outcome, reason, observation) = match item.state {
-//RS                     0 => ("executed", "passed", "null", "reached_pass"),
-//RS                     1 => ("executed", "failed", "null", "reached_fail"),
-//RS                     2 => ("skipped", "not_run", "\"fail_fast_policy\"", "not_reached"),
-//RS                     _ => (
-//RS                         "unavailable",
-//RS                         "unavailable",
-//RS                         "\"producer_start_failed\"",
-//RS                         "not_reached",
-//RS                     ),
-//RS                 };
-//RS                 let diagnostic_indexes = if item.state == 1 {
-//RS                     let index = diagnostics.len();
-//RS                     diagnostics.push(runtime_contract_diagnostic(&declaration.path, item));
-//RS                     format!("[{index}]")
-//RS                 } else {
-//RS                     "[]".to_string()
-//RS                 };
-//RS                 (
-//RS                     declaration.id.clone(),
-//RS                     if item.state == 0 || item.state == 1 {
-//RS                         format!("{{\"testEvidenceId\":{}}}", json(&item.id))
-//RS                     } else {
-//RS                         "null".to_string()
-//RS                     },
-//RS                     state,
-//RS                     outcome,
-//RS                     reason,
-//RS                     observation,
-//RS                     diagnostic_indexes,
-//RS                 )
-//RS             } else {
-//RS                 (
-//RS                     declaration.id.clone(),
-//RS                     "null".to_string(),
-//RS                     "declared",
-//RS                     "not_observed",
-//RS                     "null",
-//RS                     "not_reached",
-//RS                     "[]".to_string(),
-//RS                 )
-//RS             };
-//RS         let contract = format!(
-//RS             "{{\"marker\":{},\"observation\":\"{observation}\",\"site\":{{\"column\":{},\"line\":{},\"path\":{}}}}}",
-//RS             json(declaration.marker),
-//RS             declaration.column,
-//RS             declaration.line,
-//RS             json(&declaration.path)
-//RS         );
-//RS         evidence_rows.push(format!(
-//RS             "{{\"attachment\":{attachment},\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"contracts\",\"id\":{},\"kind\":\"contract\",\"outcome\":\"{outcome}\",\"producer\":\"jet-runtime\",\"property\":null,\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":{},\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}",
-//RS             json(&id),
-//RS             declaration.column,
-//RS             declaration.line,
-//RS             json(&declaration.path)
-//RS         ));
-//RS     }
-//RS     for item in tests {
-//RS         if item.kind == 1 {
-//RS             continue;
-//RS         }
-//RS         if item.kind == 2 {
-//RS             // A panic is a failed unit execution. Keep its diagnostic and
-//RS             // evidence row linked so the report does not hide the selected
-//RS             // test behind a producer-level exit code.
-//RS             let diagnostic_index = diagnostics.len();
-//RS             diagnostics.push(runtime_item_diagnostic(item));
-//RS             evidence_rows.push(format!(
-//RS                 "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"tests\",\"id\":{},\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"executed\"}}",
-//RS                 json(&item.id),
-//RS                 item.line.max(1),
-//RS                 json(&item.path)
-//RS             ));
-//RS             continue;
-//RS         }
-//RS         let (kind, facet, producer) = match item.kind {
-//RS             3 => ("property", "tests", "jet-property"),
-//RS             4 => ("doctest", "tests", "jet-doctest"),
-//RS             _ => ("unit", "tests", "jet-test"),
-//RS         };
-//RS         let (state, outcome) = match item.state {
-//RS             0 => ("executed", "passed"),
-//RS             1 => ("executed", "failed"),
-//RS             2 => ("skipped", "not_run"),
-//RS             _ => ("unavailable", "unavailable"),
-//RS         };
-//RS         let reason = match item.state {
-//RS             2 => "\"fail_fast_policy\"".to_string(),
-//RS             _ if item.reason.is_empty() => {
-//RS                 if item.state > 2 {
-//RS                     "\"producer_start_failed\"".to_string()
-//RS                 } else {
-//RS                     "null".to_string()
-//RS                 }
-//RS             }
-//RS             _ => json(&item.reason),
-//RS         };
-//RS         let diagnostic_indexes = if item.state == 1 {
-//RS             let index = diagnostics.len();
-//RS             diagnostics.push(runtime_item_diagnostic(item));
-//RS             format!("[{index}]")
-//RS         } else {
-//RS             "[]".into()
-//RS         };
-//RS         let property = if item.kind == 3 {
-//RS             format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.case_index, item.seed.parse::<u64>().unwrap_or(0), item.generated_count, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
-//RS         } else {
-//RS             "null".into()
-//RS         };
-//RS         let count = if item.kind == 3 {
-//RS             item.generated_count
-//RS         } else {
-//RS             1
-//RS         };
-//RS         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":{count},\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
-//RS     }
-//RS     for fact in &budgets.facts {
-//RS         let kind = if fact.statistical {
-//RS             "statistical_budget"
-//RS         } else {
-//RS             "deterministic_budget"
-//RS         };
-//RS         let facet = "budgets";
-//RS         let outcome = match fact.outcome.as_str() {
-//RS             "pass" => "met",
-//RS             "warn" => "warning",
-//RS             _ => "failed",
-//RS         };
-//RS         let budget = format!("{{\"budgetId\":{},\"enforcement\":{},\"evidenceId\":{},\"reportId\":{},\"statistical\":{}}}", json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence_id), json(&fact.report_id), fact.statistical);
-//RS         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
-//RS     }
-//RS     for (index, reason) in budgets.rejected.iter().enumerate() {
-//RS         let claim = format!("canonical budget report unavailable: {reason}");
-//RS         let id = evidence_id(
-//RS             target,
-//RS             "budget",
-//RS             &target.root,
-//RS             &format!("0:0-0:{index}"),
-//RS             &claim,
-//RS         );
-//RS         evidence_rows.push(format!(
-//RS             "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{},\"kind\":\"deterministic_budget\",\"outcome\":\"unavailable\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":{},\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"unavailable\"}}",
-//RS             json(&id),
-//RS             json(reason),
-//RS             json(&target.root)
-//RS         ));
-//RS     }
-//RS     for item in solver {
-//RS         let diagnostic_indexes = if let crate::ProveSolver::SolverOutcome::Disproved {
-//RS             assignment,
-//RS             ..
-//RS         } = &item.outcome
-//RS         {
-//RS             let index = diagnostics.len();
-//RS             let values = assignment
-//RS                 .iter()
-//RS                 .map(|(name, value)| format!("{name} = {value}"))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             diagnostics.push(format!(
-//RS                 "{{\"caret\":null,\"code\":\"E2950\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"native-presburger\",\"stage\":\"solver\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":1,\"endLine\":1,\"path\":{},\"sourceLine\":null,\"startColumn\":1,\"startLine\":1}},\"type\":\"producer\"}}",
-//RS                 json(&format!(
-//RS                     "solver found a counterexample to {}",
-//RS                     item.obligation.kind
-//RS                 )),
-//RS                 json(&format!(
-//RS                     "Why: these values satisfy every assumption but make the claim false: {values}"
-//RS                 )),
-//RS                 json(&format!(
-//RS                     "Fix: change {} so every admitted input satisfies the claim, or correct the contract",
-//RS                     item.obligation.origin
-//RS                 )),
-//RS                 json(&item.obligation.origin),
-//RS             ));
-//RS             format!("[{index}]")
-//RS         } else {
-//RS             "[]".to_string()
-//RS         };
-//RS         evidence_rows.push(crate::ProveSolver::evidence_json(item, &diagnostic_indexes));
-//RS     }
-//RS     if let Some(time_ms) = replay_time_ms {
-//RS         let claim = format!("replayed Time authority at {time_ms} ms");
-//RS         let id = evidence_id(target, "replay", &target.root, "1:1-1:1", &claim);
-//RS         evidence_rows.push(format!(
-//RS             "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"replay\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"observed\",\"producer\":\"jet-replay\",\"property\":null,\"reason\":\"parity_not_available\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"executed\"}}",
-//RS             json(&id),
-//RS             json(&target.root)
-//RS         ));
-//RS     }
-//RS     for warning in warnings {
-//RS         diagnostics.push(diagnostic_json(
-//RS             &warning.path,
-//RS             &warning.source,
-//RS             &warning.diagnostic,
-//RS         ));
-//RS     }
-//RS     let (evidence, derivations) = canonicalize_evidence_rows(target, &evidence_rows);
-//RS     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
-//RS         crate::ProveSolver::summarize(solver);
-//RS     let unit_report = unit_test_report(tests);
-//RS     let unit_summary = unit_report.status_envelope().json();
-//RS     let unit_unavailable = tests
-//RS         .iter()
-//RS         .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3)
-//RS         .count();
-//RS     let contract_selected = declarations.len();
-//RS     let (contract_passed, contract_failed, contract_not_observed, contract_skipped) =
-//RS         contract_summary(declarations, tests);
-//RS     let contract_observed = contract_passed + contract_failed;
-//RS     let property_passed = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 3 && item.state == 0)
-//RS         .count();
-//RS     let property_failed = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 3 && item.state == 1)
-//RS         .count();
-//RS     let property_cases: u32 = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 3)
-//RS         .map(|item| item.line)
-//RS         .sum();
-//RS     let property_shrunk_failures = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 3 && item.state == 1 && !item.message.is_empty())
-//RS         .count();
-//RS     let doctest_passed = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 4 && item.state == 0)
-//RS         .count();
-//RS     let doctest_failed = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 4 && item.state == 1)
-//RS         .count();
-//RS     let doctest_skipped = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 4 && item.state >= 2)
-//RS         .count();
-//RS     let doctest_selected = doctest_passed + doctest_failed + doctest_skipped;
-//RS     let deterministic_selected = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| !fact.statistical)
-//RS         .count()
-//RS         + budgets.rejected.len();
-//RS     let deterministic_failed = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| !fact.statistical && fact.outcome == "fail")
-//RS         .count();
-//RS     let deterministic_met = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| !fact.statistical && fact.outcome == "pass")
-//RS         .count();
-//RS     let deterministic_unavailable = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| !fact.statistical && fact.evidence == "unavailable")
-//RS         .count()
-//RS         + budgets.rejected.len();
-//RS     let statistical_selected = budgets.facts.iter().filter(|fact| fact.statistical).count();
-//RS     let statistical_failed = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| fact.statistical && fact.outcome == "fail")
-//RS         .count();
-//RS     let statistical_met = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| fact.statistical && fact.outcome == "pass")
-//RS         .count();
-//RS     let statistical_unavailable = budgets
-//RS         .facts
-//RS         .iter()
-//RS         .filter(|fact| fact.statistical && fact.evidence == "unavailable")
-//RS         .count();
-//RS     let front_end_selected = proved + failed;
-//RS     let property_skipped = tests
-//RS         .iter()
-//RS         .filter(|item| item.kind == 3 && item.state >= 2)
-//RS         .count();
-//RS     let property_selected = property_passed + property_failed + property_skipped;
-//RS     let result = if exit_code != ExitCodes::OK {
-//RS         "fail"
-//RS     } else if unit_unavailable > 0
-//RS         || deterministic_unavailable > 0
-//RS         || statistical_unavailable > 0
-//RS         || solver_unknown > 0
-//RS     {
-//RS         "pass_incomplete"
-//RS     } else {
-//RS         "pass"
-//RS     };
-//RS     let mir = target.mir.canonical_json();
-//RS     let candidate_identity = candidate_identity_json(target);
-//RS     let claims_grade = json(claims_grade);
-//RS     format!("{{\"derivations\":[{derivations}],\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{claims_grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"claims\":{{\"grade\":{claims_grade}}},\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{unit_summary}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"mir\":{mir},\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
-//RS     .replace(
-//RS         "\"schemaVersion\":1,",
-//RS         &format!("\"schemaVersion\":1,\"candidateIdentity\":{},", candidate_identity),
-//RS     )
-//RS }
-//RS 
-//RS fn canonicalize_evidence_rows(target: &Target, rows: &[String]) -> (String, String) {
-//RS     let identity = DerivationIdentity::new(
-//RS         target.source_digest.clone(),
-//RS         target.build_digest.clone(),
-//RS         target.mir.optimized_hash.clone(),
-//RS         target.input_sha256.clone(),
-//RS     );
-//RS     let mut rendered = Vec::with_capacity(rows.len());
-//RS     let mut derivations = Vec::with_capacity(rows.len());
-//RS     for (index, row) in rows.iter().enumerate() {
-//RS         let id = row_string_field(row, "id").unwrap_or_else(|| format!("proof-row-{index}"));
-//RS         let kind = row_string_field(row, "kind").unwrap_or_else(|| "unknown".to_string());
-//RS         let producer = row_string_field(row, "producer").unwrap_or_else(|| "jet-prove".to_string());
-//RS         let method = match producer.as_str() {
-//RS             "native-presburger" | "jet-solver" => DerivationMethod::FormalProof,
-//RS             "jet-property" => DerivationMethod::SampledAgreement,
-//RS             "jet-runtime" | "jet-test" | "jet-doctest" | "jet-replay" => {
-//RS                 DerivationMethod::RecordedExecution
-//RS             }
-//RS             "jet-sema" | "jet-budget" | "jet-policy" => DerivationMethod::StaticDerivation,
-//RS             _ => DerivationMethod::ExternalAssumption,
-//RS         };
-//RS         let outcome = row_string_field(row, "outcome").unwrap_or_default();
-//RS         let state = row_string_field(row, "state").unwrap_or_default();
-//RS         let disposition = if matches!(
-//RS             (outcome.as_str(), state.as_str()),
-//RS             ("unavailable", _)
-//RS                 | ("not_observed", _)
-//RS                 | ("unknown", _)
-//RS                 | (_, "unavailable")
-//RS                 | (_, "not_run")
-//RS                 | (_, "unchecked")
-//RS         ) {
-//RS             DerivationDisposition::Unavailable
-//RS         } else {
-//RS             DerivationDisposition::Current
-//RS         };
-//RS         let derivation = DerivationRecord::new(
-//RS             id.clone(),
-//RS             format!("{kind}:{id}"),
-//RS             producer,
-//RS             method,
-//RS             "checked-proof-row",
-//RS             [id.clone()],
-//RS             identity.clone(),
-//RS         )
-//RS         .with_disposition(disposition);
-//RS         let row = row
-//RS             .strip_suffix('}')
-//RS             .map(|prefix| {
-//RS                 format!(
-//RS                     "{prefix},\"derivation\":{{\"id\":{}}}}}",
-//RS                     json(&derivation.id)
-//RS                 )
-//RS             })
-//RS             .unwrap_or_else(|| row.clone());
-//RS         rendered.push(row);
-//RS         derivations.push(derivation.to_json());
-//RS     }
-//RS     (rendered.join(","), derivations.join(","))
-//RS }
-//RS 
-//RS fn row_string_field(row: &str, field: &str) -> Option<String> {
-//RS     let DataTree::Object(fields) = parse_json(row).ok()? else {
-//RS         return None;
-//RS     };
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(key, value)| (key == field).then(|| value.as_str().ok()).flatten())
-//RS         .map(str::to_string)
-//RS }
-//RS 
-//RS fn contract_summary(
-//RS     declarations: &[ContractDeclaration],
-//RS     tests: &[TestItem],
-//RS ) -> (usize, usize, usize, usize) {
-//RS     let mut used = BTreeSet::new();
-//RS     let mut passed = 0;
-//RS     let mut failed = 0;
-//RS     let mut not_observed = 0;
-//RS     let mut skipped = 0;
-//RS     for declaration in declarations {
-//RS         let matching = matching_contract_record(declaration, tests, &used);
-//RS         let Some((index, item)) = matching else {
-//RS             not_observed += 1;
-//RS             continue;
-//RS         };
-//RS         used.insert(index);
-//RS         match item.state {
-//RS             0 => passed += 1,
-//RS             1 => failed += 1,
-//RS             _ => skipped += 1,
-//RS         }
-//RS     }
-//RS     (passed, failed, not_observed, skipped)
-//RS }
-//RS 
-//RS fn diagnostic_json(path: &str, source: &str, d: &Diagnostic) -> String {
-//RS     let severity = if matches!(d.severity, Severity::Error) {
-//RS         "error"
-//RS     } else {
-//RS         "warning"
-//RS     };
-//RS     let span = d.span.map(|s| { let (sl, sc) = span_line_col(source, s.start); let (el, ec) = span_line_col(source, s.end); format!("{{\"endColumn\":{ec},\"endLine\":{el},\"path\":{},\"sourceLine\":null,\"startColumn\":{sc},\"startLine\":{sl}}}", json(path)) }).unwrap_or_else(|| "null".into());
-//RS     format!("{{\"caret\":null,\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-sema\",\"stage\":\"front_end\"}},\"safeLocals\":[],\"severity\":\"{severity}\",\"span\":{span},\"type\":\"front_end\"}}", json(&d.code), json(&d.what), json(&format!("Why: {}", d.why)), json(&format!("Fix: {}", d.fix)))
-//RS }
-//RS 
-//RS fn source_paths_match(left: &str, right: &str) -> bool {
-//RS     let normalize = |path: &str| path.trim_start_matches("./").replace('\\', "/");
-//RS     let left = normalize(left);
-//RS     let right = normalize(right);
-//RS     left == right || left.ends_with(&format!("/{right}")) || right.ends_with(&format!("/{left}"))
-//RS }
-//RS fn contract_record_matches(declaration: &ContractDeclaration, item: &TestItem) -> bool {
-//RS     item.kind == 1
-//RS         && item.name == declaration.marker
-//RS         && source_paths_match(&item.path, &declaration.path)
-//RS         && declaration
-//RS             .message
-//RS             .as_ref()
-//RS             .map_or(true, |message| message == &item.message)
-//RS }
-//RS 
-//RS fn matching_contract_record<'a>(
-//RS     declaration: &ContractDeclaration,
-//RS     tests: &'a [TestItem],
-//RS     used: &BTreeSet<usize>,
-//RS ) -> Option<(usize, &'a TestItem)> {
-//RS     if let Some(matching) = tests.iter().enumerate().find(|(index, item)| {
-//RS         !used.contains(index)
-//RS             && contract_record_matches(declaration, item)
-//RS             && item.line as usize == declaration.line
-//RS     }) {
-//RS         return Some(matching);
-//RS     }
-//RS     let mut candidates = tests.iter().enumerate().filter(|(index, item)| {
-//RS         !used.contains(index) && contract_record_matches(declaration, item)
-//RS     });
-//RS     let first = candidates.next()?;
-//RS     candidates.next().is_none().then_some(first)
-//RS }
-//RS 
-//RS fn runtime_contract_diagnostic(path: &str, item: &TestItem) -> String {
-//RS     let message = format!("#{} contract failed: {}", item.name, item.message);
-//RS     let report = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS         "E3005", path, item.line, "", "", 1, 1, &message, "",
-//RS     );
-//RS     let why = format!("Why: {}", report.why);
-//RS     let fix = format!("Fix: {}", report.fix);
-//RS     let source_line = source_line_for(path, item.line);
-//RS     let source_line_json = source_line
-//RS         .as_deref()
-//RS         .map(json)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let width = source_line
-//RS         .as_deref()
-//RS         .map_or(1, |line| line.chars().count().max(1));
-//RS     format!(
-//RS         "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
-//RS         json(&message),
-//RS         json(&why),
-//RS         json(&fix),
-//RS         width + 1,
-//RS         item.line,
-//RS         json(path),
-//RS         item.line
-//RS     )
-//RS }
-//RS 
-//RS fn source_line_for(path: &str, line: u32) -> Option<String> {
-//RS     let line = usize::try_from(line).ok()?.checked_sub(1)?;
-//RS     fs::read_to_string(path)
-//RS         .ok()?
-//RS         .lines()
-//RS         .nth(line)
-//RS         .map(str::to_string)
-//RS }
-//RS 
-//RS struct UnitTestReport {
-//RS     passed: usize,
-//RS     failed: usize,
-//RS     skipped: usize,
-//RS }
-//RS 
-//RS impl UnitTestReport {
-//RS     fn summary(&self) -> String {
-//RS         format!(
-//RS             "{} passed, {} failed, {} skipped",
-//RS             self.passed, self.failed, self.skipped
-//RS         )
-//RS     }
-//RS 
-//RS     fn status_envelope(&self) -> StatusEnvelope {
-//RS         StatusEnvelope::new("test", self.failed == 0).with_field(
-//RS             "test",
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("failed", self.failed)
-//RS                     .with("passed", self.passed)
-//RS                     .with("skipped", self.skipped)
-//RS                     .with("selected", self.passed + self.failed + self.skipped),
-//RS             ),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn unit_test_report(tests: &[TestItem]) -> UnitTestReport {
-//RS     let is_unit = |item: &&TestItem| item.kind == 0 || item.kind == 2;
-//RS     UnitTestReport {
-//RS         passed: tests
-//RS             .iter()
-//RS             .filter(|item| is_unit(item) && item.state == 0)
-//RS             .count(),
-//RS         failed: tests
-//RS             .iter()
-//RS             .filter(|item| is_unit(item) && item.state == 1)
-//RS             .count(),
-//RS         skipped: tests
-//RS             .iter()
-//RS             .filter(|item| is_unit(item) && item.state >= 2)
-//RS             .count(),
-//RS     }
-//RS }
-//RS 
-//RS fn test_failure_detail(item: &TestItem) -> String {
-//RS     let source_line = source_line_for(&item.path, item.line).unwrap_or_default();
-//RS     let caret = source_line.chars().count().max(1);
-//RS     format!(
-//RS         "  Stop [E3001]: {}\n    --> {}:{}\n      {}^\n  More: jet-lang.dev/e/E3001\n",
-//RS         item.message,
-//RS         item.path,
-//RS         item.line,
-//RS         " ".repeat(caret.saturating_sub(1)),
-//RS     )
-//RS }
-//RS 
-//RS fn test_failure_json(item: &TestItem) -> String {
-//RS     let source_line = source_line_for(&item.path, item.line);
-//RS     let source_line_json = source_line
-//RS         .as_deref()
-//RS         .map(json)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let width = source_line
-//RS         .as_deref()
-//RS         .map_or(1, |line| line.chars().count().max(1));
-//RS     format!(
-//RS         "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3001\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
-//RS         json(&item.message),
-//RS         width + 1,
-//RS         item.line,
-//RS         json(&item.path),
-//RS         item.line
-//RS     )
-//RS }
-//RS 
-//RS fn runtime_item_diagnostic(item: &TestItem) -> String {
-//RS     test_failure_json(item)
-//RS }
-//RS 
-//RS fn candidate_digest_json(value: &str) -> String {
-//RS     let digest = if value.starts_with("sha256-") {
-//RS         value.to_string()
-//RS     } else {
-//RS         format!("sha256-{value}")
-//RS     };
-//RS     json(&digest)
-//RS }
-//RS 
-//RS fn candidate_identity_json(target: &Target) -> String {
-//RS     format!(
-//RS         "{{\"source\":{{\"sha256\":{},\"contentSha256\":{},\"inputSha256\":{}}},\"compiler\":{{\"sha256\":{},\"version\":{}}},\"configuration\":{{\"coreAbi\":{},\"lockSha256\":{},\"profile\":\"dev\"}},\"generatedArtifact\":{{\"semanticMirSha256\":{},\"optimizedMirSha256\":{},\"mir\":{}}},\"targetTool\":{{\"triple\":{},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}",
-//RS         candidate_digest_json(&target.source_digest),
-//RS         candidate_digest_json(&target.source_digest),
-//RS         candidate_digest_json(&target.input_sha256),
-//RS         candidate_digest_json(&target.build_digest),
-//RS         json(env!("CARGO_PKG_VERSION")),
-//RS         json(&target.core_abi),
-//RS         candidate_digest_json(&target.lock_digest),
-//RS         candidate_digest_json(&target.mir.semantic_hash),
-//RS         candidate_digest_json(&target.mir.optimized_hash),
-//RS         target.mir.canonical_json(),
-//RS         json(&host_target_triple()),
-//RS     )
-//RS }
-//RS 
-//RS fn record_links_json(links: &[RecordLink]) -> String {
-//RS     let mut links = links.to_vec();
-//RS     links.sort();
-//RS     let values = links
-//RS         .iter()
-//RS         .map(|link| {
-//RS             format!(
-//RS                 "{{\"artifact_id\":{},\"kind\":{}}}",
-//RS                 json(&link.artifact_id),
-//RS                 json(link.kind.as_str())
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     format!("[{}]", values.join(","))
-//RS }
-//RS 
-//RS /// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
-//RS /// Identical existing bytes are left unchanged; differing bytes refuse.
-//RS fn write_jetproof(
-//RS     target: &Target,
-//RS     proof_report: &str,
-//RS     consumed: &[RecordLink],
-//RS     produced: &[RecordLink],
-//RS ) -> Result<ProofArtifact, String> {
-//RS     let report_bytes = format!("{proof_report}\n");
-//RS     let report_id = jet::SHA256::sha256_hex(report_bytes.as_bytes());
-//RS     let kind = target.kind;
-//RS     let name = {
-//RS         let root = Path::new(&target.root);
-//RS         let stem = root
-//RS             .file_stem()
-//RS             .and_then(|s| s.to_str())
-//RS             .unwrap_or(kind)
-//RS             .replace('.', "_");
-//RS         if stem.is_empty() {
-//RS             kind.to_string()
-//RS         } else {
-//RS             stem
-//RS         }
-//RS     };
-//RS     let rel = format!(
-//RS         ".jet/proofs/{kind}/{name}/{}.jetproof",
-//RS         &report_id[..16.min(report_id.len())]
-//RS     );
-//RS     let path = target.authority_root.join(&rel);
-//RS     let consumed_json = record_links_json(consumed);
-//RS     let produced_json = record_links_json(produced);
-//RS     let envelope = format!(
-//RS         "{{\"artifact\":{{\"path\":{}}},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
-//RS         json(&rel),
-//RS         consumed_json,
-//RS         produced_json,
-//RS         json(&report_id)
-//RS     );
-//RS     ensure_artifact_parent(&path)?;
-//RS     if let Ok(metadata) = fs::symlink_metadata(&path) {
-//RS         if !metadata.file_type().is_file() {
-//RS             return Err(format!("final .jetproof path is not a regular file: {rel}"));
-//RS         }
-//RS         let existing = fs::read(&path).map_err(|e| e.to_string())?;
-//RS         if existing == envelope.as_bytes() {
-//RS             return Ok(ProofArtifact {
-//RS                 artifact_id: report_id,
-//RS                 path,
-//RS                 size: u64::try_from(envelope.len())
-//RS                     .map_err(|_| "proof artifact is too large".to_string())?,
-//RS             });
-//RS         }
-//RS         return Err(format!(
-//RS             "refusing to overwrite differing .jetproof at {rel}"
-//RS         ));
-//RS     }
-//RS     let tmp = path.with_extension(format!(
-//RS         "jetproof.tmp.{}.{}",
-//RS         std::process::id(),
-//RS         &report_id[..8]
-//RS     ));
-//RS     let write_result = (|| -> Result<(), String> {
-//RS         let mut file = fs::OpenOptions::new()
-//RS             .write(true)
-//RS             .create_new(true)
-//RS             .open(&tmp)
-//RS             .map_err(|e| e.to_string())?;
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::PermissionsExt;
-//RS             file.set_permissions(fs::Permissions::from_mode(0o600))
-//RS                 .map_err(|e| e.to_string())?;
-//RS         }
-//RS         use std::io::Write;
-//RS         file.write_all(envelope.as_bytes())
-//RS             .map_err(|e| e.to_string())?;
-//RS         file.sync_all().map_err(|e| e.to_string())?;
-//RS         match fs::hard_link(&tmp, &path) {
-//RS             Ok(()) => {}
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-//RS                 let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-//RS                 if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS                     return Err(format!("final .jetproof path is not a regular file: {rel}"));
-//RS                 }
-//RS                 let existing = fs::read(&path).map_err(|e| e.to_string())?;
-//RS                 if existing != envelope.as_bytes() {
-//RS                     return Err(format!(
-//RS                         "refusing to overwrite differing .jetproof at {rel}"
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Err(error) => return Err(error.to_string()),
-//RS         }
-//RS         fs::remove_file(&tmp).map_err(|e| e.to_string())?;
-//RS         #[cfg(unix)]
-//RS         if let Some(parent) = path.parent() {
-//RS             fs::File::open(parent)
-//RS                 .map_err(|e| e.to_string())?
-//RS                 .sync_all()
-//RS                 .map_err(|e| e.to_string())?;
-//RS         }
-//RS         Ok(())
-//RS     })();
-//RS     if let Err(error) = write_result {
-//RS         let _ = fs::remove_file(&tmp);
-//RS         return Err(error);
-//RS     }
-//RS     Ok(ProofArtifact {
-//RS         artifact_id: report_id,
-//RS         path,
-//RS         size: u64::try_from(envelope.len())
-//RS             .map_err(|_| "proof artifact is too large".to_string())?,
-//RS     })
-//RS }
-//RS 
-//RS fn ensure_artifact_parent(path: &Path) -> Result<(), String> {
-//RS     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-//RS     let mut current = if parent.is_absolute() {
-//RS         PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
-//RS     } else {
-//RS         PathBuf::from(".")
-//RS     };
-//RS     for component in parent.components() {
-//RS         match component {
-//RS             std::path::Component::RootDir | std::path::Component::CurDir => {}
-//RS             std::path::Component::Normal(name) => {
-//RS                 current.push(name);
-//RS                 match fs::symlink_metadata(&current) {
-//RS                     Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS                         return Err(format!(
-//RS                             "artifact parent is a symlink: {}",
-//RS                             current.display()
-//RS                         ));
-//RS                     }
-//RS                     Ok(metadata) if !metadata.is_dir() => {
-//RS                         return Err(format!(
-//RS                             "artifact parent is not a directory: {}",
-//RS                             current.display()
-//RS                         ));
-//RS                     }
-//RS                     Ok(_) => {}
-//RS                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                         fs::create_dir(&current).map_err(|e| e.to_string())?;
-//RS                         #[cfg(unix)]
-//RS                         {
-//RS                             use std::os::unix::fs::PermissionsExt;
-//RS                             fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
-//RS                                 .map_err(|e| e.to_string())?;
-//RS                         }
-//RS                     }
-//RS                     Err(error) => return Err(error.to_string()),
-//RS                 }
-//RS             }
-//RS             std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-//RS                 return Err("artifact parent contains an unsafe component".into());
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod target_tests {
-//RS     use super::resolve_target;
-//RS     use std::fs;
-//RS     use std::path::PathBuf;
-//RS 
-//RS     #[test]
-//RS     fn canonical_package_marker_selects_package_and_enters_identity() {
-//RS         let root = PathBuf::from(format!(
-//RS             "/tmp/jet-prove-target-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         fs::create_dir_all(&root).unwrap();
-//RS         fs::write(root.join("package.jet"), "name: \"demo\"\n").unwrap();
-//RS         fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
-//RS 
-//RS         let target = resolve_target(&root.to_string_lossy()).unwrap();
-//RS         assert_eq!(target.kind, "package");
-//RS         assert!(target
-//RS             .identity_members
-//RS             .iter()
-//RS             .any(|(path, _)| path.ends_with("/package.jet")));
-//RS 
-//RS         fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS }
-// END-PORT-PENDING 0705 Source/CmdProve.rs:3619-4964
+// Private fragment of the canonical Cli.Evidence.Prove owner.
+use crate.[Member, Target, ProofArtifact, FrontEndItem, FrontEndWarning, TestItem, ContractDeclaration,
+    ProveSolver, resolve_target, host_target_triple, span_line_col]
+use crate.ProveReplay.json_str as json
+use jet.[SHA256, AST, Sema, Driver, Codegen, Syntax, Loader, BudgetView, Package,
+    Diagnostics, ExitCodes, RecordLink, lower_checked_semantic_mir_program_for]
+use jet.Diagnostics.[Diagnostic, Severity]
+use jet_foundation.[MIR, DataTree, parse_json, DerivationIdentity, DerivationMethod,
+    DerivationDisposition, DerivationRecord, StatusEnvelope, StatusFields, StatusValue, Outcome, JSON]
+use std.[fs, env, process, Command, collections]
 
+// Rust: Source/CmdProve.rs:3619
+fn reject_symlink_ancestors(path: &OSPath) -> Void Err! {
+    // GATE #4494: native cwd, path components, no-follow metadata.
+    current := if path.is_absolute() { OSPath.from(std.path.MAIN_SEPARATOR.to_string()) }
+        else { env.current_dir().map_err(error -> "couldn't resolve proof target parent: {error}")? }
+    for component in path.components() {
+        if component == {
+            RootDir -> current = OSPath.from(std.path.MAIN_SEPARATOR.to_string())
+            CurDir -> {}
+            ParentDir -> { _ :: current.pop() }
+            Normal(name) -> current.push(name)
+            Prefix(_) -> return Err("proof target {path.display()} has an unsupported path prefix")
+        }
+        metadata :: fs.symlink_metadata(current).map_err(error -> "couldn't inspect proof target ancestor {current.display()}: {error}")?
+        if metadata.file_type().is_symlink() {
+            return Err("proof target {path.display()} must not pass through symlink {current.display()}")
+        }
+    }
+    Ok(())
+}
+
+// Rust: Source/CmdProve.rs:3660
+fn append_proof_field(bytes: &[UInt8], label: String, value: &[UInt8]) -> Void {
+    bytes.extend_from_slice((label.len() as UInt64).to_be_bytes())
+    bytes.extend_from_slice(label.as_bytes())
+    bytes.extend_from_slice((value.len() as UInt64).to_be_bytes())
+    bytes.extend_from_slice(value)
+}
+// Rust: Source/CmdProve.rs:3667
+fn proof_digest(schema: String, fields: &[(String, [UInt8])]) -> String {
+    bytes := []
+    append_proof_field(&bytes, "schema", schema.as_bytes())
+    for (label, value) in fields { append_proof_field(&bytes, label, value) }
+    SHA256.sha256_hex(bytes)
+}
+// Rust: Source/CmdProve.rs:3676
+fn proof_digest_or_none(schema: String, fields: &[(String, [UInt8])]) -> String {
+    if fields.is_empty() { proof_digest(schema, &[("none", "<none>".as_bytes().to_vec())]) }
+    else { proof_digest(schema, fields) }
+}
+// Rust: Source/CmdProve.rs:3684
+fn is_lock_identity_path(path: String) -> Bool {
+    path == ".jet/lock" || path.ends_with("/.jet/lock") ||
+        path.rsplit('/').next().is_some_and(name -> name == "jet.lock" || name == "jet.lock.json")
+}
+// Rust: Source/CmdProve.rs:3690
+fn is_build_identity_path(path: String) -> Bool {
+    path.rsplit('/').next().is_some_and(name -> name == "package.jet" || name == "build.jet")
+}
+// Rust: Source/CmdProve.rs:3699
+// Content-derived compiler identity emitted by build.rs over compiler inputs.
+fn proof_compiler_digest() -> String { env.compile_var("JET_COMPILER_BUILD_ID") }
+// Rust: Source/CmdProve.rs:3703
+fn proof_build_digest(build_inputs: String, lock_digest: String) -> String Err! {
+    compiler_digest :: proof_compiler_digest()
+    // GATE #4494: real child process; #4409: preserve NotFound.
+    rustc_identity :: if Command.new("rustc").args(["-vV"]).output() == {
+        Ok(rustc) if rustc.status.success() -> String.from_utf8(^rustc.stdout).map_err(_ -> "rustc identity is not UTF-8")?
+        Ok(_) -> return Err("cannot identify rustc: `rustc -vV` failed")
+        Err(error) if error.kind() == std.io.ErrorKind.NotFound -> "<unavailable: rustc executable not installed>"
+        Err(error) -> return Err("cannot identify rustc: {error}")
+    }
+    fields :: [
+        ("compiler", compiler_digest.as_bytes().to_vec()),
+        ("jet_version", env.compile_var("CARGO_PKG_VERSION").as_bytes().to_vec()),
+        ("compiler_build_id", env.compile_var("JET_COMPILER_BUILD_ID").as_bytes().to_vec()),
+        ("runner_id", (env.compile_var_optional("JET_RUNNER_BUILD_ID") ?? "unversioned").as_bytes().to_vec()),
+        ("stdlib_id", (env.compile_var_optional("JET_STDLIB_BUILD_ID") ?? "unversioned").as_bytes().to_vec()),
+        ("target", host_target_triple().as_bytes().to_vec()),
+        ("profile", "dev".as_bytes().to_vec()), ("rustc", rustc_identity.into_bytes()),
+        ("build_inputs", build_inputs.as_bytes().to_vec()), ("lock", lock_digest.as_bytes().to_vec())
+    ]
+    Ok(proof_digest("jet-proof-build-v2", &fields))
+}
+// Rust: Source/CmdProve.rs:3754
+fn load_checked_proof_bundle(entry: String, profile: String, setting_overrides: &[String:String]) -> (AST.ProgramBundle, Sema.SemIndexEffectFacts)? {
+    (diagnostics, bundle, facts) :: Driver.check_file_with_effect_facts_for_run(entry, profile, setting_overrides)
+    if diagnostics.iter().any(diagnostic -> diagnostic.severity == Severity.Error) { None }
+    else { bundle.map(bundle -> (^bundle, ^facts)) }
+}
+// Rust: Source/CmdProve.rs:3771
+fn proof_core_abi(bundle: &AST.ProgramBundle?, source_digest: String) -> String {
+    emission :: bundle.map(bundle -> Codegen.corelib_emission_fingerprint(bundle, false)) ?? "unavailable"
+    proof_digest("jet-proof-core-abi-v2", &[("emission", emission.into_bytes()), ("source", source_digest.as_bytes().to_vec())])
+}
+// Rust: Source/CmdProve.rs:3784
+fn unavailable_mir_identity(source_digest: String, core_abi: String, members: &[Member]) -> MIR.MirProgramIdentity {
+    fields := [("source", source_digest.as_bytes().to_vec()), ("core_abi", core_abi.as_bytes().to_vec())]
+    for member in members { fields.push((member.path.clone(), member.sha256.as_bytes().to_vec())) }
+    fields.push(("mir", "unavailable".as_bytes().to_vec()))
+    unavailable :: proof_digest("jet-proof-mir-unavailable-v1", &fields)
+    source_map := members.iter().enumerate().map((index, member) -> MIR.MirSourceMapIdentity {
+        id: index as UInt64 + 1, path: member.path.clone(), digest: member.sha256.clone()
+    }).collect()
+    source_map.sort_by((left, right) -> left.id.cmp(right.id))
+    MIR.MirProgramIdentity.unavailable(unavailable, ^source_map)
+}
+// Rust: Source/CmdProve.rs:3813
+fn proof_mir_identity(checked: &(AST.ProgramBundle, Sema.SemIndexEffectFacts)?, source_digest: String, core_abi: String, members: &[Member]) -> MIR.MirProgramIdentity {
+    if checked == {
+        Val((bundle, _facts)) -> {
+            (mir, artifact) :: lower_checked_semantic_mir_program_for(bundle, MIR.MirArtifactRequest.new(
+                MIR.MirArtifactTarget.RustAot, MIR.MirArtifactKind.NativeExecutable, MIR.MirArtifactBuildMode.Dev))
+            identity :: mir.artifact_identity(artifact).unwrap_or_else(error -> jet_foundation.ice(None, "canonical MIR identity failed: {error}"))
+            return std.sync.Arc.unwrap_or_clone(identity.program_identity)
+        }
+        None -> {}
+    }
+    unavailable_mir_identity(source_digest, core_abi, members)
+}
+// Rust: Source/CmdProve.rs:3836
+fn proof_mir_identity_for_file(file: String, profile: String, setting_overrides: &[String:String]) -> MIR.MirProgramIdentity Err! {
+    bytes :: fs.read(file).map_err(error -> "could not read `{file}`: {error}")?
+    member :: Member { path: normalized(OSPath.from(file)), sha256: SHA256.sha256_hex(bytes), bytes: ^bytes }
+    checked :: load_checked_proof_bundle(file, profile, setting_overrides).ok_or_else(() -> "could not check `{file}` for MIR artifact identity")?
+    source_digest :: SHA256.sha256_hex(member.bytes)
+    core_abi :: proof_core_abi(Val(&checked.0), source_digest)
+    Ok(proof_mir_identity(Val(&checked), source_digest, core_abi, &[member]))
+}
+// Rust: Source/CmdProve.rs:3859
+fn has_proof_manifest(dir: &OSPath, name: String) -> Bool Err! {
+    path :: dir.join(name)
+    if fs.symlink_metadata(path) == {
+        Ok(metadata) if metadata.file_type().is_symlink() -> Err("proof manifest `{path.display()}` is a symlink")
+        Ok(metadata) -> Ok(metadata.is_file())
+        Err(error) if error.kind() == std.io.ErrorKind.NotFound -> Ok(false)
+        Err(error) -> Err("couldn't inspect proof manifest `{path.display()}`: {error}")
+    }
+}
+// Rust: Source/CmdProve.rs:3874
+fn collect_jet_files(dir: &OSPath, out: &[OSPath]) -> Void Err! {
+    entries :: fs.read_dir(dir).map_err(e -> "couldn't read `{dir.display()}`: {e}")?
+    for entry in entries {
+        path :: entry.map_err(e -> "couldn't inspect `{dir.display()}`: {e}")?.path()
+        metadata :: fs.symlink_metadata(path).map_err(e -> "couldn't inspect `{path.display()}`: {e}")?
+        if metadata.file_type().is_symlink() { return Err("proof target contains symlink `{path.display()}`") }
+        if path.file_name().and_then(name -> name.to_str()).is_none() { return Err("proof target contains a non-UTF-8 path `{path.display()}`") }
+        if metadata.is_dir() {
+            name :: path.file_name().and_then(n -> n.to_str()) ?? ""
+            if name == "build" || name.starts_with('.') { continue }
+            collect_jet_files(path, out)?
+        } else if metadata.is_file() && path.extension().and_then(ext -> ext.to_str()) == Val(Syntax.FILE_EXT) {
+            name :: path.file_name().and_then(name -> name.to_str()) ?? ""
+            if name != Syntax.PACKAGE_FILE && name != Syntax.PAYLOAD_FILE && name != "build.jet" { out.push(^path) }
+        }
+    }
+    Ok(())
+}
+// Rust: Source/CmdProve.rs:3919
+fn collect_identity_files(dir: &OSPath, out: &[OSPath]) -> Void Err! {
+    entries :: fs.read_dir(dir).map_err(e -> "couldn't read `{dir.display()}`: {e}")?
+    for entry in entries {
+        path :: entry.map_err(e -> "couldn't inspect `{dir.display()}`: {e}")?.path()
+        metadata :: fs.symlink_metadata(path).map_err(e -> "couldn't inspect `{path.display()}`: {e}")?
+        if metadata.file_type().is_symlink() { return Err("proof target contains symlink `{path.display()}`") }
+        if path.file_name().and_then(name -> name.to_str()).is_none() { return Err("proof target contains a non-UTF-8 path `{path.display()}`") }
+        name :: path.file_name().and_then(name -> name.to_str()) ?? ""
+        parent_is_jet :: path.parent().and_then(parent -> parent.file_name()).and_then(name -> name.to_str()) == Val(".jet")
+        if metadata.is_dir() {
+            if name == ".git" || (parent_is_jet && name == "cache") { continue }
+            collect_identity_files(path, out)?
+            continue
+        }
+        if !metadata.is_file() { continue }
+        under_generated :: path.components().collect().windows(2).any(components ->
+            components[0].as_os_str() == ".jet" && components[1].as_os_str() == "generated")
+        if name == "package.jet" || name == "jet.lock" || name == "jet.lock.json" || name == "build.jet" ||
+            (parent_is_jet && name == "lock") || under_generated { out.push(^path) }
+    }
+    Ok(())
+}
+// Rust: Source/CmdProve.rs:3987
+fn normalized(path: &OSPath) -> String {
+    relative :: if path.is_absolute() {
+        path.strip_prefix(env.current_dir().unwrap_or_else(_ -> OSPath.from("."))).unwrap_or(path)
+    } else { path }
+    relative.components().map(part -> part.as_os_str().to_string_lossy()).collect().join("/")
+}
+// Rust: Source/CmdProve.rs:4000
+fn budget_projection(target: &Target) -> BudgetView.BudgetProjection {
+    target_path :: OSPath.from(target.root)
+    search :: if target_path.is_file() { target_path.parent().and_then(parent -> parent.parent()) ?? OSPath.from(".") } else { target_path }
+    root :: Loader.find_manifest_root(search).unwrap_or_else(() -> search.to_path_buf())
+    sources :: target.members.iter().map(member -> {
+        path :: OSPath.from(member.path)
+        relative :: path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+        trimmed := relative.trim_start_matches("./") // #4303
+        (trimmed.to_string(), member.sha256.clone())
+    }).collect()
+    BudgetView.read_compatible(root, sources)
+}
+// Rust: Source/CmdProve.rs:4030
+fn diagnostic_span(source: String, diagnostic: &Diagnostic) -> String {
+    span :: if diagnostic.span == { Val(span) -> span; None -> return "0:0-0:0" }
+    (sl, sc) :: span_line_col(source, span.start)
+    (el, ec) :: span_line_col(source, span.end)
+    "{sl}:{sc}-{el}:{ec}"
+}
+// Rust: Source/CmdProve.rs:4039
+fn evidence_id(target: &Target, kind: String, origin: String, span: String, claim: String) -> String {
+    claim_sha :: SHA256.sha256_hex(claim.as_bytes())
+    preimage := []
+    for field in [target.input_sha256, kind, origin, span, claim_sha] {
+        preimage.extend_from_slice((field.len() as UInt64).to_be_bytes())
+        preimage.extend_from_slice(field.as_bytes())
+    }
+    SHA256.sha256_hex(preimage)
+}
+// Rust: Source/CmdProve.rs:4049
+fn claim_grade(proved: USize, failed: USize, tests: &[TestItem], solver: &[ProveSolver.SolverEvidence]) -> String {
+    // Failed producers cannot establish a package floor.
+    if failed > 0 || tests.iter().any(item -> item.state == 1) { return "unchecked" }
+    if solver.iter().any(item -> if item.outcome == { Proved { .. } -> true; _ -> false }) { return "proved" }
+    generated: UInt64 :: tests.iter().filter(item -> item.generated && item.state == 0).map(item -> item.generated_count).sum()
+    if generated > 0 { return "generated({generated})" }
+    examples :: tests.iter().filter(item -> (item.kind == 0 || item.kind == 2 || item.kind == 4) && item.state == 0).count()
+    if examples > 0 { return "examples({examples})" }
+    if failed == 0 && proved > 0 { "checked" } else { "unchecked" }
+}
+// Rust: Source/CmdProve.rs:4091
+fn claims_floor_for_target(target: &Target) -> Package.ClaimsGrade? {
+    root :: OSPath.from(target.root)
+    entry :: if root.is_dir() { OSPath.from(target.members.first()?.path) } else { root.to_path_buf() }
+    Loader.package_facts_for_entry(entry).ok().flatten().and_then(facts -> facts.policy.claims_min)
+}
+// Rust: Source/CmdProve.rs:4103
+fn grade_meets_floor(actual: String, floor: Package.ClaimsGrade) -> Bool {
+    Package.ClaimsGrade.parse(actual).is_some_and(grade -> grade.meets(floor))
+}
+// Rust: Source/CmdProve.rs:4107
+fn render_report(target: &Target, items: &[FrontEndItem], warnings: &[FrontEndWarning], tests: &[TestItem],
+    budgets: &BudgetView.BudgetProjection, solver: &[ProveSolver.SolverEvidence], _lenses: &[String],
+    declarations: &[ContractDeclaration], replay_time_ms: Int64?, proved: USize, failed: USize,
+    claims_grade: String, claims_floor: Package.ClaimsGrade?, exit_code: Int32) -> String {
+    members :: target.identity_members.iter().map((path, sha256) -> "{{\"path\":{json(path)},\"sha256\":{json(sha256)}}}").collect().join(",")
+    diagnostics := items.iter().filter_map(item -> item.diagnostic.map(d -> diagnostic_json(item.path, item.source, d))).collect()
+    diagnostic_index := 0
+    evidence_rows := items.iter().map(item -> {
+        (outcome, indexes) :: if item.diagnostic.is_some() {
+            i :: diagnostic_index
+            diagnostic_index += 1
+            ("failed", "[{i}]")
+        } else { ("proved", "[]") }
+        "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"{item.facet}\",\"id\":{json(item.id)},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":{item.column},\"line\":{item.line},\"path\":{json(item.path)}}},\"state\":\"checked\"}}"
+    }).collect()
+    if claims_floor == {
+        Val(floor) -> {
+            floor_name :: floor.render()
+            diagnostic :: Diagnostic.error("E2942", "claim grade `{claims_grade}` is below package floor `{floor_name}`",
+                "package policy requires at least `{floor_name}` evidence",
+                "raise the claim with `jet prove --lens solver` or the required generated/property evidence", None)
+            diagnostic_index :: diagnostics.len()
+            diagnostics.push(diagnostic_json(target.root, "", diagnostic))
+            claim :: "claim grade `{claims_grade}` below floor `{floor_name}`"
+            id :: evidence_id(target, "claims_policy", target.root, "1:1-1:1", claim)
+            evidence_rows.push("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"claims\",\"id\":{json(id)},\"kind\":\"policy\",\"outcome\":\"failed\",\"producer\":\"jet-policy\",\"property\":null,\"reason\":\"claims_floor\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{json(target.root)}}},\"state\":\"unchecked\"}}")
+        }
+        None -> {}
+    }
+    used_contract_records := collections.BTreeSet.new()
+    for declaration in declarations {
+        matching :: matching_contract_record(declaration, tests, used_contract_records)
+        (id, attachment, state, outcome, reason, observation, diagnostic_indexes) :: if matching == {
+            Val((index, item)) -> {
+                used_contract_records.insert(index)
+                (state, outcome, reason, observation) :: if item.state == {
+                    0 -> ("executed", "passed", "null", "reached_pass")
+                    1 -> ("executed", "failed", "null", "reached_fail")
+                    2 -> ("skipped", "not_run", "\"fail_fast_policy\"", "not_reached")
+                    _ -> ("unavailable", "unavailable", "\"producer_start_failed\"", "not_reached")
+                }
+                diagnostic_indexes :: if item.state == 1 {
+                    index :: diagnostics.len()
+                    diagnostics.push(runtime_contract_diagnostic(declaration.path, item))
+                    "[{index}]"
+                } else { "[]" }
+                (declaration.id.clone(), if item.state == 0 || item.state == 1 { "{{\"testEvidenceId\":{json(item.id)}}}" } else { "null" },
+                    state, outcome, reason, observation, diagnostic_indexes)
+            }
+            None -> (declaration.id.clone(), "null", "declared", "not_observed", "null", "not_reached", "[]")
+        }
+        contract :: "{{\"marker\":{json(declaration.marker)},\"observation\":\"{observation}\",\"site\":{{\"column\":{declaration.column},\"line\":{declaration.line},\"path\":{json(declaration.path)}}}}}"
+        evidence_rows.push("{{\"attachment\":{attachment},\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"contracts\",\"id\":{json(id)},\"kind\":\"contract\",\"outcome\":\"{outcome}\",\"producer\":\"jet-runtime\",\"property\":null,\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":{declaration.column},\"line\":{declaration.line},\"path\":{json(declaration.path)}}},\"state\":\"{state}\"}}")
+    }
+    for item in tests {
+        if item.kind == 1 { continue }
+        if item.kind == 2 {
+            // Preserve the failed unit execution and its diagnostic linkage.
+            diagnostic_index :: diagnostics.len()
+            diagnostics.push(runtime_item_diagnostic(item))
+            evidence_rows.push("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"tests\",\"id\":{json(item.id)},\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":{item.line.max(1)},\"path\":{json(item.path)}}},\"state\":\"executed\"}}")
+            continue
+        }
+        (kind, facet, producer) :: if item.kind == {
+            3 -> ("property", "tests", "jet-property")
+            4 -> ("doctest", "tests", "jet-doctest")
+            _ -> ("unit", "tests", "jet-test")
+        }
+        (state, outcome) :: if item.state == {
+            0 -> ("executed", "passed")
+            1 -> ("executed", "failed")
+            2 -> ("skipped", "not_run")
+            _ -> ("unavailable", "unavailable")
+        }
+        reason :: if item.state == 2 { "\"fail_fast_policy\"" }
+            else if item.reason.is_empty() { if item.state > 2 { "\"producer_start_failed\"" } else { "null" } }
+            else { json(item.reason) }
+        diagnostic_indexes :: if item.state == 1 {
+            index :: diagnostics.len()
+            diagnostics.push(runtime_item_diagnostic(item))
+            "[{index}]"
+        } else { "[]" }
+        property :: if item.kind == 3 {
+            shrink_trace :: if item.message.is_empty() { "[]" } else { "[{{\"name\":\"minimized_inputs\",\"value\":{json(item.message)}}}]" }
+            "{{\"caseIndex\":{item.case_index},\"effectiveSeed\":{item.seed.parse::<UInt64>().unwrap_or(0)},\"generatedCases\":{item.generated_count},\"shrinkTrace\":{shrink_trace},\"source\":{{\"column\":1,\"line\":1,\"path\":{json(item.path)}}},\"toolchain\":{{\"jet\":{json(env.compile_var(\"CARGO_PKG_VERSION\"))},\"targetTriple\":{json(host_target_triple())}}}}}"
+        } else { "null" }
+        count :: if item.kind == 3 { item.generated_count } else { 1 }
+        evidence_rows.push("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":{count},\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{json(item.id)},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{item.line.max(1)},\"path\":{json(item.path)}}},\"state\":\"{state}\"}}")
+    }
+    for fact in budgets.facts {
+        kind :: if fact.statistical { "statistical_budget" } else { "deterministic_budget" }
+        outcome :: if fact.outcome == { "pass" -> "met"; "warn" -> "warning"; _ -> "failed" }
+        budget :: "{{\"budgetId\":{json(fact.budget_id)},\"enforcement\":{json(fact.enforcement)},\"evidenceId\":{json(fact.evidence_id)},\"reportId\":{json(fact.report_id)},\"statistical\":{fact.statistical}}}"
+        evidence_rows.push("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{json(fact.evidence_id)},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{json(target.root)}}},\"state\":\"checked\"}}")
+    }
+    for (index, reason) in budgets.rejected.iter().enumerate() {
+        claim :: "canonical budget report unavailable: {reason}"
+        id :: evidence_id(target, "budget", target.root, "0:0-0:{index}", claim)
+        evidence_rows.push("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{json(id)},\"kind\":\"deterministic_budget\",\"outcome\":\"unavailable\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":{json(reason)},\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{json(target.root)}}},\"state\":\"unavailable\"}}")
+    }
+    for item in solver {
+        diagnostic_indexes :: if item.outcome == {
+            Disproved { assignment, .. } -> {
+                index :: diagnostics.len()
+                values :: assignment.iter().map((name, value) -> "{name} = {value}").collect().join(", ")
+                message :: "solver found a counterexample to {item.obligation.kind}"
+                why :: "Why: these values satisfy every assumption but make the claim false: {values}"
+                fix :: "Fix: change {item.obligation.origin} so every admitted input satisfies the claim, or correct the contract"
+                diagnostics.push("{{\"caret\":null,\"code\":\"E2950\",\"context\":[],\"frames\":[],\"message\":{json(message)},\"notes\":[{json(why)},{json(fix)}],\"origin\":{{\"producer\":\"native-presburger\",\"stage\":\"solver\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":1,\"endLine\":1,\"path\":{json(item.obligation.origin)},\"sourceLine\":null,\"startColumn\":1,\"startLine\":1}},\"type\":\"producer\"}}")
+                "[{index}]"
+            }
+            _ -> "[]"
+        }
+        evidence_rows.push(ProveSolver.evidence_json(item, diagnostic_indexes))
+    }
+    if replay_time_ms == {
+        Val(time_ms) -> {
+            claim :: "replayed Time authority at {time_ms} ms"
+            id :: evidence_id(target, "replay", target.root, "1:1-1:1", claim)
+            evidence_rows.push("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"replay\",\"id\":{json(id)},\"kind\":\"front_end\",\"outcome\":\"observed\",\"producer\":\"jet-replay\",\"property\":null,\"reason\":\"parity_not_available\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{json(target.root)}}},\"state\":\"executed\"}}")
+        }
+        None -> {}
+    }
+    for warning in warnings { diagnostics.push(diagnostic_json(warning.path, warning.source, warning.diagnostic)) }
+    (evidence, derivations) :: canonicalize_evidence_rows(target, evidence_rows)
+    (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) :: ProveSolver.summarize(solver)
+    unit_report :: unit_test_report(tests)
+    unit_summary :: unit_report.status_envelope().json()
+    unit_unavailable :: tests.iter().filter(item -> (item.kind == 0 || item.kind == 2) && item.state == 3).count()
+    contract_selected :: declarations.len()
+    (contract_passed, contract_failed, contract_not_observed, contract_skipped) :: contract_summary(declarations, tests)
+    contract_observed :: contract_passed + contract_failed
+    property_passed :: tests.iter().filter(item -> item.kind == 3 && item.state == 0).count()
+    property_failed :: tests.iter().filter(item -> item.kind == 3 && item.state == 1).count()
+    property_cases: UInt32 :: tests.iter().filter(item -> item.kind == 3).map(item -> item.line).sum()
+    property_shrunk_failures :: tests.iter().filter(item -> item.kind == 3 && item.state == 1 && !item.message.is_empty()).count()
+    doctest_passed :: tests.iter().filter(item -> item.kind == 4 && item.state == 0).count()
+    doctest_failed :: tests.iter().filter(item -> item.kind == 4 && item.state == 1).count()
+    doctest_skipped :: tests.iter().filter(item -> item.kind == 4 && item.state >= 2).count()
+    doctest_selected :: doctest_passed + doctest_failed + doctest_skipped
+    deterministic_selected :: budgets.facts.iter().filter(fact -> !fact.statistical).count() + budgets.rejected.len()
+    deterministic_failed :: budgets.facts.iter().filter(fact -> !fact.statistical && fact.outcome == "fail").count()
+    deterministic_met :: budgets.facts.iter().filter(fact -> !fact.statistical && fact.outcome == "pass").count()
+    deterministic_unavailable :: budgets.facts.iter().filter(fact -> !fact.statistical && fact.evidence == "unavailable").count() + budgets.rejected.len()
+    statistical_selected :: budgets.facts.iter().filter(fact -> fact.statistical).count()
+    statistical_failed :: budgets.facts.iter().filter(fact -> fact.statistical && fact.outcome == "fail").count()
+    statistical_met :: budgets.facts.iter().filter(fact -> fact.statistical && fact.outcome == "pass").count()
+    statistical_unavailable :: budgets.facts.iter().filter(fact -> fact.statistical && fact.evidence == "unavailable").count()
+    front_end_selected :: proved + failed
+    property_skipped :: tests.iter().filter(item -> item.kind == 3 && item.state >= 2).count()
+    property_selected :: property_passed + property_failed + property_skipped
+    result :: if exit_code != ExitCodes.OK { "fail" }
+        else if unit_unavailable > 0 || deterministic_unavailable > 0 || statistical_unavailable > 0 || solver_unknown > 0 { "pass_incomplete" }
+        else { "pass" }
+    mir :: target.mir.canonical_json()
+    candidate_identity :: candidate_identity_json(target)
+    grade :: json(claims_grade)
+    version :: json(env.compile_var("CARGO_PKG_VERSION"))
+    triple :: json(host_target_triple())
+    "{{\"derivations\":[{derivations}],\"diagnostics\":[{diagnostics.join(\",\")}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"candidateIdentity\":{candidate_identity},\"summaries\":{{\"claims\":{{\"grade\":{grade}}},\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{unit_summary}}},\"target\":{{\"inputSha256\":{json(target.input_sha256)},\"kind\":\"{target.kind}\",\"members\":[{members}],\"mir\":{mir},\"root\":{json(target.root)}}},\"tool\":{{\"jet\":{version},\"proofProducer\":\"jet-prove\",\"targetTriple\":{triple}}}}}"
+}
+// Rust: Source/CmdProve.rs:4473
+fn canonicalize_evidence_rows(target: &Target, rows: &[String]) -> (String, String) {
+    identity :: DerivationIdentity.new(target.source_digest.clone(), target.build_digest.clone(), target.mir.optimized_hash.clone(), target.input_sha256.clone())
+    rendered := Array<String>.with_capacity(rows.len())
+    derivations := Array<String>.with_capacity(rows.len())
+    for (index, row) in rows.iter().enumerate() {
+        id :: row_string_field(row, "id") ?? "proof-row-{index}"
+        kind :: row_string_field(row, "kind") ?? "unknown"
+        producer :: row_string_field(row, "producer") ?? "jet-prove"
+        method :: if producer == {
+            "native-presburger" | "jet-solver" -> DerivationMethod.FormalProof
+            "jet-property" -> DerivationMethod.SampledAgreement
+            "jet-runtime" | "jet-test" | "jet-doctest" | "jet-replay" -> DerivationMethod.RecordedExecution
+            "jet-sema" | "jet-budget" | "jet-policy" -> DerivationMethod.StaticDerivation
+            _ -> DerivationMethod.ExternalAssumption
+        }
+        outcome :: row_string_field(row, "outcome") ?? ""
+        state :: row_string_field(row, "state") ?? ""
+        disposition :: if outcome == "unavailable" || outcome == "not_observed" || outcome == "unknown" ||
+            state == "unavailable" || state == "not_run" || state == "unchecked" { DerivationDisposition.Unavailable } else { DerivationDisposition.Current }
+        derivation :: DerivationRecord.new(id.clone(), "{kind}:{id}", producer, method, "checked-proof-row", [id.clone()], identity.clone()).with_disposition(disposition)
+        rendered.push(row.strip_suffix('}').map(prefix -> "{prefix},\"derivation\":{{\"id\":{json(derivation.id)}}}}}").unwrap_or_else(() -> row.clone()))
+        derivations.push(derivation.to_json())
+    }
+    (rendered.join(","), derivations.join(","))
+}
+// Rust: Source/CmdProve.rs:4535
+fn row_string_field(row: String, field: String) -> String? {
+    tree :: parse_json(row).ok()?
+    fields :: if tree == { DataTree.Object(fields) -> fields; _ -> return None }
+    fields.iter().find_map((key, value) -> if key == field { value.as_str().ok() } else { None }).map(value -> value.to_string())
+}
+// Rust: Source/CmdProve.rs:4545
+fn contract_summary(declarations: &[ContractDeclaration], tests: &[TestItem]) -> (USize, USize, USize, USize) {
+    used := collections.BTreeSet.new()
+    passed := 0
+    failed := 0
+    not_observed := 0
+    skipped := 0
+    for declaration in declarations {
+        if matching_contract_record(declaration, tests, used) == {
+            None -> { not_observed += 1; continue }
+            Val((index, item)) -> {
+                used.insert(index)
+                if item.state == { 0 -> passed += 1; 1 -> failed += 1; _ -> skipped += 1 }
+            }
+        }
+    }
+    (passed, failed, not_observed, skipped)
+}
+// Rust: Source/CmdProve.rs:4570
+fn diagnostic_json(path: String, source: String, d: &Diagnostic) -> String {
+    severity :: if d.severity == Severity.Error { "error" } else { "warning" }
+    span :: d.span.map(s -> {
+        (sl, sc) :: span_line_col(source, s.start)
+        (el, ec) :: span_line_col(source, s.end)
+        "{{\"endColumn\":{ec},\"endLine\":{el},\"path\":{json(path)},\"sourceLine\":null,\"startColumn\":{sc},\"startLine\":{sl}}}"
+    }) ?? "null"
+    why :: "Why: {d.why}"
+    fix :: "Fix: {d.fix}"
+    "{{\"caret\":null,\"code\":{json(d.code)},\"context\":[],\"frames\":[],\"message\":{json(d.what)},\"notes\":[{json(why)},{json(fix)}],\"origin\":{{\"producer\":\"jet-sema\",\"stage\":\"front_end\"}},\"safeLocals\":[],\"severity\":\"{severity}\",\"span\":{span},\"type\":\"front_end\"}}"
+}
+// Rust: Source/CmdProve.rs:4580
+fn source_paths_match(left: String, right: String) -> Bool {
+    normalize :: (path: String) -> { trimmed := path.trim_start_matches("./"); trimmed.replace('\\', "/") } // #4303
+    l :: normalize(left)
+    r :: normalize(right)
+    l == r || l.ends_with("/{r}") || r.ends_with("/{l}")
+}
+// Rust: Source/CmdProve.rs:4586
+fn contract_record_matches(declaration: &ContractDeclaration, item: &TestItem) -> Bool {
+    item.kind == 1 && item.name == declaration.marker && source_paths_match(item.path, declaration.path) &&
+        declaration.message.map_or(true, message -> message == item.message)
+}
+// Rust: Source/CmdProve.rs:4596
+fn matching_contract_record(declaration: &ContractDeclaration, tests: &[TestItem], used: &collections.BTreeSet<USize>) -> (USize, &TestItem)? {
+    matching :: tests.iter().enumerate().find((index, item) -> !used.contains(index) && contract_record_matches(declaration, item) && item.line as USize == declaration.line)
+    if matching.is_some() { return matching }
+    candidates := tests.iter().enumerate().filter((index, item) -> !used.contains(index) && contract_record_matches(declaration, item))
+    first :: candidates.next()?
+    if candidates.next().is_none() { Val(first) } else { None }
+}
+// Rust: Source/CmdProve.rs:4615
+fn runtime_contract_diagnostic(path: String, item: &TestItem) -> String {
+    message :: "#{item.name} contract failed: {item.message}"
+    report :: Outcome.jet_render_runtime_stop("E3005", path, item.line, "", "", 1, 1, message, "")
+    why :: "Why: {report.why}"
+    fix :: "Fix: {report.fix}"
+    source_line :: source_line_for(path, item.line)
+    source_line_json :: source_line.map(line -> json(line)) ?? "null"
+    width :: source_line.map_or(1, line -> line.chars().count().max(1))
+    "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{json(message)},\"notes\":[{json(why)},{json(fix)}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{width + 1},\"endLine\":{item.line},\"path\":{json(path)},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{item.line}}},\"type\":\"runtime\"}}"
+}
+// Rust: Source/CmdProve.rs:4642
+fn source_line_for(path: String, line: UInt32) -> String? {
+    index :: USize.try_from(line).ok()?.checked_sub(1)?
+    fs.read_to_string(path).ok()?.lines().nth(index).map(line -> line.to_string())
+}
+// Rust: Source/CmdProve.rs:4651
+struct UnitTestReport {
+    passed: USize
+    failed: USize
+    skipped: USize
+    // Rust: Source/CmdProve.rs:4658
+    fn summary(self: &Self) -> String { "{self.passed} passed, {self.failed} failed, {self.skipped} skipped" }
+    // Rust: Source/CmdProve.rs:4665
+    fn status_envelope(self: &Self) -> StatusEnvelope {
+        StatusEnvelope.new("test", self.failed == 0).with_field("test", StatusValue.object(
+            StatusFields.new().with("failed", self.failed).with("passed", self.passed).with("skipped", self.skipped)
+                .with("selected", self.passed + self.failed + self.skipped)))
+    }
+}
+// Rust: Source/CmdProve.rs:4679
+fn unit_test_report(tests: &[TestItem]) -> UnitTestReport {
+    is_unit :: (item: &TestItem) -> item.kind == 0 || item.kind == 2
+    UnitTestReport {
+        passed: tests.iter().filter(item -> is_unit(item) && item.state == 0).count(),
+        failed: tests.iter().filter(item -> is_unit(item) && item.state == 1).count(),
+        skipped: tests.iter().filter(item -> is_unit(item) && item.state >= 2).count()
+    }
+}
+// Rust: Source/CmdProve.rs:4697
+fn test_failure_detail(item: &TestItem) -> String {
+    source_line :: source_line_for(item.path, item.line) ?? ""
+    caret :: source_line.chars().count().max(1)
+    spaces :: " ".repeat(caret.saturating_sub(1))
+    "  Stop [E3001]: {item.message}\n    --> {item.path}:{item.line}\n      {spaces}^\n  More: jet-lang.dev/e/E3001\n"
+}
+// Rust: Source/CmdProve.rs:4709
+fn test_failure_json(item: &TestItem) -> String {
+    source_line :: source_line_for(item.path, item.line)
+    source_line_json :: source_line.map(line -> json(line)) ?? "null"
+    width :: source_line.map_or(1, line -> line.chars().count().max(1))
+    "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3001\",\"context\":[],\"frames\":[],\"message\":{json(item.message)},\"notes\":[],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{width + 1},\"endLine\":{item.line},\"path\":{json(item.path)},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{item.line}}},\"type\":\"runtime\"}}"
+}
+// Rust: Source/CmdProve.rs:4728
+fn runtime_item_diagnostic(item: &TestItem) -> String { test_failure_json(item) }
+// Rust: Source/CmdProve.rs:4732
+fn candidate_digest_json(value: String) -> String {
+    digest :: if value.starts_with("sha256-") { value.to_string() } else { "sha256-{value}" }
+    json(digest)
+}
+// Rust: Source/CmdProve.rs:4741
+fn candidate_identity_json(target: &Target) -> String {
+    version :: json(env.compile_var("CARGO_PKG_VERSION"))
+    "{{\"source\":{{\"sha256\":{candidate_digest_json(target.source_digest)},\"contentSha256\":{candidate_digest_json(target.source_digest)},\"inputSha256\":{candidate_digest_json(target.input_sha256)}}},\"compiler\":{{\"sha256\":{candidate_digest_json(target.build_digest)},\"version\":{version}}},\"configuration\":{{\"coreAbi\":{json(target.core_abi)},\"lockSha256\":{candidate_digest_json(target.lock_digest)},\"profile\":\"dev\"}},\"generatedArtifact\":{{\"semanticMirSha256\":{candidate_digest_json(target.mir.semantic_hash)},\"optimizedMirSha256\":{candidate_digest_json(target.mir.optimized_hash)},\"mir\":{target.mir.canonical_json()}}},\"targetTool\":{{\"triple\":{json(host_target_triple())},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
+}
+// Rust: Source/CmdProve.rs:4758
+fn record_links_json(links: &[RecordLink]) -> String {
+    sorted := links.to_vec()
+    sorted.sort()
+    values :: sorted.iter().map(link -> "{{\"artifact_id\":{json(link.artifact_id)},\"kind\":{json(link.kind.as_str())}}}").collect()
+    "[{values.join(\",\")}]"
+}
+// Rust: Source/CmdProve.rs:4776
+// D-JPROOF1=A: identical existing bytes stay unchanged; differing bytes refuse.
+fn write_jetproof(target: &Target, proof_report: String, consumed: &[RecordLink], produced: &[RecordLink]) -> ProofArtifact Err! {
+    report_bytes :: "{proof_report}\n"
+    report_id :: SHA256.sha256_hex(report_bytes.as_bytes())
+    kind :: target.kind
+    root :: OSPath.from(target.root)
+    stem :: (root.file_stem().and_then(s -> s.to_str()) ?? kind).replace('.', "_")
+    name :: if stem.is_empty() { kind.to_string() } else { stem }
+    short_id := report_id.get(0..<16.min(report_id.len())).unwrap()
+    rel :: ".jet/proofs/{kind}/{name}/{short_id}.jetproof"
+    path :: target.authority_root.join(rel)
+    consumed_json :: record_links_json(consumed)
+    produced_json :: record_links_json(produced)
+    envelope :: "{{\"artifact\":{{\"path\":{json(rel)}}},\"consumed\":{consumed_json},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{produced_json},\"proofReport\":{proof_report},\"report_id\":{json(report_id)},\"schema\":\"jet.jproof\",\"version\":2}}\n"
+    ensure_artifact_parent(path)?
+    // GATE #4494: no-follow metadata, exclusive create, hard-link publication and fsync.
+    if fs.symlink_metadata(path) == {
+        Ok(metadata) -> {
+            if !metadata.file_type().is_file() { return Err("final .jetproof path is not a regular file: {rel}") }
+            existing :: fs.read(path).map_err(e -> e.to_string())?
+            if existing == envelope.as_bytes() {
+                return Ok(ProofArtifact { artifact_id: report_id, path: ^path,
+                    size: UInt64.try_from(envelope.len()).map_err(_ -> "proof artifact is too large")? })
+            }
+            return Err("refusing to overwrite differing .jetproof at {rel}")
+        }
+        Err(_) -> {}
+    }
+    hash := report_id.get(0..<8).unwrap()
+    tmp :: path.with_extension("jetproof.tmp.{process.id()}.{hash}")
+    write_result :: (() -> {
+        file := fs.OpenOptions.new().write(true).create_new(true).open(tmp).map_err(e -> e.to_string())?
+        // GATE #4483: selected-family cfg(unix).
+        if core.sys.target.selected_family() == "unix" {
+            file.set_permissions(fs.Permissions.from_mode(0o600)).map_err(e -> e.to_string())?
+        }
+        file.write_all(envelope.as_bytes()).map_err(e -> e.to_string())?
+        file.sync_all().map_err(e -> e.to_string())?
+        if fs.hard_link(tmp, path) == {
+            Ok(_) -> {}
+            Err(error) if error.kind() == std.io.ErrorKind.AlreadyExists -> {
+                metadata :: fs.symlink_metadata(path).map_err(e -> e.to_string())?
+                if metadata.file_type().is_symlink() || !metadata.is_file() { return Err("final .jetproof path is not a regular file: {rel}") }
+                existing :: fs.read(path).map_err(e -> e.to_string())?
+                if existing != envelope.as_bytes() { return Err("refusing to overwrite differing .jetproof at {rel}") }
+            }
+            Err(error) -> return Err(error.to_string())
+        }
+        fs.remove_file(tmp).map_err(e -> e.to_string())?
+        if core.sys.target.selected_family() == "unix" {
+            if path.parent() == {
+                Val(parent) -> fs.File.open(parent).map_err(e -> e.to_string())?.sync_all().map_err(e -> e.to_string())?
+                None -> {}
+            }
+        }
+        Ok(())
+    })()
+    if write_result == {
+        Err(error) -> { _ :: fs.remove_file(tmp); return Err(error) }
+        Ok(_) -> {}
+    }
+    Ok(ProofArtifact { artifact_id: report_id, path: ^path,
+        size: UInt64.try_from(envelope.len()).map_err(_ -> "proof artifact is too large")? })
+}
+// Rust: Source/CmdProve.rs:4889
+fn ensure_artifact_parent(path: &OSPath) -> Void Err! {
+    parent :: path.parent() ?? OSPath.from(".")
+    current := if parent.is_absolute() { OSPath.from(std.path.MAIN_SEPARATOR.to_string()) } else { OSPath.from(".") }
+    for component in parent.components() {
+        if component == {
+            RootDir | CurDir -> {}
+            Normal(name) -> {
+                current.push(name)
+                if fs.symlink_metadata(current) == {
+                    Ok(metadata) if metadata.file_type().is_symlink() -> return Err("artifact parent is a symlink: {current.display()}")
+                    Ok(metadata) if !metadata.is_dir() -> return Err("artifact parent is not a directory: {current.display()}")
+                    Ok(_) -> {}
+                    Err(error) if error.kind() == std.io.ErrorKind.NotFound -> {
+                        fs.create_dir(current).map_err(e -> e.to_string())?
+                        // GATE #4483: selected-family cfg(unix); #4494: native permissions.
+                        if core.sys.target.selected_family() == "unix" {
+                            fs.set_permissions(current, fs.Permissions.from_mode(0o700)).map_err(e -> e.to_string())?
+                        }
+                    }
+                    Err(error) -> return Err(error.to_string())
+                }
+            }
+            ParentDir | Prefix(_) -> return Err("artifact parent contains an unsafe component")
+        }
+    }
+    Ok(())
+}

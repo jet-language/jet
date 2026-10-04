@@ -1,0 +1,43 @@
+use jet.Fetch
+use std.net.IpAddr
+
+// Rust: Source/Fetch.rs:3141
+#Test("git_revision_allowlist_rejects_option_and_control_injection") {
+    assert(Fetch.validate_git_revision("main").is_ok())
+    assert(Fetch.validate_git_revision("--upload-pack=touch pwned").is_err())
+    assert(Fetch.validate_git_revision("main\n--upload-pack=touch").is_err())
+}
+// Rust: Source/Fetch.rs:3148
+#Test("git_diagnostics_keep_source_data_but_escape_terminal_projection") {
+    diagnostic :: Fetch.git_transport_diagnostic("https://example.invalid/repo.git\nforged", "provider stderr: \u{001b}[31mfailed")
+    rendered :: diagnostic.render("", "")
+    assert(!rendered.contains('\u{001b}'))
+    assert(rendered.contains("\\nforged"))
+    assert(rendered.contains("\\u{001b}"))
+    assert(diagnostic.why.contains('\n'))
+}
+// Rust: Source/Fetch.rs:3161
+#Test("git_network_transport_pins_validated_address_and_disables_redirects") {
+    https_url :: "https://8.8.8.8/repository.git"
+    https :: Fetch.validate_git_transport_url(https_url, OSPath.from(".")).expect("numeric public HTTPS host should validate")
+    assert_eq(https.pinned_url(https_url), https_url)
+    assert_eq(https.git_config_values(), ["http.followRedirects=false", "http.proxy=", "http.sslVerify=true",
+        "http.curloptResolve=8.8.8.8:443:8.8.8.8"])
+    rebound :: Fetch.ValidatedGitTransport.Network{scheme: "https", host: "rebind.example", port: U16{443},
+        explicit_port: false, address: "8.8.8.8".parse[IpAddr]().unwrap()}
+    assert_eq(rebound.pinned_url("https://rebind.example/repository.git"), "https://rebind.example/repository.git")
+    assert(rebound.git_config_values().iter().any(value -> value == "http.curloptResolve=rebind.example:443:8.8.8.8"))
+    assert_eq(Fetch.curl_resolve_host("2001:db8::1"), "[2001:db8::1]")
+    git_url :: "git://8.8.8.8/repository.git"
+    git :: Fetch.validate_git_transport_url(git_url, OSPath.from(".")).expect("numeric public Git host should validate")
+    assert_eq(git.pinned_url(git_url), "git://8.8.8.8/repository.git")
+    ssh :: Fetch.validate_git_transport_url("ssh://git@8.8.8.8/repository.git", OSPath.from(".")).expect("numeric public SSH host should validate")
+    assert(ssh.ssh_command().expect("SSH transport should pin its address").contains("-oHostName=8.8.8.8"))
+}
+// Rust: Source/Fetch.rs:3212
+#Test("git_transport_rejects_reserved_ipv4_destination") {
+    loop address in ["192.0.0.1", "192.0.0.9", "192.0.0.255"] {
+        url :: "https://{address}/repository.git"
+        assert(Fetch.validate_git_transport_url(url, OSPath.from(".")).is_err(), "reserved Git destination was accepted: {url}")
+    }
+}
