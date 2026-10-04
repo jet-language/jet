@@ -103,6 +103,7 @@ use jet_parser.[
     parse_source,
 ]
 use jet_optimizer.[
+    mir_optimizer_function_failures,
     optimize_mir_program,
     MIROptimizationResult,
 ]
@@ -377,6 +378,20 @@ fn jet_driver_mir_function_index_for_id(functions: [MIRFunction], identity: MIRF
         index += 1
     }
     selected
+}
+
+// Function ID -> its row, or -1 when the ID repeats (as
+// jet_driver_mir_function_index_for_id, for many lookups in one pass).
+fn jet_driver_mir_function_rows(functions: [MIRFunction]) -> [U64:Int] Never! {
+    rows := [U64:Int]{}
+    loop (index, function) in functions {
+        if rows.get(function.id.value) == None {
+            &rows.add(function.id.value, index).drop("checked absent above")
+        } else {
+            &rows.add(function.id.value, -1).drop("a repeated identity has no single row")
+        }
+    }
+    rows
 }
 
 fn jet_driver_loaded_module_index_for_mir_module(load: JetDriverLoadResult, identity: MIRModuleID) -> Int? {
@@ -2427,11 +2442,11 @@ fn jet_driver_prunable_core_modules(load: JetDriverLoadResult, core_sources: [Je
 // Every failed unit is recorded and replaced by a typed trap so every later
 // phase still runs: sema keeps a failed function as a trap of its declared
 // signature (SemaRegistrationGraph.keep_going), comptime drops a failed item,
-// the optimizer traps the function a legality or lint failure names and runs
-// again, and the emitter keeps every failure and finishes the text. Each
-// failure is one TSV row (phase, item, code, message, span), returned in
-// keep_going_rows and streamed through the trace sink at every phase
-// boundary (jet_driver_keep_going_flush), so a later crash keeps it. The
+// the optimizer traps every function the failing legality or lint check
+// rejects and runs again, and the emitter keeps every failure and finishes
+// the text. Each failure is one TSV row (phase, item, code, message, span),
+// returned in keep_going_rows and streamed through the trace sink at every
+// phase boundary (jet_driver_keep_going_flush), so a later crash keeps it. The
 // output is never shipped: the result keeps every error report, so its
 // receipt never passes.
 struct JetDriverKeepGoingLog {
@@ -2447,7 +2462,7 @@ struct JetDriverKeepGoingLog {
     streamed: Int
 }
 
-// Optimizer reruns after trapping a failed function, per compile.
+// Optimizer reruns after trapping failed functions, per compile.
 JET_DRIVER_KEEP_GOING_OPTIMIZER_RETRIES :: 64
 
 fn jet_driver_keep_going_log(options: JetDriverKeepGoing?) -> JetDriverKeepGoingLog Never! {
@@ -2584,29 +2599,40 @@ fn jet_driver_keep_going_trap_emission(kg: &JetDriverKeepGoingLog, program: &MIR
     }
 }
 
-// Each optimizer failure is a row; when it names a function, that function
-// becomes a trap and the optimizer runs again on the program as it stands.
+// Each optimizer failure is a row. The failing check then names every other
+// function it rejects in the program as it stands; all of them become traps
+// together and the optimizer runs again on the program, so reruns grow with
+// the failing checks rather than with the failing functions.
 fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool) -> MIROptimizationResult {
     optimization := ^first
     attempts := 0
+    traps := 0
     loop attempts < JET_DRIVER_KEEP_GOING_OPTIMIZER_RETRIES {
         optimizer_error :: optimization.error ?? { break }
-        phase :: if optimizer_error.kind == .Lint -> "mir-lint" else -> "optimize"
-        position := Int?{None}
-        if optimizer_error.function == .Val(function_id) -> position = jet_driver_mir_function_index_for_id(program.functions, function_id)
-        item := "-"
-        site := "{optimizer_error.span.start}..{optimizer_error.span.end}"
-        if position == .Val(index) {
-            item = "{program.functions[index].name} [{program.functions[index].key}]"
-            site = jet_driver_keep_going_mir_site(program, program.functions[index], optimizer_error.span)
+        failures :: mir_optimizer_function_failures(program, optimizer_error)
+        rows :: jet_driver_mir_function_rows(program.functions)
+        trapped := 0
+        loop failure in failures {
+            phase :: if failure.kind == .Lint -> "mir-lint" else -> "optimize"
+            position := -1
+            if failure.function == .Val(function_id) -> position = rows.get(function_id.value) ?? -1
+            item := "-"
+            site := "{failure.span.start}..{failure.span.end}"
+            if position >= 0 {
+                item = "{program.functions[position].name} [{program.functions[position].key}]"
+                site = jet_driver_keep_going_mir_site(program, program.functions[position], failure.span)
+            }
+            jet_driver_keep_going_row(&kg, phase, item, "E0003", failure.message, site)
+            if position < 0 -> next
+            program.functions[position] = jet_driver_keep_going_mir_trap(program.functions[position], "keep-going trap: the MIR {phase} check failed")
+            trapped += 1
         }
-        jet_driver_keep_going_row(&kg, phase, item, "E0003", optimizer_error.message, site)
-        trapped_index :: position ?? { break }
-        program.functions[trapped_index] = jet_driver_keep_going_mir_trap(program.functions[trapped_index], "keep-going trap: the MIR {phase} check failed")
+        if trapped == 0 -> break
+        traps += trapped
         attempts += 1
         optimization = optimize_mir_program(&program, full_verification)
     }
-    if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {attempts} keep-going traps; emission runs on the program as the optimizer left it", "-")
+    if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {traps} keep-going traps in {attempts} reruns; emission runs on the program as the optimizer left it", "-")
     optimization
 }
 
