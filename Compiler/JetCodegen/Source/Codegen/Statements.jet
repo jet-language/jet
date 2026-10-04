@@ -1906,13 +1906,17 @@ fn jet_codegen_lower_loop_value(builder: &JetCodegenBuilder, label: String?, bod
 }
 
 
+// Rust tir_to_mir_expr.rs lower_inline_block: the prefix lowers as nested
+// statements of the enclosing scope (no lexical scope of its own), so a local
+// the block declares lives until the enclosing scope ends. A scope here would
+// drop that local before the tail value it feeds is used: a collecting loop
+// passed as a borrowed argument (`f(loop _ in xs -> false)`) borrows its
+// `__jet_collect_*` local after the scope-exit Drop released it.
 fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, expression: TExpr, body: [TStmt]) -> MIRValueID {
     if body.len() == 0 -> panic("checked inline contract block has no tail expression")
-    jet_codegen_enter_lexical(&builder)
     if expression.ty == (Type.Named{name: "Never"}) {
         jet_codegen_lower_statements(&builder, body)
         if jet_codegen_current_is_open(builder) -> panic("checked divergent inline block did not terminate")
-        jet_codegen_leave_lexical(&builder)
         return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
     }
     index := 0
@@ -1941,7 +1945,6 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, expression: TExpr
         }
         else -> panic("checked inline contract block has no expression tail")
     }
-    jet_codegen_leave_lexical(&builder)
     result
 }
 
@@ -2209,15 +2212,32 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                 }
                 else -> {
                     if local.uninit_scalar || local.uninit_fixed -> panic("checked initialized let carries an uninitialized-local fact")
-                    // D-OPT-WRITE1 (#3974): a hoisted `&place` switch subject is
-                    // an alias of the place, so arm patterns are write windows.
-                    window_place := MIRPlaceID?{None}
-                    if local.generated && init.kind == .Borrow(borrowed, access) {
-                        if access == AccessConvention.Write -> window_place = Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: borrowed}, MIRAccess.Write))
+                    // `name := &place` binds an alias of the place, never a
+                    // copy: a write borrow is a window whose edits reach the
+                    // owner (D-OPT-WRITE1 (#3974): arm patterns on a hoisted
+                    // `&place` switch subject are write windows too), a read
+                    // borrow reads the place itself. A range borrow is a
+                    // View value; only its write window over a list is a
+                    // place (Rust: the ViewMutNew arm).
+                    // Rust: tir_to_mir_stmt.rs lower_stmt TStmt::Let alias_place
+                    alias_place := MIRPlaceID?{None}
+                    write_alias := false
+                    if init.kind == .Borrow(borrowed, access) {
+                        write_alias = access == AccessConvention.Write
+                        if borrowed.kind == .Slice(_, _, _, _, _) {
+                            if write_alias -> alias_place = jet_codegen_lower_expression_place(&builder, borrowed, MIRAccess.Write)
+                        } else {
+                            borrowed_access :: if write_alias -> MIRAccess.Write else -> MIRAccess.Read
+                            alias_place = Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: borrowed}, borrowed_access))
+                        }
                     }
-                    if window_place == .Val(window) {
-                        _ := jet_codegen_bind_local_alias(&builder, local, init.ty, window, true)
-                        &builder.window_aliases.push(local.name)
+                    if alias_place == .Val(window) {
+                        alias_ty :: if let_ty == {
+                            .Annotated(ty, _) -> ty
+                            else -> init.ty
+                        }
+                        _ := jet_codegen_bind_local_alias(&builder, local, alias_ty, window, write_alias)
+                        if write_alias -> &builder.window_aliases.push(local.name)
                     } else {
                         // D-MEM-COPYSEM1: an immutable binding of a read
                         // parameter's place (or of its payload past a
