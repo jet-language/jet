@@ -110,7 +110,7 @@ pub fn sema_copy_site_check_borrowed_binding(binding: Binding, environment: Sema
 pub fn sema_copy_site_check_borrowed_return(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     site :: sema_copy_site_borrowed_param(value, scopes) ?? return
     if sema_copy_site_is_type_parameter(site.ty, context) -> return
-    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return ~{site.name};` — or take ownership with the move marker `^`: `{site.name}: ^{type_name(site.ty)}`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`ID<T>` once a real program needs shared ownership"), site, environment, context, &diagnostics)
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return ~{site.name};` — or take ownership with the move marker `^`: `{site.name}: ^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, context, &diagnostics)
 }
 
 // An owned struct or variant field filled from `value`.

@@ -5632,11 +5632,8 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        // D-BUILDPOLICY1: three independent checks — the declaration above, the
-        // `#Impure` source gate above, and the effective grant here. The
-        // per-effect `--allow-<effect>` flag replaced the blanket impure gate,
-        // so asking for both spelled one authorization twice and made the
-        // E3503 fix text ("pass `--allow-fs`") false at the command line.
+        // D-BUILDPOLICY1: declaration, `#Impure` source gate, and effective
+        // `--allow=Effect` policy grant are three independent checks.
         if !options.inspect_only && !effective_grants(options).contains(&effect) {
             if let Some(dependency_name) = dependency_name.as_deref() {
                 return Err(vec![Diagnostic::error(
@@ -5654,7 +5651,7 @@ fn validate_build_authority(
                 "E3503",
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),
                 "a source declaration and `#Impure` gate do not widen CLI, package, or workspace policy".to_string(),
-                format!("pass `--allow-{}` or grant it in package/workspace build policy", effect.flag()),
+                format!("pass `--allow={}` or grant it in package/workspace build policy", effect.name()),
                 Some(span),
             )]);
         }
@@ -6276,7 +6273,7 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
             "E3504",
             format!("build action `{action}` asks for ungranted `{capability:?}` ability"),
             "declaring an ability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
-            format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
+            format!("pass `--allow={}` for this run, or grant it in package/workspace policy", capability.name()),
             None,
         ),
         BuildExecutionError::Reported { report } => {
@@ -6287,9 +6284,23 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
                 "fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`".to_string(),
                 None,
             );
-            diagnostic.detail = Some(
-                report.render_with_style(jet_foundation::Outcome::JetReportStyle::PLAIN),
-            );
+            let mut detail =
+                report.render_with_style(jet_foundation::Outcome::JetReportStyle::PLAIN);
+            if let Some(fields) = &report.details {
+                for field in &fields.fields {
+                    if field.name == "stderr" {
+                        let value = jet_foundation::JSON::parse_json(&field.value)
+                            .expect("build action stderr detail must be valid JSON");
+                        let output = jet_foundation::JSON::json_str(&value)
+                            .expect("build action stderr detail must be text");
+                        if !output.is_empty() {
+                            detail.push('\n');
+                            detail.push_str(output);
+                        }
+                    }
+                }
+            }
+            diagnostic.detail = Some(detail);
             diagnostic.structured = Some(crate::Diagnostics::StructuredDiagnostic::BuildError {
                 report,
             });

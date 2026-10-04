@@ -3495,6 +3495,9 @@ pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
 #[doc(hidden)]
 pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
     match handle_ty {
+        "FileScope" | "<corelib>/Core/files::Core/files/files.jet::FileScope" => {
+            Some("FileScope")
+        }
         "FileReader" | "<corelib>/Core/files::Core/files/files.jet::FileReader" => {
             Some("FileReader")
         }
@@ -3528,13 +3531,13 @@ pub fn file_handle_method_return(
             ("window" | "window_len", 2) => Some(Some(result_ty(
                 Type::Apply {
                     name: "View".to_string(),
-                    args: vec![Type::List(Box::new(u8_ty()))],
+                    args: vec![u8_ty()],
                 },
                 io.clone(),
             ))),
             ("lines", 0) => Some(Some(crate::Collections::view_iter_ty(Type::Apply {
                 name: "View".to_string(),
-                args: vec![Type::List(Box::new(u8_ty()))],
+                args: vec![u8_ty()],
             }))),
             ("len", 0) => Some(Some(Type::Int)),
             ("is_empty", 0) => Some(Some(Type::Bool)),

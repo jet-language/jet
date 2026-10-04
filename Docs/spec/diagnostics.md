@@ -60,6 +60,12 @@ What/Why/Fix, span, and structured edits without requiring consumers to parse
 human prose. Safe edits may be applied automatically; suggested edits remain
 advisory until accepted.
 
+Borrowed-return repairs teach the provenance spelling `-> View<T> from source`
+and a view derived from that source, not shared ownership as a substitute.
+Build authority repairs use `--allow=Effect` (for example `--allow=Exec`);
+action stderr is decoded from the structured report before terminal rendering,
+so its line breaks remain actual lines rather than JSON escapes.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is
